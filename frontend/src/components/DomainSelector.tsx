@@ -192,18 +192,6 @@ export const DomainSelector = () => {
     }
   };
 
-  // The same wizard the Domains tab opens — switch to whatever it creates so
-  // the user lands on the brand they just added. The wizard has already
-  // refreshed the domain store by the time this runs.
-  const handleDomainAdded = async (domain: any) => {
-    if (!domain) return;
-    if (user) {
-      const { updateActiveDomain } = await import('@/utils/activeDomain');
-      await updateActiveDomain(user.id, domain.id, domain);
-    }
-    setSelectedDomain(domain);
-  };
-
   const canAddDomain = user?.role === 'admin' || user?.role === 'super_admin';
 
   if (isLoading && domains.length === 0) {
@@ -389,7 +377,8 @@ export const DomainSelector = () => {
       <AddDomainDialog
         open={addDomainOpen}
         onOpenChange={setAddDomainOpen}
-        onDomainAdded={handleDomainAdded}
+        // Selection and the hand-off to Prompts happen inside the dialog, so
+        // both entry points behave the same.
       />
     </>
   );

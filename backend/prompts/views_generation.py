@@ -30,6 +30,11 @@ from .models import Prompt, PromptCandidate, PromptGenerationRun, PromptGroup
 
 logger = logging.getLogger(__name__)
 
+# Everything built from Search Console lands in one group, and later fetches
+# append to it rather than creating "GSC Based Prompts (2)".
+GSC_GROUP_KEY = 'search-console'
+GSC_GROUP_TITLE = 'GSC Based Prompts' 
+
 # Wizard answers that are facts about the brand rather than about one run, and
 # so are written back to the project. Filling these here improves competitor
 # analysis and reporting too.
@@ -248,34 +253,61 @@ def accept_generation_run(request, run_id):
         clusters.setdefault(c.cluster_key or 'general', []).append(c)
 
     created_groups, created_prompts = 0, 0
+    # (prompt, candidate) for every prompt created, so keyword linking can tie
+    # each prompt to the keywords it is about.
+    accepted_pairs = []
     with transaction.atomic():
         for key, rows in clusters.items():
             rows.sort(key=lambda c: c.score_elicits_brands, reverse=True)
             title = rows[0].cluster_title or key.replace('::', ' — ').title()
 
-            # group_id is unique per domain; suffix on collision rather than
-            # merging into someone else's group.
-            base, name, n = title[:90], title[:100], 2
-            while PromptGroup.objects.filter(group_id=name, domain=domain).exists():
-                name = f"{base} ({n})"[:100]
-                n += 1
+            # Search Console prompts append to their one group. Every other
+            # cluster gets a fresh group, suffixed on collision rather than
+            # merging into someone else's.
+            if key == GSC_GROUP_KEY:
+                group, made = PromptGroup.objects.get_or_create(
+                    group_id=GSC_GROUP_TITLE, domain=domain,
+                )
+                if made:
+                    created_groups += 1
+            else:
+                base, name, n = title[:90], title[:100], 2
+                while PromptGroup.objects.filter(group_id=name, domain=domain).exists():
+                    name = f"{base} ({n})"[:100]
+                    n += 1
 
-            group = PromptGroup.objects.create(group_id=name, domain=domain)
-            created_groups += 1
+                group = PromptGroup.objects.create(group_id=name, domain=domain)
+                created_groups += 1
+
+            # A group being appended to already has a primary; a second one
+            # would misreport which prompt leads the group.
+            has_primary = group.prompts.filter(type='primary').exists()
+            added_to_group = 0
 
             for i, cand in enumerate(rows):
                 # Duplicate prompt text inside a group violates unique_together.
                 if Prompt.objects.filter(prompt=cand.text, group=group).exists():
                     continue
-                Prompt.objects.create(
+                prompt = Prompt.objects.create(
                     prompt=cand.text,
                     group=group,
-                    type='primary' if i == 0 else 'secondary',
+                    type='secondary' if has_primary else ('primary' if i == 0 else 'secondary'),
                     track_status='INIT',
                 )
                 created_prompts += 1
+                added_to_group += 1
+                accepted_pairs.append((prompt, cand))
 
-        created_keywords = _seed_keywords_from_candidates(domain, candidates)
+            # A group that has already run sits at COMP, and the scheduler only
+            # picks up groups in INIT — so prompts appended to it would never be
+            # tracked at all. Reopening it is what makes an append reach the AI
+            # platforms rather than sit there looking added.
+            if added_to_group and group.track_status != 'INIT':
+                group.track_status = 'INIT'
+                group.track_message = 'Reopened: new prompts added'
+                group.save(update_fields=['track_status', 'track_message', 'modified_at'])
+
+        created_links, created_keywords = _link_prompts_to_keywords(domain, accepted_pairs)
 
         run.candidates.filter(id__in=[c.id for c in candidates]).update(status='accepted')
         run.candidates.exclude(id__in=[c.id for c in candidates]).update(status='rejected')
@@ -604,8 +636,14 @@ def create_run_from_search_console(request):
                 intent=str(row.get('intent') or '')[:16],
                 entity=str(row.get('entity') or '')[:255],
                 is_branded=False,
-                cluster_key=str(row.get('topic') or 'search console')[:255],
-                cluster_title=str(row.get('topic') or 'Search Console')[:255],
+                # One cluster for every Search Console prompt. Left to the
+                # model's per-query topic, five queries produced five groups of
+                # one prompt each — the grouping carried no information and the
+                # review screen read as a list of headings. Provenance is the
+                # useful axis here: these came from real search demand, and
+                # they are worth looking at together.
+                cluster_key=GSC_GROUP_KEY,
+                cluster_title=GSC_GROUP_TITLE,
                 # Real demand, so realism is not in question — it was typed by a
                 # person. The tier carries how likely an answer is to name any
                 # brand at all, which is what the other score means elsewhere.

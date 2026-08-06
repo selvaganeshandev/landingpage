@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef } from "react";
+import { useNavigate } from "react-router-dom";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -27,6 +28,7 @@ import { AlertTriangle, Check, ChevronDown, Loader2, Sparkles } from "lucide-rea
 import { cn } from "@/lib/utils";
 import { apiClient } from "@/services/api";
 import { useToast } from "@/hooks/use-toast";
+import { useAuth } from "@/contexts/AuthContext";
 
 interface AddDomainDialogProps {
   open: boolean;
@@ -180,6 +182,8 @@ const STEP_PACE_MS = 4000;
  */
 export function AddDomainDialog({ open, onOpenChange, onDomainAdded }: AddDomainDialogProps) {
   const { toast } = useToast();
+  const navigate = useNavigate();
+  const { user } = useAuth();
 
   const [newDomain, setNewDomain] = useState("");
   const [newBrandName, setNewBrandName] = useState("");
@@ -284,9 +288,19 @@ export function AddDomainDialog({ open, onOpenChange, onDomainAdded }: AddDomain
         throw new Error(created?.error || "Failed to create the brand.");
       }
 
-      // Refresh the global domain store so every switcher sees the new brand
+      // Refresh the global domain store so every switcher sees the new brand,
+      // then make it the active project. Selecting here rather than in the
+      // caller matters because both entry points land on Prompts afterwards:
+      // opened from Organization Settings, the page would otherwise show the
+      // previously selected project's prompts.
       const { useDomainStore } = await import('@/stores/domainStore');
       await useDomainStore.getState().loadDomains();
+
+      if (user) {
+        const { updateActiveDomain } = await import('@/utils/activeDomain');
+        await updateActiveDomain(user.id, created.domain.id, created.domain);
+      }
+      useDomainStore.getState().setSelectedDomain(created.domain);
 
       setStepIndex(ANALYSIS_STEPS.length);
 
@@ -301,6 +315,12 @@ export function AddDomainDialog({ open, onOpenChange, onDomainAdded }: AddDomain
       onDomainAdded?.(created.domain);
       resetAll();
       onOpenChange(false);
+
+      // Straight to Prompts, not the dashboard. A brand created here has no
+      // prompts yet, so every dashboard panel would read zero — which looks
+      // like a broken project rather than an empty one. Prompts is the one
+      // page with something to do, and everything else fills in from there.
+      navigate('/prompts');
     } catch (error: any) {
       stopPacing();
       setIsRunning(false);
