@@ -797,7 +797,7 @@ const CompetitorDetail = () => {
               {isExporting
                 ? <Loader2 className="h-4 w-4 mr-2 animate-spin" />
                 : <Download className="h-4 w-4 mr-2" />}
-              {isExporting ? "Exporting..." : "Export to Excel"}
+              {isExporting ? "Exporting..." : "Export"}
             </Button>
             <Button
               variant="ghost"
