@@ -36,7 +36,128 @@ logger = logging.getLogger(__name__)
 DEFAULT_KEYWORD_COUNT = 50
 
 
-def _build_prompt(domain, count):
+# Enough of the page to characterise what a brand actually sells, matching what
+# site_profile reads for the same reason.
+MAX_SITE_CHARS = 6000
+
+
+def _fetch_site_excerpt(domain):
+    """The brand's own homepage text, or '' if it cannot be read.
+
+    Without this the generator is working from a one-line description, and for a
+    brand it has never heard of it fills the gap by guessing from the name:
+    DataBlue — an API-first web scraping service — was given "DataBlue
+    Kubernetes management" and "CI CD automation platform", because "Blue" and
+    "Data" sound like a cloud vendor. The site says what the product is in its
+    own words, and those words are the ones customers search for.
+
+    The homepage was already crawled once during onboarding to build the brand
+    profile; that text is not stored, so this re-reads it. One fetch, a few
+    seconds, off the request thread.
+    """
+    url = (domain.url or '').strip()
+    if not url:
+        return ''
+    if not url.startswith(('http://', 'https://')):
+        url = f'https://{url}'
+
+    try:
+        from misinformation.services.crawler import WebCrawler
+        from prompts.site_profile import _strip_html
+
+        html, status_code, err = WebCrawler().crawl(url)
+        if not html:
+            logger.info(f"[KeywordSeed] no site text for {url} (HTTP {status_code or 0}): {err}")
+            return ''
+        text = _strip_html(html)[:MAX_SITE_CHARS]
+        return text if len(text) >= 200 else ''
+    except Exception as exc:
+        logger.warning(f"[KeywordSeed] could not read {url}: {exc}")
+        return ''
+
+
+def _stem(word):
+    """Crude singular form. "products" and "product" must match, and a real
+    stemmer is not worth a dependency for a word-overlap test."""
+    return word[:-1] if len(word) > 4 and word.endswith('s') else word
+
+
+def _words(text):
+    return {_stem(w) for w in re.findall(r"[a-z0-9]{3,}", (text or '').lower())}
+
+
+def _vocabulary(domain, site_text):
+    """Significant words this brand actually uses, for the relevance filter."""
+    parts = [
+        domain.name or '', domain.short_description or '', domain.target_audience or '',
+        site_text or '',
+    ]
+    for field in (domain.niches, domain.offering_categories, domain.use_cases,
+                  domain.differentiators, domain.buying_criteria):
+        if isinstance(field, list):
+            parts.extend(str(v) for v in field)
+    return _words(' '.join(parts))
+
+
+# Words shared by every brand in every industry. A keyword that overlaps the
+# site only on these has told us nothing about relevance.
+_GENERIC = {
+    'the', 'and', 'for', 'with', 'you', 'your', 'our', 'best', 'top', 'how',
+    'what', 'services', 'service', 'solutions', 'solution', 'company',
+    'companies', 'platform', 'software', 'tool', 'tools', 'app', 'apps',
+    'business', 'management', 'system', 'systems', 'online', 'digital', 'data',
+    'india', 'usa', 'near', 'price', 'pricing', 'cost', 'free', 'review',
+    'reviews', 'agency', 'provider', 'providers', 'development', 'developer',
+    'developers', 'consulting', 'consultant', 'support', 'guide', 'vs',
+}
+
+
+# Modifiers that make a legitimate branded query on their own — "datablue
+# pricing", "datablue careers" — without saying anything about the industry.
+_BRAND_MODIFIERS = {
+    'pricing', 'price', 'cost', 'plans', 'reviews', 'review', 'alternatives',
+    'alternative', 'competitors', 'login', 'careers', 'jobs', 'contact',
+    'support', 'demo', 'trial', 'docs', 'documentation', 'api', 'app',
+    'features', 'about', 'case', 'studies', 'testimonials', 'coupon',
+    'discount', 'refund', 'free', 'vs', 'comparison', 'customer', 'service',
+}
+
+
+_GENERIC_STEMS = {w[:-1] if len(w) > 4 and w.endswith('s') else w for w in _GENERIC}
+_MODIFIER_STEMS = {w[:-1] if len(w) > 4 and w.endswith('s') else w for w in _BRAND_MODIFIERS}
+
+
+def _is_relevant(keyword, vocab, brand_tokens):
+    """True when a generated keyword is anchored in the brand's own vocabulary.
+
+    Carrying the brand name is not enough on its own. The most confident wrong
+    answers are branded: DataBlue, a web-scraping API, was given "DataBlue
+    Kubernetes management" — the model guessed an industry from the name and
+    then attached the brand to it, which is exactly the keyword a naive brand
+    check would wave through.
+
+    So the brand name is stripped first and what remains has to justify itself:
+    nothing left (a pure brand query), a plain brand modifier like "pricing" or
+    "careers", or at least one distinctive word the site itself uses. Generic
+    industry filler does not count — "development services" overlaps every
+    technology company on earth.
+    """
+    tokens = _words(keyword)
+    rest = tokens - brand_tokens
+
+    if tokens & brand_tokens:
+        # A branded keyword is fine unless it carries a word the brand never
+        # uses. "datablue careers india" is a real query — careers is a
+        # modifier, india is generic. "datablue kubernetes management" is not:
+        # kubernetes appears nowhere on the site, and that word is the entire
+        # reason the keyword is wrong.
+        unexplained = rest - _MODIFIER_STEMS - _GENERIC_STEMS - vocab
+        return not unexplained
+
+    return bool((tokens & vocab) - _GENERIC_STEMS)
+
+
+def _build_prompt(domain, count, site_text=''):
     niches = domain.niches if isinstance(domain.niches, list) else []
     offerings = domain.offering_categories if isinstance(domain.offering_categories, list) else []
     use_cases = domain.use_cases if isinstance(domain.use_cases, list) else []
@@ -51,6 +172,14 @@ def _build_prompt(domain, count):
         context += f"**Offerings:** {', '.join(str(o) for o in offerings[:10])}\n"
     if use_cases:
         context += f"**Use cases:** {', '.join(str(u) for u in use_cases[:10])}\n"
+    if site_text:
+        context += (
+            "\n**The brand's own website says:**\n"
+            f"{site_text}\n\n"
+            "Ground every keyword in what this page actually describes. Use the "
+            "product names, service names, industries and locations it mentions. "
+            "Do NOT infer the industry from the brand name.\n"
+        )
 
     return f"""You are an expert SEO keyword researcher. Generate a comprehensive keyword universe for:
 
@@ -145,11 +274,12 @@ def generate_keywords_for_domain(domain, count=DEFAULT_KEYWORD_COUNT):
 
     try:
         client = get_openai_client()
+        site_text = _fetch_site_excerpt(domain)
         response = client.chat.completions.create(
             model=getattr(settings, "OPENROUTER_INTERNAL_MODEL", "openai/gpt-5-mini"),
             messages=[
                 {"role": "system", "content": "You are an expert SEO keyword researcher. Always respond with valid JSON only."},
-                {"role": "user", "content": _build_prompt(domain, int(count))},
+                {"role": "user", "content": _build_prompt(domain, int(count), site_text)},
             ],
             temperature=0.7,
             # The internal model reasons before answering out of the same budget,
@@ -163,7 +293,11 @@ def generate_keywords_for_domain(domain, count=DEFAULT_KEYWORD_COUNT):
         logger.error(f"[KeywordSeed] model call failed for domain {domain.id}: {exc}")
         return 0
 
+    vocab = _vocabulary(domain, site_text)
+    brand_tokens = _words(domain.name)
+
     keyword_rows, secondary_rows, seen = [], [], set()
+    dropped = []
     for item in _keywords_from(reply):
         if not isinstance(item, dict):
             continue
@@ -172,6 +306,11 @@ def generate_keywords_for_domain(domain, count=DEFAULT_KEYWORD_COUNT):
         if not text or key in seen or key in existing:
             continue
         seen.add(key)
+        # Anchored in the brand's own words, or dropped. This is the guard
+        # against a confidently generated keyword set for the wrong company.
+        if not _is_relevant(text, vocab, brand_tokens):
+            dropped.append(text)
+            continue
         shared = dict(
             keyword=text,
             volume_level=str(item.get('volume_level') or 'medium')[:20],
@@ -200,7 +339,10 @@ def generate_keywords_for_domain(domain, count=DEFAULT_KEYWORD_COUNT):
 
     Keyword.objects.bulk_create(keyword_rows, ignore_conflicts=True)
     SecondaryKeyword.objects.bulk_create(secondary_rows, ignore_conflicts=True)
-    logger.info(f"[KeywordSeed] domain {domain.id}: created {len(keyword_rows)} keywords")
+    logger.info(
+        f"[KeywordSeed] domain {domain.id}: created {len(keyword_rows)} keywords "
+        f"({len(dropped)} dropped as off-brand{': ' + ', '.join(dropped[:5]) if dropped else ''})"
+    )
     return len(keyword_rows)
 
 
