@@ -124,6 +124,32 @@ Reference: `pages/Mentions.tsx:280`, `pages/Citations.tsx:615`,
 - Title `text-4xl font-bold tracking-tight`, subtitle `text-muted-foreground mt-2`
 - No icon beside the page title — the sidebar already carries it.
 
+### Detail pages have a different header
+
+A page reached *from* a list does not repeat the index-page header. The back
+control is an **icon-only outline button inline to the left of the title**, and
+the row carries a rule beneath it:
+
+```tsx
+<div className="flex items-center justify-between pb-4 border-b border-border/50">
+  <div className="flex items-center gap-4">
+    <Button variant="outline" size="icon" className="border-border/50"
+            onClick={() => navigate("/seo-rankings")}>
+      <ArrowLeft className="h-4 w-4" />
+    </Button>
+    <div>
+      <h1 className="text-2xl font-bold tracking-tight font-inter">{title}</h1>
+      <p className="text-muted-foreground mt-0.5">{context}</p>
+    </div>
+  </div>
+  {/* row actions, if any */}
+</div>
+```
+
+- `text-2xl`, not the `text-4xl` used on index pages
+- Never a full-width "← Back to X" text button stacked above the title
+- Reference: `pages/SeoKeywordDetail.tsx:588`, `pages/CompetitorDetail.tsx:770`
+
 ### Button hierarchy
 
 Only one button on a page gets the gradient. Everything else is secondary.

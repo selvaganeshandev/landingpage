@@ -101,9 +101,13 @@ export default function SeoOpportunityDetail() {
   if (!data) {
     return (
       <div className="p-8 space-y-8 bg-background animate-fade-in">
-        <Button variant="outline" onClick={() => navigate("/seo-opportunities")}>
-          <ArrowLeft className="h-4 w-4 mr-2" />
-          Back to Opportunities
+        <Button
+          variant="outline"
+          size="icon"
+          className="border-border/50"
+          onClick={() => navigate("/seo-opportunities")}
+        >
+          <ArrowLeft className="h-4 w-4" />
         </Button>
         <div className="py-32 text-center text-muted-foreground">
           This opportunity could not be found.
@@ -117,31 +121,32 @@ export default function SeoOpportunityDetail() {
 
   return (
     <div className="p-8 space-y-8 bg-background animate-fade-in">
-      <div>
-        <div className="min-w-0">
+      {/* Matches the header on SeoKeywordDetail and CompetitorDetail: an
+          icon-only back button inline to the left of the title, and a rule
+          under the row. A full-width text button above a text-4xl title made
+          this read as a top-level page rather than a detail view. */}
+      <div className="flex items-center justify-between pb-4 border-b border-border/50">
+        <div className="flex items-center gap-4 min-w-0">
           <Button
             variant="outline"
-            size="sm"
-            className="mb-4"
+            size="icon"
+            className="border-border/50 flex-shrink-0"
             onClick={() => navigate("/seo-opportunities")}
           >
-            <ArrowLeft className="h-4 w-4 mr-2" />
-            Back to Opportunities
+            <ArrowLeft className="h-4 w-4" />
           </Button>
-          <h1 className="text-4xl font-bold tracking-tight">{kw.keyword}</h1>
-          <p className="text-muted-foreground mt-2 flex items-center gap-2 flex-wrap">
-            <Badge variant="secondary" className="tabular-nums">
-              #{kw.rank_now}
-            </Badge>
-            <span>·</span>
-            <span>{fmt(kw.search_volume)} searches/mo</span>
-            {kw.top_rank ? (
-              <>
-                <span>·</span>
-                <span>best ever #{kw.top_rank}</span>
-              </>
-            ) : null}
-          </p>
+          <div className="min-w-0">
+            <h1 className="text-2xl font-bold tracking-tight font-inter truncate">
+              {kw.keyword}
+            </h1>
+            <p className="text-muted-foreground mt-0.5 flex items-center gap-2 flex-wrap text-sm">
+              <Badge variant="secondary" className="tabular-nums">
+                #{kw.rank_now}
+              </Badge>
+              <span>{fmt(kw.search_volume)} searches/mo</span>
+              {kw.top_rank ? <span>· best ever #{kw.top_rank}</span> : null}
+            </p>
+          </div>
         </div>
       </div>
 
