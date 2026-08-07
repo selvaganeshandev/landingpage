@@ -810,6 +810,10 @@ export default function SeoOpportunities() {
                 icon: SearchCheck,
                 tint: "text-primary",
                 hint: `${data.summary.with_volume.toLocaleString()} with search volume`,
+                plain:
+                  "Every keyword being monitored for this domain — the pool everything else on this page is measured against.",
+                formula:
+                  "Counts desktop keyword records for the selected domain. Mobile is not currently tracked, so this is desktop only. A keyword counts here whether or not it ranks.",
               },
               {
                 label: "Ranking",
@@ -817,6 +821,10 @@ export default function SeoOpportunities() {
                 icon: BarChart3,
                 tint: "text-secondary",
                 hint: "Holding a position today",
+                plain:
+                  "How many tracked keywords currently hold a position at all in the results we capture.",
+                formula:
+                  "Keywords with a current position above 0. Anything below the depth the crawl stores is indistinguishable from not ranking, so it counts as not ranked rather than as a very low position.",
               },
               {
                 label: "In Top 3",
@@ -824,6 +832,10 @@ export default function SeoOpportunities() {
                 icon: Trophy,
                 tint: "text-success",
                 hint: "Positions earning most clicks",
+                plain:
+                  "Keywords already in the positions that earn the large majority of clicks. These are won, not opportunities.",
+                formula:
+                  "Positions 1-3. Deliberately excluded from the Striking Distance tab, which starts at position 4 — there is little left to gain here.",
               },
               {
                 label: "Not Ranked",
@@ -831,12 +843,25 @@ export default function SeoOpportunities() {
                 icon: EyeOff,
                 tint: "text-destructive",
                 hint: "No position recorded",
+                plain:
+                  "Tracked keywords with no position recorded — you are not appearing for these at all.",
+                formula:
+                  "Current position of 0. They do not appear in any Opportunities tab: this page only lists keywords already within reach of page one, and these are not.",
               },
             ].map((tile) => (
               <Card key={tile.label} className="p-6 border border-border">
                 <div className="flex items-center justify-between">
                   <div>
-                    <p className="text-sm text-muted-foreground">{tile.label}</p>
+                    <p className="text-sm text-muted-foreground flex items-center gap-1.5">
+                      {tile.label}
+                      <InfoHint>
+                        <MetricHint
+                          title={tile.label}
+                          plain={tile.plain}
+                          formula={tile.formula}
+                        />
+                      </InfoHint>
+                    </p>
                     <p className="text-2xl font-bold mt-1 tabular-nums">
                       {tile.value.toLocaleString()}
                     </p>

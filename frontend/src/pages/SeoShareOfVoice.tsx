@@ -171,7 +171,16 @@ export default function SeoShareOfVoice() {
             <Card className="p-6 border border-border">
               <div className="flex items-center justify-between">
                 <div>
-                  <p className="text-sm text-muted-foreground">League Position</p>
+                  <p className="text-sm text-muted-foreground flex items-center gap-1.5">
+                    League Position
+                    <InfoHint>
+                      <MetricHint
+                        title="League Position"
+                        plain="Where you rank against every other domain competing for your tracked keywords, by total visibility."
+                        formula="Domains are ordered by volume-weighted visibility and this is your place in that order. Counts ALL domains, including search features and government sites — so it is a harsher measure than Your Share, which excludes them. Moving up one place means overtaking a domain, not gaining a fixed amount of traffic."
+                      />
+                    </InfoHint>
+                  </p>
                   <p className="text-2xl font-bold mt-1 tabular-nums">#{data.our_position}</p>
                 </div>
                 <Users className="h-5 w-5 text-secondary" />
@@ -184,7 +193,16 @@ export default function SeoShareOfVoice() {
             <Card className="p-6 border border-border">
               <div className="flex items-center justify-between">
                 <div>
-                  <p className="text-sm text-muted-foreground">You Appear On</p>
+                  <p className="text-sm text-muted-foreground flex items-center gap-1.5">
+                    You Appear On
+                    <InfoHint>
+                      <MetricHint
+                        title="You Appear On"
+                        plain="How many of your tracked searches you show up in at all, anywhere in the results we capture."
+                        formula="Tracked keywords where you hold any position within the stored results depth (the top 30). This is presence, not prominence — appearing at position 28 counts here but contributes almost nothing to Your Share, which weights by position."
+                      />
+                    </InfoHint>
+                  </p>
                   <p className="text-2xl font-bold mt-1 tabular-nums">
                     {fmt(data.summary.our_appearances)}
                   </p>
@@ -199,7 +217,16 @@ export default function SeoShareOfVoice() {
             <Card className="p-6 border border-border">
               <div className="flex items-center justify-between">
                 <div>
-                  <p className="text-sm text-muted-foreground">Rival Domains</p>
+                  <p className="text-sm text-muted-foreground flex items-center gap-1.5">
+                    Rival Domains
+                    <InfoHint>
+                      <MetricHint
+                        title="Rival Domains"
+                        plain="How many distinct domains appear anywhere in your tracked results — the full field you are competing against."
+                        formula="Distinct domains across every stored results page, including ones appearing only once. The sub-line counts how many are formally tracked as competitors in the product; the gap between the two is what Rivals Nobody Has Flagged draws from."
+                      />
+                    </InfoHint>
+                  </p>
                   <p className="text-2xl font-bold mt-1 tabular-nums">
                     {fmt(data.summary.rival_domains_seen)}
                   </p>
