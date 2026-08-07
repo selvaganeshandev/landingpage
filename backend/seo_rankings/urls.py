@@ -22,6 +22,7 @@ urlpatterns = [
 
     # Insights
     path('opportunities/', views_insights.seo_opportunities, name='seo-opportunities'),
+    path('share-of-voice/', views_insights.seo_share_of_voice, name='seo-share-of-voice'),
     path('opportunities/export/', views_insights.seo_opportunities_export, name='seo-opportunities-export'),
     path('opportunities/<int:seo_kw_id>/', views_insights.seo_opportunity_detail, name='seo-opportunity-detail'),
 

@@ -55,6 +55,38 @@ def seo_opportunities(request):
 
 @api_view(['GET'])
 @permission_classes([IsAuthenticated])
+def seo_share_of_voice(request):
+    """
+    Volume-weighted visibility share for us and every rival domain seen in our
+    tracked results pages.
+    Query params: domain_id (required), platform (default desktop), top (default 25)
+    """
+    from .services.share_of_voice_service import build_share_of_voice, DEFAULT_TOP_N
+
+    domain_id = request.query_params.get('domain_id')
+    if not domain_id:
+        return Response({'error': 'domain_id is required'}, status=status.HTTP_400_BAD_REQUEST)
+    try:
+        domain_id = int(domain_id)
+    except (TypeError, ValueError):
+        return Response({'error': 'domain_id must be an integer'}, status=status.HTTP_400_BAD_REQUEST)
+    if domain_id not in list(_get_user_domain_ids(request.user)):
+        return Response({'error': 'Domain not found or access denied'}, status=status.HTTP_403_FORBIDDEN)
+
+    try:
+        top_n = max(1, min(int(request.query_params.get('top', DEFAULT_TOP_N)), 200))
+    except (TypeError, ValueError):
+        top_n = DEFAULT_TOP_N
+
+    return Response(build_share_of_voice(
+        domain_id,
+        platform=request.query_params.get('platform', 'desktop'),
+        top_n=top_n,
+    ))
+
+
+@api_view(['GET'])
+@permission_classes([IsAuthenticated])
 def seo_opportunity_detail(request, seo_kw_id):
     """
     One opportunity, expanded: score breakdown, recommended action, and every

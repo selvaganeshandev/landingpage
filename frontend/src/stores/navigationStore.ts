@@ -2,6 +2,7 @@ import { create } from 'zustand';
 import { MODULES } from '@/types/auth';
 import {
   LayoutDashboard,
+  PieChart,
   Search,
   MessageSquare,
   TrendingUp,
@@ -151,6 +152,12 @@ const allNavGroups: NavGroup[] = [
     name: "Opportunities",
     items: [
       { name: "Opportunities", path: "/seo-opportunities", icon: Target, module: MODULES.KEYWORD_RANKINGS },
+    ],
+  },
+  {
+    name: "Share of Voice",
+    items: [
+      { name: "Share of Voice", path: "/seo-share-of-voice", icon: PieChart, module: MODULES.SEO_COMPETITORS },
     ],
   },
   {

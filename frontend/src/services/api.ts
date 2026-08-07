@@ -2438,6 +2438,13 @@ export const apiClient = {
       (sheetIds && sheetIds.length ? `&sheet_ids=${sheetIds.join(',')}` : '')
     ),
 
+  getSeoShareOfVoice: (params: { domain_id: string; platform?: string; top?: number }) => {
+    const sp = new URLSearchParams({ domain_id: params.domain_id });
+    if (params.platform) sp.append('platform', params.platform);
+    if (params.top) sp.append('top', String(params.top));
+    return apiRequest(`/seo/share-of-voice/?${sp.toString()}`);
+  },
+
   getSeoOpportunityDetail: (seoKwId: string | number) =>
     apiRequest(`/seo/opportunities/${seoKwId}/`),
 
