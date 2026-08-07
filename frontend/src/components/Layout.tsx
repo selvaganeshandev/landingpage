@@ -2,7 +2,7 @@ import { useState, useEffect, Suspense } from "react";
 import { Sidebar } from "./Sidebar";
 import { PageLoader } from "./PageLoader";
 import { RouteFallback } from "./RouteFallback";
-import { ProcessingStateCard } from "./ProcessingStateCard";
+import { ProcessingBanner } from "./ProcessingBanner";
 import { OnboardingModal } from "./OnboardingModal";
 import { Outlet, useLocation } from "react-router-dom";
 import { useSidebar } from "@/contexts/SidebarContext";
@@ -70,25 +70,28 @@ export const Layout = () => {
     '/profile',
   ];
 
-  // Determine if we should show processing state based on current page
+  // Determine whether to show the processing banner for the current page.
+  //
+  // The competitor and misinformation branches used to read
+  // `processing_status !== 'COMP'`, which was tolerable when this gated a
+  // blocking card but is wrong for a banner: a FAILED domain is not "still
+  // being analysed", it is finished and broken, and saying otherwise would
+  // leave someone waiting for a run that will never complete. Each branch now
+  // asks whether something is genuinely in flight.
   const shouldShowProcessingState = () => {
     if (!selectedDomain) return false;
+    if (selectedDomain.processing_status === 'FAIL') return false;
 
     const currentPath = location.pathname;
 
-    // Check if on a competitor-specific page and competitor analysis is processing
     if (competitorPages.some(page => currentPath.startsWith(page))) {
-      return isCompetitorProcessing(selectedDomain) ||
-             (selectedDomain.processing_status !== 'COMP');
+      return isCompetitorProcessing(selectedDomain) || isDomainProcessing(selectedDomain);
     }
 
-    // Check if on misinformation page and scan is processing
     if (misinformationPages.some(page => currentPath.startsWith(page))) {
-      return isMisinformationProcessing(selectedDomain) ||
-             (selectedDomain.processing_status !== 'COMP');
+      return isMisinformationProcessing(selectedDomain) || isDomainProcessing(selectedDomain);
     }
 
-    // For all other data pages, show processing if prompt processing is not complete
     if (promptDataPages.some(page => currentPath.startsWith(page))) {
       return isDomainProcessing(selectedDomain);
     }
@@ -123,11 +126,14 @@ export const Layout = () => {
             code-split page blanked the entire window. Scoped to the content
             area, the shell stays put and only the page swaps. */}
         <Suspense fallback={<RouteFallback />}>
-          {shouldShowProcessingState() ? (
-            <ProcessingStateCard domain={selectedDomain!} />
-          ) : (
-            <Outlet />
+          {/* The processing state is a banner above the page, not a substitute
+              for it. Analysis lands progressively, so replacing the content
+              hid data that had already arrived — and made the domain feel
+              broken rather than busy. */}
+          {shouldShowProcessingState() && selectedDomain && (
+            <ProcessingBanner domain={selectedDomain} />
           )}
+          <Outlet />
         </Suspense>
       </main>
 

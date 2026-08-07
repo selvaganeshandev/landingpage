@@ -118,8 +118,10 @@ const NavGroup = ({ group, location, isSidebarOpen, onItemClick, navigate, isDom
       ? (location.pathname === '/' || location.pathname === '/chat')
       : location.pathname === item.path;
 
-    // Disable navigation when domain is processing (except for settings and chat)
-    const isDisabled = isDomainProcessing && !['/chat', '/', '/organization-settings'].includes(item.path);
+    // Navigation stays enabled while a domain processes — see the note on
+    // isDomainProcessing below. Kept as a named constant so the disabled
+    // branches below remain in place should a real reason to lock nav appear.
+    const isDisabled = false;
 
     const linkContent = isDisabled ? (
       <div
@@ -194,7 +196,7 @@ const NavGroup = ({ group, location, isSidebarOpen, onItemClick, navigate, isDom
           {group.items.map((item: any) => {
             const Icon = (item.icon as any) || LayoutDashboard;
             const isActive = location.pathname === item.path;
-            const isItemDisabled = isDomainProcessing && !['/chat', '/', '/organization-settings'].includes(item.path);
+            const isItemDisabled = false;
 
             if (isItemDisabled) {
               return (
@@ -268,7 +270,13 @@ export const Sidebar = () => {
   const [domainPopoverOpen, setDomainPopoverOpen] = useState(false);
   const [logoutDialogOpen, setLogoutDialogOpen] = useState(false);
 
-  // Check if domain is currently processing
+  // Check if domain is currently processing.
+  //
+  // This drives the spinner on the domain avatar only. It no longer disables
+  // navigation: a processing domain is now selectable, and locking every menu
+  // item behind it would hand the user a dead sidebar. Pages carry their own
+  // empty states, and Layout shows a ProcessingBanner explaining what is still
+  // running.
   const domainProcessingStatus = selectedDomain?.processing_status || null;
   const isDomainProcessing = Boolean(selectedDomain && domainProcessingStatus && ['INIT', 'SCHD', 'PROC'].includes(domainProcessingStatus));
 

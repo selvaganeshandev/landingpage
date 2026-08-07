@@ -141,16 +141,15 @@ export const DomainSelector = () => {
   const handleDomainSelect = async (domainId: number) => {
     const domain = domains.find(d => d.id === domainId);
     if (domain) {
-      // Check if domain is still processing or failed - don't allow selection
-      if (domain.processing_status && ['INIT', 'SCHD', 'PROC', 'FAIL'].includes(domain.processing_status)) {
-
-        const isFailed = domain.processing_status === 'FAIL';
+      // A failed domain has no data and never will, so selecting it is still
+      // blocked. Domains that are merely processing ARE selectable: analysis
+      // runs in the background and results arrive progressively, so the pages
+      // are worth opening — a ProcessingBanner explains what is still running.
+      if (domain.processing_status === 'FAIL') {
         toast({
-          title: isFailed ? "Domain Processing Failed" : "Domain Processing",
-          description: isFailed
-            ? `Processing failed: ${domain.track_message || 'Unknown error'}. Please try re-adding this domain.`
-            : "This domain is still being processed. Please wait until processing completes.",
-          variant: isFailed ? "destructive" : "default",
+          title: "Domain Processing Failed",
+          description: `Processing failed: ${domain.track_message || 'Unknown error'}. Please try re-adding this domain.`,
+          variant: "destructive",
         });
         return;
       }
@@ -295,7 +294,9 @@ export const DomainSelector = () => {
                   const isProcessing = domain.processing_status
                     && ['INIT', 'SCHD', 'PROC'].includes(domain.processing_status);
                   const isFailed = domain.processing_status === 'FAIL';
-                  const isDisabled = isProcessing || isFailed;
+                  // Processing domains stay selectable — the label and spinner
+                  // are the signal, not a lock. Only failed domains are barred.
+                  const isDisabled = isFailed;
                   const isActive = selectedDomain?.id === domain.id;
                   const processingLabel = domain.processing_status === 'INIT' ? 'Initializing...' :
                                           domain.processing_status === 'SCHD' ? 'Scheduled...' :
