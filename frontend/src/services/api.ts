@@ -2276,6 +2276,13 @@ export const apiClient = {
   getSeoDomainOverview: (domainId: string) =>
     apiRequest(`/seo/overview/?domain_id=${domainId}`),
 
+  getSeoOpportunities: (params: { domain_id: string; platform?: string; limit?: number }) => {
+    const searchParams = new URLSearchParams({ domain_id: params.domain_id });
+    if (params.platform) searchParams.append('platform', params.platform);
+    if (params.limit) searchParams.append('limit', String(params.limit));
+    return apiRequest(`/seo/opportunities/?${searchParams.toString()}`);
+  },
+
   triggerSeoRanking: (data: { domain_id?: number; seo_keyword_rank_id?: number }) =>
     apiRequest('/seo/trigger/', {
       method: 'POST',
@@ -2430,6 +2437,18 @@ export const apiClient = {
       `/seo/report-sheets/data/?domain_id=${domainId}` +
       (sheetIds && sheetIds.length ? `&sheet_ids=${sheetIds.join(',')}` : '')
     ),
+
+  exportSeoOpportunitiesXlsx: async (domainId: string): Promise<Blob> => {
+    const token = getAuthToken();
+    const headers: HeadersInit = {};
+    if (token) headers['Authorization'] = `Bearer ${token}`;
+    const response = await fetch(
+      `${API_BASE_URL}/seo/opportunities/export/?domain_id=${domainId}`,
+      { method: 'GET', headers }
+    );
+    if (!response.ok) throw new Error('Export failed');
+    return response.blob();
+  },
 
   exportSeoReportXlsx: async (domainId: number): Promise<Blob> => {
     const token = getAuthToken();

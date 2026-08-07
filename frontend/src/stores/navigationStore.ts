@@ -148,6 +148,12 @@ const allNavGroups: NavGroup[] = [
     ],
   },
   {
+    name: "Opportunities",
+    items: [
+      { name: "Opportunities", path: "/seo-opportunities", icon: Target, module: MODULES.KEYWORD_RANKINGS },
+    ],
+  },
+  {
     name: "Competitors",
     items: [
       { name: "Competitors", path: "/seo-competitors", icon: Users, module: MODULES.SEO_COMPETITORS },

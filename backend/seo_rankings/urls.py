@@ -1,5 +1,5 @@
 from django.urls import path
-from . import views, views_billing, views_invoice_settings
+from . import views, views_billing, views_invoice_settings, views_insights
 
 urlpatterns = [
     # Keyword rankings
@@ -19,6 +19,10 @@ urlpatterns = [
     # Domain-level metrics
     path('metrics/', views.seo_domain_metrics, name='seo-domain-metrics'),
     path('overview/', views.seo_domain_overview, name='seo-domain-overview'),
+
+    # Insights
+    path('opportunities/', views_insights.seo_opportunities, name='seo-opportunities'),
+    path('opportunities/export/', views_insights.seo_opportunities_export, name='seo-opportunities-export'),
 
     # Bulk operations
     path('keywords/bulk-delete/', views.seo_keyword_bulk_delete, name='seo-keyword-bulk-delete'),

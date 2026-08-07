@@ -36,6 +36,7 @@ const AutomationSettings = lazy(() => import("./pages/AutomationSettings"));
 const TrafficAttribution = lazy(() => import("./pages/TrafficAttribution"));
 const SeoRankings = lazy(() => import("./pages/SeoRankings"));
 const SeoKeywordDetail = lazy(() => import("./pages/SeoKeywordDetail"));
+const SeoOpportunities = lazy(() => import("./pages/SeoOpportunities"));
 const SeoCompetitors = lazy(() => import("./pages/SeoCompetitors"));
 const SeoReports = lazy(() => import("./pages/SeoReports"));
 const ConfigureSeoReport = lazy(() => import("./pages/ConfigureSeoReport"));
@@ -261,6 +262,11 @@ const App = () => (
               <Route path="/seo-rankings/:id" element={
                 <ProtectedRoute requiredPermission={MODULES.KEYWORD_RANKINGS}>
                   <SeoKeywordDetail />
+                </ProtectedRoute>
+              } />
+              <Route path="/seo-opportunities" element={
+                <ProtectedRoute requiredPermission={MODULES.KEYWORD_RANKINGS}>
+                  <SeoOpportunities />
                 </ProtectedRoute>
               } />
               <Route path="/seo-competitors" element={
