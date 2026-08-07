@@ -48,7 +48,13 @@ NON_RIVAL_DOMAINS = {
 # highest-scoring domains (incometax.gov.in alone holds ~9%), and nobody can
 # outrank a tax authority on its own statute — treating them as competitors
 # would make the league table advice-free.
-NON_RIVAL_SUFFIXES = ('.gov', '.gov.in', '.nic.in', '.edu', '.ac.in', '.nih.gov', '.org.in')
+NON_RIVAL_SUFFIXES = (
+    '.gov', '.gov.in', '.nic.in', '.nih.gov', '.int', '.mil',
+    '.edu', '.ac.in', '.ac.uk',
+    # Charities and non-profits. heartfoundation.org.au was surfacing as a
+    # competitor to a life insurer purely because it ranks for health terms.
+    '.org.in', '.org.au', '.org.uk', '.org.nz',
+)
 
 
 def _is_non_rival(host):

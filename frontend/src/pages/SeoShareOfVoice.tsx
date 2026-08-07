@@ -15,7 +15,7 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import { Loader2, Trophy, Globe, Users, Eye, AlertCircle } from "lucide-react";
+import { Loader2, Trophy, Globe, Users, Eye } from "lucide-react";
 
 interface Competitor {
   domain: string;
@@ -240,28 +240,60 @@ export default function SeoShareOfVoice() {
           </div>
 
           {data.untracked_rivals.length > 0 && (
-            <Card className="p-6 border border-border">
-              <div className="flex items-start gap-3">
-                <div className="rounded-full bg-warning/10 p-2 flex-shrink-0">
-                  <AlertCircle className="h-5 w-5 text-warning" />
-                </div>
+            <Card className="p-6 border border-border space-y-4">
+              <div className="flex items-start justify-between gap-4">
                 <div className="min-w-0">
-                  <h2 className="text-lg font-semibold">
-                    Rivals nobody has flagged
+                  <h2 className="text-lg font-semibold flex items-center gap-1.5">
+                    Untracked Competitors
+                    <InfoHint>
+                      <MetricHint
+                        title="Untracked Competitors"
+                        plain="Domains taking meaningful visibility in your tracked results that are not being monitored as competitors."
+                        formula="The highest-scoring domains by volume-weighted visibility that do not appear in this domain's competitor list, excluding search features, marketplaces and government sites. Adding one as a competitor brings it into competitor reporting."
+                      />
+                    </InfoHint>
                   </h2>
-                  <p className="text-sm text-muted-foreground mt-1">
-                    These domains take real visibility in your results but are not tracked as
-                    competitors, so nothing in the product is watching them.
+                  <p className="text-sm text-muted-foreground mt-1 max-w-2xl">
+                    These domains compete for your tracked keywords but are not being monitored.
+                    Between them they hold{" "}
+                    <span className="font-medium text-foreground tabular-nums">
+                      {data.untracked_rivals
+                        .reduce((sum, c) => sum + c.share, 0)
+                        .toFixed(2)}
+                      %
+                    </span>{" "}
+                    of total visibility.
                   </p>
-                  <div className="flex flex-wrap gap-2 mt-3">
-                    {data.untracked_rivals.map((c) => (
-                      <Badge key={c.domain} variant="secondary" className="font-normal">
-                        {c.domain}
-                        <span className="ml-1.5 tabular-nums opacity-70">{c.share}%</span>
-                      </Badge>
-                    ))}
-                  </div>
                 </div>
+                <Badge variant="outline" className="flex-shrink-0 font-normal tabular-nums">
+                  {data.untracked_rivals.length} domains
+                </Badge>
+              </div>
+
+              {/* A ranked list rather than a cloud of pills: these are ordered
+                  by visibility, and the order is the point. */}
+              <div className="grid gap-x-8 gap-y-1 md:grid-cols-2">
+                {data.untracked_rivals.map((c, i) => (
+                  <div
+                    key={c.domain}
+                    className="flex items-center gap-3 py-2 border-b border-border/50 last:border-0"
+                  >
+                    <span className="text-xs text-muted-foreground tabular-nums w-5 flex-shrink-0">
+                      {i + 1}
+                    </span>
+                    <span className="text-sm font-medium truncate flex-1 min-w-0">
+                      {c.domain}
+                    </span>
+                    <span className="text-xs text-muted-foreground tabular-nums flex-shrink-0">
+                      {c.beats_us > 0
+                        ? `ahead on ${fmt(c.beats_us)}`
+                        : `${fmt(c.appearances)} results`}
+                    </span>
+                    <span className="text-sm font-medium tabular-nums w-14 text-right flex-shrink-0">
+                      {c.share}%
+                    </span>
+                  </div>
+                ))}
               </div>
             </Card>
           )}
