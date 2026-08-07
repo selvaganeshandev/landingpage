@@ -340,6 +340,124 @@ def _sort_key(row):
     return (-(row['search_volume'] or 0), row['rank_now'])
 
 
+def _recommended_action(row, sibling_count):
+    """
+    What to actually do about this keyword.
+
+    Derived from the same signals as the score, but expressed as an
+    instruction rather than a number. Ordered by urgency: a decline is worth
+    stopping before a gain is worth chasing.
+    """
+    state = (row.get('trajectory') or {}).get('state', 'new')
+    level = (row.get('difficulty') or {}).get('level')
+    gap = row['rank_now'] - row['opportunity']['target_position']
+    proven = bool(row.get('top_rank') and 0 < row['top_rank'] <= row['opportunity']['target_position'])
+
+    if state == 'slipping':
+        headline = 'Defend this first'
+        detail = (
+            f"It has lost {abs(row['trajectory']['delta']):g} places over 90 days. "
+            "Find what changed — a competitor's new content, a page edit, or lost links — "
+            "before investing in growth elsewhere."
+        )
+    elif state == 'volatile':
+        headline = 'Stabilise before pushing'
+        detail = (
+            f"The position swings by ±{row['trajectory']['volatility']:g} places. "
+            "Chasing it while it bounces wastes effort; look for thin or duplicated content first."
+        )
+    elif state == 'climbing':
+        headline = 'Hold course'
+        detail = (
+            f"Already gaining {row['trajectory']['delta']:g} places. Whatever is working, keep doing it — "
+            "this one may reach the target without further work."
+        )
+    elif proven:
+        headline = 'Recover a position you have held'
+        detail = (
+            f"It reached #{row['top_rank']} before, so the page can rank there. "
+            "Compare it with the version that ranked and restore what was lost."
+        )
+    elif gap <= 2:
+        headline = 'Small push needed'
+        detail = (
+            f"Only {gap} place{'s' if gap != 1 else ''} from #{row['opportunity']['target_position']}. "
+            "On-page work — title, intro, internal links — is usually enough at this distance."
+        )
+    elif level == 'HIGH':
+        headline = 'Needs substantial work'
+        detail = (
+            "Stalled on a highly contested term. Expect to need materially better content "
+            "and external links, not a tweak."
+        )
+    else:
+        headline = 'Refresh the page'
+        detail = (
+            "Stalled with no recent movement. The page is indexed but not competitive — "
+            "a content refresh is the usual next step."
+        )
+
+    if sibling_count:
+        detail += (
+            f" This URL also ranks for {sibling_count} other tracked keyword"
+            f"{'s' if sibling_count != 1 else ''}, so the work lands on all of them at once."
+        )
+
+    return {'headline': headline, 'detail': detail}
+
+
+def build_opportunity_detail(seo_kw_id, allowed_domain_ids):
+    """
+    One keyword, expanded — plus every other tracked keyword ranking through
+    the same URL.
+
+    The sibling list is the point: 1,150 of this account's 1,765 keywords share
+    a page with at least one other, and the largest page carries 64. Nothing
+    else in the product turns a keyword list into a page-level work plan.
+    Returns None when the keyword does not exist or is not the caller's.
+    """
+    from ..models import SeoKeywordRank
+
+    kw = (
+        SeoKeywordRank.objects
+        .select_related('keyword', 'domain')
+        .filter(id=seo_kw_id, domain_id__in=list(allowed_domain_ids))
+        .first()
+    )
+    if not kw:
+        return None
+
+    row = _serialize(kw)
+    _attach_trajectory([row])
+    _attach_difficulty([row])
+    _attach_score([row])
+
+    siblings = []
+    url = row['target_url']
+    if url:
+        # Same domain and platform, same ranking URL, excluding this keyword.
+        for other in _base_qs(kw.domain_id, kw.platform).exclude(id=kw.id):
+            if _ranking_url(other) != url:
+                continue
+            siblings.append({
+                'id': other.id,
+                'keyword': other.keyword.keyword,
+                'rank_now': other.rank_now,
+                'search_volume': other.search_volume or 0,
+            })
+        # Best positions first; unranked keywords (rank 0) sort last rather than
+        # first, which a naive ascending sort would do.
+        siblings.sort(key=lambda s: (s['rank_now'] == 0, s['rank_now']))
+
+    return {
+        'keyword': row,
+        'domain_id': kw.domain_id,
+        'siblings': siblings,
+        'sibling_volume': sum(s['search_volume'] for s in siblings),
+        'action': _recommended_action(row, len(siblings)),
+    }
+
+
 def _bucket_rows(qs, low, high):
     """Every keyword in a position band, unclipped."""
     return [

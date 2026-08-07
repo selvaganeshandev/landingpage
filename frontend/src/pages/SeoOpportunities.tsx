@@ -683,7 +683,9 @@ export default function SeoOpportunities() {
     fetchData();
   }, [fetchData]);
 
-  const openKeyword = (id: number) => navigate(`/seo-rankings/${id}`);
+  // Rows open the opportunity view, not the generic keyword detail: the two
+  // show different things, and this page's rows are opportunities.
+  const openKeyword = (id: number) => navigate(`/seo-opportunities/${id}`);
 
   const handleExport = async () => {
     if (!activeDomainId) return;

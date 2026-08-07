@@ -2438,6 +2438,9 @@ export const apiClient = {
       (sheetIds && sheetIds.length ? `&sheet_ids=${sheetIds.join(',')}` : '')
     ),
 
+  getSeoOpportunityDetail: (seoKwId: string | number) =>
+    apiRequest(`/seo/opportunities/${seoKwId}/`),
+
   exportSeoOpportunitiesXlsx: async (domainId: string): Promise<Blob> => {
     const token = getAuthToken();
     const headers: HeadersInit = {};

@@ -23,6 +23,7 @@ urlpatterns = [
     # Insights
     path('opportunities/', views_insights.seo_opportunities, name='seo-opportunities'),
     path('opportunities/export/', views_insights.seo_opportunities_export, name='seo-opportunities-export'),
+    path('opportunities/<int:seo_kw_id>/', views_insights.seo_opportunity_detail, name='seo-opportunity-detail'),
 
     # Bulk operations
     path('keywords/bulk-delete/', views.seo_keyword_bulk_delete, name='seo-keyword-bulk-delete'),

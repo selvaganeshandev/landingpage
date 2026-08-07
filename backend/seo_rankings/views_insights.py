@@ -55,6 +55,24 @@ def seo_opportunities(request):
 
 @api_view(['GET'])
 @permission_classes([IsAuthenticated])
+def seo_opportunity_detail(request, seo_kw_id):
+    """
+    One opportunity, expanded: score breakdown, recommended action, and every
+    other tracked keyword ranking through the same URL.
+    """
+    from .services.opportunities_service import build_opportunity_detail
+
+    detail = build_opportunity_detail(seo_kw_id, _get_user_domain_ids(request.user))
+    if detail is None:
+        return Response(
+            {'error': 'Keyword not found or access denied'},
+            status=status.HTTP_404_NOT_FOUND,
+        )
+    return Response(detail)
+
+
+@api_view(['GET'])
+@permission_classes([IsAuthenticated])
 def seo_opportunities_export(request):
     """
     Export the three opportunity classifications as a single .xlsx workbook,
