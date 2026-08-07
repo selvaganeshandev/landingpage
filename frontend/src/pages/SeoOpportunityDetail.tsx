@@ -20,7 +20,6 @@ import {
   Lightbulb,
   Layers,
   Calculator,
-  FileText,
 } from "lucide-react";
 
 interface Sibling {
@@ -118,7 +117,7 @@ export default function SeoOpportunityDetail() {
 
   return (
     <div className="p-8 space-y-8 bg-background animate-fade-in">
-      <div className="flex items-start justify-between gap-4">
+      <div>
         <div className="min-w-0">
           <Button
             variant="outline"
@@ -144,10 +143,6 @@ export default function SeoOpportunityDetail() {
             ) : null}
           </p>
         </div>
-        <Button variant="outline" onClick={() => navigate(`/seo-rankings/${kw.id}`)}>
-          <FileText className="h-4 w-4 mr-2" />
-          Keyword Detail
-        </Button>
       </div>
 
       {/* 1 — what to do. The reason this page exists rather than a number. */}
