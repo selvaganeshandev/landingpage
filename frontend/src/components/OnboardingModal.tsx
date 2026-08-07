@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useMemo } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -332,6 +332,48 @@ export function OnboardingModal({ onComplete, user }: OnboardingModalProps) {
 
   const selectedCountry = countries.find((c) => c.value === newDomainCountry);
 
+  // The prompts on step 4, filtered by the search box and the "Ignore Brand
+  // Prompts" toggle. Kept as its own step because this is the set that gets
+  // SAVED: selection is topic-level, so without filtering here a mixed topic
+  // would write back the very brand prompts the toggle hid.
+  const nonBrandKeywords = useMemo(() => {
+    const brandName =
+      newBrandName || newDomain.replace(/^(https?:\/\/)?(www\.)?/, "").split(".")[0];
+    if (!ignoreBrandKeywords || !brandName) return generatedKeywords;
+
+    const needle = brandName.toLowerCase();
+    return generatedKeywords.filter(
+      (keyword) => !keyword.keyword.toLowerCase().includes(needle)
+    );
+  }, [generatedKeywords, ignoreBrandKeywords, newBrandName, newDomain]);
+
+  // The same prompts narrowed by the search box and grouped by topic. The search
+  // is applied only here, never to what gets saved — a term left in the box must
+  // not silently drop prompts from the domain being created.
+  const visibleTopicGroups = useMemo(() => {
+    const query = keywordSearchQuery.toLowerCase();
+
+    return nonBrandKeywords
+      .map((keyword, index) => ({ keyword, index }))
+      .filter(
+        ({ keyword }) =>
+          keywordSearchQuery === "" ||
+          keyword.keyword.toLowerCase().includes(query) ||
+          (keyword.topic && keyword.topic.toLowerCase().includes(query)) ||
+          (keyword.entity && keyword.entity.toLowerCase().includes(query))
+      )
+      .reduce((acc: Record<string, Array<{ keyword: any; index: number }>>, { keyword, index }) => {
+        const topic = keyword.topic || "Other";
+        if (!acc[topic]) acc[topic] = [];
+        acc[topic].push({ keyword, index });
+        return acc;
+      }, {});
+  }, [nonBrandKeywords, keywordSearchQuery]);
+
+  const visibleTopics = Object.keys(visibleTopicGroups);
+  const allVisibleSelected =
+    visibleTopics.length > 0 && visibleTopics.every((topic) => selectedTopics.has(topic));
+
   // Progress message animation
   useEffect(() => {
     if (!isAutomatedOnboarding) return;
@@ -513,6 +555,15 @@ export function OnboardingModal({ onComplete, user }: OnboardingModalProps) {
 
       const domainName = newDomain.trim();
 
+      // What the user actually chose: the selected topics, minus anything the
+      // "Ignore Brand Prompts" toggle hid. This is the set handed to the backend,
+      // which bulk-creates whatever it receives — passing the full generated list
+      // here meant every prompt was created regardless of what was ticked, so
+      // neither the topic selection nor the brand toggle restricted anything.
+      const selectedKeywords = useManualKeywords
+        ? generatedKeywords
+        : nonBrandKeywords.filter((kw) => selectedTopics.has(kw.topic || "Other"));
+
       const response: any = await apiClient.automatedDomainOnboard({
         domain_name: domainName,
         brand_name: newBrandName.trim(),
@@ -521,18 +572,16 @@ export function OnboardingModal({ onComplete, user }: OnboardingModalProps) {
         // Hand over the keywords step 2 already generated. Without this the
         // backend regenerated all 50 from scratch — the same ~25-30s call and
         // the same spend, twice per domain.
-        keywords: generatedKeywords.length > 0 ? generatedKeywords : undefined,
+        keywords: selectedKeywords.length > 0 ? selectedKeywords : undefined,
       });
 
       if (response.success && response.domain) {
         const createdDomainId = response.domain.id;
 
-        // Gather all keywords from selected topics
-        if (createdDomainId && selectedTopics.size > 0) {
+        // The onboard call above already created these; this is kept so anything
+        // the endpoint does not cover still lands. Same filtered set either way.
+        if (createdDomainId && selectedKeywords.length > 0) {
           try {
-            const selectedKeywords = generatedKeywords.filter((kw) =>
-              selectedTopics.has(kw.topic || "Other")
-            );
             await apiClient.bulkCreateKeywords(createdDomainId, selectedKeywords);
           } catch (keywordError) {
             console.error("Failed to save selected keywords:", keywordError);
@@ -928,6 +977,33 @@ export function OnboardingModal({ onComplete, user }: OnboardingModalProps) {
                   <div className="flex items-center gap-3">
                     <div className="flex items-center space-x-2 bg-gray-100 px-3 py-2 rounded-lg border border-gray-200">
                       <Checkbox
+                        id="selectAllTopics"
+                        checked={allVisibleSelected}
+                        disabled={visibleTopics.length === 0}
+                        onCheckedChange={(checked) => {
+                          // Only ever touches what is on screen, so selecting all
+                          // while a search is active does not quietly pull in the
+                          // topics the search filtered out.
+                          setSelectedTopics((prev) => {
+                            const newSet = new Set(prev);
+                            if (checked) {
+                              visibleTopics.forEach((topic) => newSet.add(topic));
+                            } else {
+                              visibleTopics.forEach((topic) => newSet.delete(topic));
+                            }
+                            return newSet;
+                          });
+                        }}
+                      />
+                      <label
+                        htmlFor="selectAllTopics"
+                        className="text-sm font-medium leading-none cursor-pointer"
+                      >
+                        Select All
+                      </label>
+                    </div>
+                    <div className="flex items-center space-x-2 bg-gray-100 px-3 py-2 rounded-lg border border-gray-200">
+                      <Checkbox
                         id="ignoreBrandKeywords"
                         checked={ignoreBrandKeywords}
                         onCheckedChange={(checked) => setIgnoreBrandKeywords(checked as boolean)}
@@ -964,41 +1040,7 @@ export function OnboardingModal({ onComplete, user }: OnboardingModalProps) {
 
                 {/* Prompts Grouped by Topic */}
                 <div className="space-y-4 max-h-[350px] overflow-y-auto pr-2">
-                  {Object.entries(
-                    generatedKeywords
-                      .map((keyword, index) => ({ keyword, index }))
-                      .filter(({ keyword }) => {
-                        const matchesSearch =
-                          keywordSearchQuery === "" ||
-                          keyword.keyword
-                            .toLowerCase()
-                            .includes(keywordSearchQuery.toLowerCase()) ||
-                          (keyword.topic &&
-                            keyword.topic
-                              .toLowerCase()
-                              .includes(keywordSearchQuery.toLowerCase())) ||
-                          (keyword.entity &&
-                            keyword.entity
-                              .toLowerCase()
-                              .includes(keywordSearchQuery.toLowerCase()));
-
-                        const brandName =
-                          newBrandName ||
-                          newDomain.replace(/^(https?:\/\/)?(www\.)?/, "").split(".")[0];
-                        const containsBrandName =
-                          ignoreBrandKeywords &&
-                          brandName &&
-                          keyword.keyword.toLowerCase().includes(brandName.toLowerCase());
-
-                        return matchesSearch && !containsBrandName;
-                      })
-                      .reduce((acc: any, { keyword, index }) => {
-                        const topic = keyword.topic || "Other";
-                        if (!acc[topic]) acc[topic] = [];
-                        acc[topic].push({ keyword, index });
-                        return acc;
-                      }, {})
-                  ).map(([topic, items]: [string, any]) => {
+                  {Object.entries(visibleTopicGroups).map(([topic, items]: [string, any]) => {
                     const topicItems = items as Array<{ keyword: any; index: number }>;
                     const isTopicSelected = selectedTopics.has(topic);
 
