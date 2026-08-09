@@ -122,3 +122,6 @@ Thumbs.db
 # Celery beat runtime state — regenerated on each start, never commit.
 engine/celerybeat-schedule
 engine/celerybeat-schedule.*
+# Rankmaxx migration credentials — private key and plaintext host passwords.
+# Untracked, and must stay that way.
+rankmaxx/
