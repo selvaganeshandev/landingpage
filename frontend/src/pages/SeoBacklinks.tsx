@@ -468,8 +468,11 @@ export default function SeoBacklinks() {
         </Alert>
       ) : null}
 
-      {/* Headline metrics — the shared MetricCard, as on the dashboard. */}
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6 gap-6">
+      {/* Headline metrics — the shared MetricCard, as on the dashboard.
+          Capped at three columns: across six, "Domain rank" and "Referring
+          domains" wrap onto two lines and the row reads as broken. Two rows of
+          three keeps every label on one line. */}
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6">
         <MetricCard
           title="Domain rank"
           value={fmt(snapshot.rank)}
