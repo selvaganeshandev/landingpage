@@ -57,6 +57,7 @@ urlpatterns = [
     # SEO Ranking
     path('seo/process-keyword/', views.seo_process_keyword, name='seo_process_keyword'),
     path('seo/process-domain/', views.seo_process_domain, name='seo_process_domain'),
+    path('seo/fetch-backlinks/', views.seo_fetch_backlinks, name='seo_fetch_backlinks'),
     path('seo/sync-volume/', views.seo_sync_volume, name='seo_sync_volume'),
     path('seo/analyze-competitors/', views.seo_analyze_competitors, name='seo_analyze_competitors'),
 ]

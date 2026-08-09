@@ -79,6 +79,7 @@ export const MODULES = {
   KEYWORD_RANKINGS: 'keyword_rankings',
   SEO_COMPETITORS: 'seo_competitors',
   ORGANIC_REPORTS: 'organic_reports',
+  BACKLINKS: 'backlinks',
 } as const;
 
 export type ModuleKey = typeof MODULES[keyof typeof MODULES];

@@ -1143,3 +1143,24 @@ def prompt_generation_scheduler(self):
     except Exception as e:
         logger.error(f"[PromptGen] scheduler error: {e}", exc_info=True)
         raise self.retry(exc=e, countdown=60)
+
+
+@shared_task(bind=True, ignore_result=True, max_retries=0)
+def fetch_backlinks_task(self, snapshot_id: int):
+    """Fill in one backlink snapshot from DataForSEO.
+
+    max_retries=0 deliberately: every attempt spends real money against a
+    shared prepaid balance, so a failure must surface to the user rather than
+    silently bill three times. The snapshot row records the error and leaves
+    next_refresh_allowed_at null, so the user can simply press Fetch again.
+    """
+    from core.backlinks_processor import run_snapshot
+
+    try:
+        result = run_snapshot(int(snapshot_id))
+        logger.info(f"[BL] Snapshot {snapshot_id} finished: {result}")
+        return result
+    except Exception as e:
+        logger.error(f"[BL] Snapshot {snapshot_id} failed: {e}", exc_info=True)
+        # run_snapshot already marked the row FAIL and stored the message.
+        return {'snapshot_id': snapshot_id, 'status': 'FAIL', 'error': str(e)}

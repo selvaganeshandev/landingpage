@@ -611,3 +611,13 @@ class SeoKeywordVolume(models.Model):
 
 # Invoice letterhead / GST settings, kept in their own module for clarity.
 from .models_invoice import InvoiceSettings, FxRate  # noqa: E402,F401
+
+# Backlink profiles (DataForSEO Backlinks API) — manual, monthly, snapshot-based.
+from .models_backlinks import (  # noqa: E402,F401
+    SeoBacklinkSnapshot,
+    SeoBacklinkItem,
+    SeoBacklinkReferringDomain,
+    SeoBacklinkAnchor,
+    SeoBacklinkPage,
+    SeoBacklinkHistoryPoint,
+)

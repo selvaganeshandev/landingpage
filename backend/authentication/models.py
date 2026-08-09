@@ -495,6 +495,7 @@ class UserPermission(models.Model):
         ('keyword_rankings', 'Keyword Rankings'),
         ('seo_competitors', 'SEO Competitors'),
         ('organic_reports', 'Organic Reports'),
+        ('backlinks', 'Backlinks'),
 
         # Reporting
         ('reports', 'Reports'),

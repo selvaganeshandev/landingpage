@@ -39,6 +39,7 @@ const SeoKeywordDetail = lazy(() => import("./pages/SeoKeywordDetail"));
 const SeoOpportunities = lazy(() => import("./pages/SeoOpportunities"));
 const SeoOpportunityDetail = lazy(() => import("./pages/SeoOpportunityDetail"));
 const SeoShareOfVoice = lazy(() => import("./pages/SeoShareOfVoice"));
+const SeoBacklinks = lazy(() => import("./pages/SeoBacklinks"));
 const SeoCompetitors = lazy(() => import("./pages/SeoCompetitors"));
 const SeoReports = lazy(() => import("./pages/SeoReports"));
 const ConfigureSeoReport = lazy(() => import("./pages/ConfigureSeoReport"));
@@ -274,6 +275,11 @@ const App = () => (
               <Route path="/seo-opportunities/:id" element={
                 <ProtectedRoute requiredPermission={MODULES.KEYWORD_RANKINGS}>
                   <SeoOpportunityDetail />
+                </ProtectedRoute>
+              } />
+              <Route path="/seo-backlinks" element={
+                <ProtectedRoute requiredPermission={MODULES.BACKLINKS}>
+                  <SeoBacklinks />
                 </ProtectedRoute>
               } />
               <Route path="/seo-share-of-voice" element={

@@ -167,6 +167,12 @@ const allNavGroups: NavGroup[] = [
     ],
   },
   {
+    name: "Backlinks",
+    items: [
+      { name: "Backlinks", path: "/seo-backlinks", icon: Link2, module: MODULES.BACKLINKS },
+    ],
+  },
+  {
     name: "Organic Reports",
     items: [
       { name: "Organic Reports", path: "/seo-reports", icon: FileText, module: MODULES.ORGANIC_REPORTS },

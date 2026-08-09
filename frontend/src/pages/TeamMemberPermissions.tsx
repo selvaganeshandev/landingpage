@@ -82,6 +82,7 @@ const featureCategories = [
       { id: "keyword_rankings", name: "Keyword Rankings", icon: SearchCheck, description: "View keyword ranking positions and trends" },
       { id: "seo_competitors", name: "SEO Competitors", icon: Users, description: "Track and compare SEO competitors" },
       { id: "organic_reports", name: "Organic Reports", icon: FileText, description: "Generate and view organic search reports" },
+      { id: "backlinks", name: "Backlinks", icon: Link2, description: "View the backlink profile and pull fresh data" },
     ]
   },
   {

@@ -1900,6 +1900,40 @@ def seo_process_domain(request):
 
 @api_view(['POST'])
 @permission_classes([AllowAny])
+def seo_fetch_backlinks(request):
+    """Queue a DataForSEO backlink pull for an already-created snapshot.
+
+    Body: { snapshot_id: int }
+
+    The backend creates the snapshot row (so the UI has something to poll the
+    moment the button is pressed) and enforces the monthly refresh guard; this
+    only dispatches the work to the seo queue.
+    """
+    from .processing_tasks import fetch_backlinks_task
+
+    snapshot_id = request.data.get('snapshot_id')
+    if not snapshot_id:
+        return Response(
+            {'error': 'snapshot_id is required'},
+            status=status.HTTP_400_BAD_REQUEST
+        )
+
+    try:
+        fetch_backlinks_task.delay(int(snapshot_id))
+        return Response({
+            'message': f'Backlink snapshot {snapshot_id} queued',
+            'snapshot_id': int(snapshot_id),
+        })
+    except Exception as e:
+        logger.error(f"[BL] Error queuing snapshot {snapshot_id}: {e}")
+        return Response(
+            {'error': str(e)},
+            status=status.HTTP_500_INTERNAL_SERVER_ERROR
+        )
+
+
+@api_view(['POST'])
+@permission_classes([AllowAny])
 def seo_sync_volume(request):
     """Fetch search volume for one domain's keywords now.
 

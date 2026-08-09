@@ -476,6 +476,10 @@ CELERY_TASK_ROUTES = {
     'core.processing_tasks.process_seo_domain_task': {'queue': 'seo'},
     'core.processing_tasks.process_seo_keyword_task': {'queue': 'seo'},
     'core.processing_tasks.seo_rankings_daily_scheduler': {'queue': 'seo'},
+    # Backlink pulls are user-triggered and long (10+ sequential DataForSEO
+    # requests), so they belong on the same dedicated worker rather than behind
+    # the prompt-analytics backlog.
+    'core.processing_tasks.fetch_backlinks_task': {'queue': 'seo'},
 }
 
 # Prompt analytics fans one Celery task out per prompt, and each task is a long
