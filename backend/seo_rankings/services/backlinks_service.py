@@ -58,6 +58,34 @@ class FetchAlreadyRunning(Exception):
         super().__init__("A backlink fetch is already running for this project.")
 
 
+class FirstFetchDisabled(Exception):
+    """First-ever pull for a project is switched off.
+
+    Every project that has never been fetched is a brand-new charge against the
+    prepaid balance, and there are ~45 of them. The monthly guard only limits
+    projects that already have data; this closes the other side.
+    """
+
+    def __init__(self):
+        super().__init__(
+            "Fetching backlinks for a new project is temporarily switched off. "
+            "Projects that already have backlink data can still be refreshed."
+        )
+
+
+def first_fetch_enabled() -> bool:
+    """Whether a project with no existing data may be fetched for the first time.
+
+    Off by default and flipped with BACKLINK_FIRST_FETCH_ENABLED in .env, so it
+    can be opened for one deliberate pull and closed again without a deploy.
+    """
+    return bool(getattr(settings, "BACKLINK_FIRST_FETCH_ENABLED", False))
+
+
+def has_data(domain) -> bool:
+    return latest_snapshot(domain) is not None
+
+
 def next_refresh_at(completed_at):
     return completed_at + timedelta(days=REFRESH_INTERVAL_DAYS)
 
@@ -128,6 +156,11 @@ def start_fetch(domain, *, account=None, force: bool = False):
     in_flight = running_snapshot(domain)
     if in_flight:
         raise FetchAlreadyRunning(in_flight)
+
+    # Enforced here rather than only in the UI — hiding the button does not stop
+    # a POST, and this is the control that actually protects the balance.
+    if not force and not has_data(domain) and not first_fetch_enabled():
+        raise FirstFetchDisabled()
 
     refresh_guard(domain, force=force)
 

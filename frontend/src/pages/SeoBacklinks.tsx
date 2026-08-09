@@ -101,6 +101,7 @@ interface Overview {
   top_referring_domains: RefDomainRow[];
   top_pages: PageRow[];
   can_refresh: boolean;
+  can_fetch_first: boolean;
   next_refresh_allowed_at: string | null;
   last_error: string | null;
 }
@@ -196,6 +197,9 @@ export default function SeoBacklinks() {
 
   const snapshot = overview?.snapshot ?? null;
   const isFetching = overview?.is_fetching ?? false;
+  // First-ever pull is gated server-side; default false so the button never
+  // flashes enabled while the overview is still loading.
+  const canFetchFirst = overview?.can_fetch_first ?? false;
 
   const loadOverview = useCallback(async () => {
     if (!activeDomainId) { setOverview(null); return; }
@@ -272,6 +276,12 @@ export default function SeoBacklinks() {
           title: "Already refreshed this month",
           description: `Backlinks can be refreshed once a month. Next refresh on ${fmtDate(until)}.`,
         });
+      } else if (err?.status === 403) {
+        toast({
+          title: "Fetching new projects is switched off",
+          description: err?.data?.error || "Projects that already have backlink data can still be refreshed.",
+        });
+        await loadOverview();
       } else if (err?.status === 409) {
         toast({ title: "A fetch is already running for this project." });
         await loadOverview();
@@ -291,11 +301,11 @@ export default function SeoBacklinks() {
     if (!activeDomainId) return;
     setExporting(true);
     try {
-      const blob = await apiClient.exportSeoBacklinksCsv(activeDomainId);
+      const blob = await apiClient.exportSeoBacklinksXlsx(activeDomainId);
       const url = window.URL.createObjectURL(blob);
       const a = document.createElement("a");
       a.href = url;
-      a.setAttribute("download", `backlinks-${overview?.domain_name || "project"}.csv`);
+      a.setAttribute("download", `backlinks-${overview?.domain_name || "project"}.xlsx`);
       document.body.appendChild(a);
       a.click();
       a.remove();
@@ -408,14 +418,22 @@ export default function SeoBacklinks() {
             <div>
               <h3 className="text-lg font-semibold">No backlink data yet</h3>
               <p className="text-sm text-muted-foreground max-w-md mt-1">
-                Backlinks are not tracked automatically. Pull the profile for this project when
-                you need it — it can then be refreshed once a month.
+                {canFetchFirst
+                  ? "Backlinks are not tracked automatically. Pull the profile for this project when you need it — it can then be refreshed once a month."
+                  : "Backlinks have not been pulled for this project. Fetching a project for the first time is switched off at the moment, so there is nothing to show here yet."}
               </p>
             </div>
-            <Button onClick={handleFetch} disabled={starting}>
+            {/* Disabled rather than hidden: the button is the explanation for
+                why the page is empty, and hiding it just looks broken. */}
+            <Button onClick={handleFetch} disabled={starting || !canFetchFirst}>
               {starting ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : <Link2 className="h-4 w-4 mr-2" />}
               Fetch backlinks
             </Button>
+            {!canFetchFirst && (
+              <p className="text-xs text-muted-foreground">
+                Contact your administrator if you need this project's backlinks pulled.
+              </p>
+            )}
           </CardContent>
         </Card>
       </div>

@@ -6,7 +6,6 @@ Nothing here calls DataForSEO; `POST /backlinks/fetch/` creates a snapshot and
 hands it to the engine, and the page polls `GET /backlinks/` until the snapshot
 reaches DONE.
 """
-import csv
 import logging
 
 from django.http import HttpResponse
@@ -18,6 +17,7 @@ from rest_framework.response import Response
 from domains.models import Domain
 
 from .models import SeoBacklinkItem
+from .services.backlinks_export import build_backlinks_workbook
 from .serializers_backlinks import (
     SeoBacklinkSnapshotSerializer,
     SeoBacklinkItemSerializer,
@@ -81,6 +81,7 @@ def backlinks_overview(request):
         'top_referring_domains': [],
         'top_pages': [],
         'can_refresh': True,
+        'can_fetch_first': svc.first_fetch_enabled(),
         'next_refresh_allowed_at': None,
         'last_error': None,
     }
@@ -196,6 +197,11 @@ def backlinks_fetch(request):
             },
             status=status.HTTP_429_TOO_MANY_REQUESTS,
         )
+    except svc.FirstFetchDisabled as exc:
+        return Response(
+            {'error': str(exc), 'code': 'first_fetch_disabled'},
+            status=status.HTTP_403_FORBIDDEN,
+        )
     except svc.FetchAlreadyRunning as exc:
         return Response(
             {
@@ -218,9 +224,9 @@ def backlinks_fetch(request):
 @api_view(['GET'])
 @permission_classes([IsAuthenticated])
 def backlinks_export(request):
-    """CSV of every stored backlink for the latest snapshot.
+    """Workbook for the latest snapshot: Summary first, then the detail sheets.
 
-    Streams the whole snapshot, not the current page — an export that honoured
+    Exports the whole snapshot, not the current page — an export that honoured
     pagination would silently hand back 50 of 1,000 rows.
     """
     domain, err = _resolve_domain(request)
@@ -232,29 +238,13 @@ def backlinks_export(request):
         return Response({'error': 'No backlink data to export'}, status=status.HTTP_404_NOT_FOUND)
 
     host = (domain.url or domain.name or 'project').replace('https://', '').replace('http://', '').strip('/')
-    response = HttpResponse(content_type='text/csv')
-    response['Content-Disposition'] = (
-        f'attachment; filename="backlinks-{host}-{snapshot.completed_at:%Y-%m-%d}.csv"'
-    )
+    stream = build_backlinks_workbook(snapshot, domain.name or host)
 
-    writer = csv.writer(response)
-    writer.writerow([
-        'Source domain', 'Source URL', 'Target URL', 'Anchor', 'Link type',
-        'Follow', 'Domain rank', 'Page rank', 'Link rank', 'Spam score',
-        'Country', 'Placement', 'New', 'Lost', 'Broken',
-        'First seen', 'Last seen', 'Source page title',
-    ])
-    rows = SeoBacklinkItem.objects.filter(snapshot=snapshot).order_by('-rank').iterator(chunk_size=500)
-    for r in rows:
-        writer.writerow([
-            r.domain_from, r.url_from, r.url_to, r.anchor, r.item_type,
-            'dofollow' if r.dofollow else 'nofollow',
-            r.domain_from_rank, r.page_from_rank, r.rank, r.backlink_spam_score,
-            r.domain_from_country, r.semantic_location,
-            'yes' if r.is_new else '', 'yes' if r.is_lost else '',
-            'yes' if r.is_broken else '',
-            r.first_seen.date() if r.first_seen else '',
-            r.last_seen.date() if r.last_seen else '',
-            r.page_from_title,
-        ])
+    response = HttpResponse(
+        stream.read(),
+        content_type='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+    )
+    response['Content-Disposition'] = (
+        f'attachment; filename="backlinks-{host}-{snapshot.completed_at:%Y-%m-%d}.xlsx"'
+    )
     return response

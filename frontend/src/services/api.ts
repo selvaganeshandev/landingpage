@@ -2483,7 +2483,7 @@ export const apiClient = {
       body: JSON.stringify({ domain_id: domainId }),
     }),
 
-  exportSeoBacklinksCsv: async (domainId: string | number): Promise<Blob> => {
+  exportSeoBacklinksXlsx: async (domainId: string | number): Promise<Blob> => {
     const token = getAuthToken();
     const headers: HeadersInit = {};
     if (token) headers['Authorization'] = `Bearer ${token}`;
