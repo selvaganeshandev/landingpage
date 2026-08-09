@@ -30,6 +30,34 @@ from types import SimpleNamespace
 
 logger = logging.getLogger(__name__)
 
+def domain_already_tracked(organisation, url):
+    """Whether this organisation already tracks `url`.
+
+    The database used to enforce this with unique_together on
+    (url, organisation), and the add-domain views relied on catching the
+    resulting IntegrityError. That constraint was removed so the Rankmax
+    import can hold two projects on one domain — Rankmax tracks Kotak811 and
+    Shriram Wealth as separate projects on the same host — but nothing else
+    should be able to create a duplicate by accident, so the check moves here.
+
+    Compared on the bare host, so https://x.com, http://www.x.com and x.com/
+    are all the same site rather than three projects.
+    """
+    def host(u):
+        u = (u or "").strip().lower()
+        u = u.split("//", 1)[-1]
+        u = u.split("/", 1)[0].split("?", 1)[0]
+        return u[4:] if u.startswith("www.") else u
+
+    wanted = host(url)
+    if not wanted:
+        return None
+    for d in Domain.objects.filter(organisation=organisation).only("id", "url", "name"):
+        if host(d.url) == wanted:
+            return d
+    return None
+
+
 
 def get_openai_client():
     """Return the INTERNAL LLM client (OpenRouter) for non-measured work.
@@ -2800,6 +2828,13 @@ Return ONLY a valid JSON object with these fields:
             # Prepare keywords string (all generated keywords)
             keywords_str = ','.join([kw.get('keyword', '') for kw in generated_keywords if kw.get('keyword')])
 
+            existing = domain_already_tracked(request.user.organisation, domain_url)
+            if existing:
+                return Response({
+                    'success': False,
+                    'error': f"This domain is already tracked as '{existing.name}'.",
+                }, status=status.HTTP_400_BAD_REQUEST)
+
             # Create domain
             domain = Domain.objects.create(
                 name=brand_name,
@@ -3098,6 +3133,13 @@ def create_analyzed_domain(request):
 
     try:
         with transaction.atomic():
+            existing = domain_already_tracked(request.user.organisation, host)
+            if existing:
+                return Response({
+                    'success': False,
+                    'error': f"This domain is already tracked as '{existing.name}'.",
+                }, status=status.HTTP_400_BAD_REQUEST)
+
             domain = Domain.objects.create(
                 name=brand_name,
                 url=f"https://{host}",

@@ -88,6 +88,14 @@ class Command(BaseCommand):
                             help="Rankmax group.id, e.g. 6720 for YCH")
         parser.add_argument("--org", type=int, default=1,
                             help="Target organisation id (default 1, PivotRoots)")
+        parser.add_argument("--new-project", action="store_true",
+                            help="Create a second project on a domain another project already "
+                                 "tracks. Rankmax holds some sites as two projects (Kotak811, "
+                                 "Shriram Wealth); this is how they come across as two.")
+        parser.add_argument("--name", type=str, default="",
+                            help="Override the project name. Rankmax's two Shriram entries are "
+                                 "both called 'Shriram Wealth', which is indistinguishable in "
+                                 "any list.")
         parser.add_argument("--merge-into", type=int, default=0,
                             help="Attach to an existing PromptMaxx domain id instead of "
                                  "creating one. Only permitted when that domain holds no "
@@ -247,7 +255,7 @@ class Command(BaseCommand):
         else:
             group, kws = self._load_from_mongo(group_id, opts["mongo_password"])
 
-        name = group.get("group_name") or f"rankmax-{group_id}"
+        name = opts.get("name") or group.get("group_name") or f"rankmax-{group_id}"
         url = group.get("domain_name") or ""
         host = self._host(url)
         if not host:
@@ -348,12 +356,17 @@ class Command(BaseCommand):
                     break
 
         if not merge_id:
+            if existing and opts.get("new_project"):
+                w(self.style.WARNING(
+                    f"  SECOND PROJECT  '{existing.name}' (id={existing.id}) already tracks this "
+                    f"domain; creating another alongside it"))
+                return None
             if existing:
                 raise CommandError(
                     f"'{existing.name}' (id={existing.id}) already tracks {existing.url} in org "
                     f"{opts['org']}. This command only creates NEW projects — merge it with "
-                    f"--merge-into {existing.id}, which is allowed only when that project holds "
-                    f"no SEO data."
+                    f"--merge-into {existing.id}, or pass --new-project to create a second "
+                    f"project on the same domain."
                 )
             return None
 
