@@ -10,6 +10,7 @@ from rest_framework.response import Response
 from rest_framework import status
 from rest_framework.permissions import IsAuthenticated
 from django.db import transaction
+from django.db.models import Case, IntegerField, Value, When
 from django.conf import settings
 
 from domains.models import Domain
@@ -102,7 +103,14 @@ def seo_keyword_list(request):
     if search:
         qs = qs.filter(keyword__keyword__icontains=search)
 
-    qs = qs.order_by('-rank_now')
+    # Best rank first. rank_now = 0 means "not ranked", not position zero, so a
+    # plain ascending sort would lead with every keyword that ranks nowhere and
+    # bury the ones that rank #1. The annotation pushes those to the end while
+    # keeping 1, 2, 3 ... in order ahead of them.
+    qs = qs.annotate(
+        _unranked=Case(When(rank_now=0, then=Value(1)), default=Value(0),
+                       output_field=IntegerField()),
+    ).order_by('_unranked', 'rank_now')
     # List serializer: omits the SERP blobs this page never reads. See
     # SeoKeywordRankListSerializer — they were 70% of the response.
     serializer = SeoKeywordRankListSerializer(qs, many=True)
@@ -4405,7 +4413,7 @@ def _fetch_keyword_ranking_overview(domain_id, sheet):
             'total_rows': 1,
         }
 
-    from django.db.models import Q, Count
+    from django.db.models import Case, Count, IntegerField, Q, Value, When
 
     buckets = [
         ('Top 1', Q(rank_now=1)),
