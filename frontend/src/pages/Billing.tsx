@@ -101,6 +101,11 @@ const RATE_ROWS: { label: string; render: (t: RatePlan) => React.ReactNode }[] =
 ];
 
 function RegionTable({ region, showOrg }: { region: BillingRegion; showOrg: boolean }) {
+  // Only projects that actually track keywords get a row — a list of dozens of
+  // 0-keyword projects buries the handful that are charged. The header counts
+  // above still report every project in the region, billable or not.
+  const rows = region.projects.filter((p) => p.used_keywords > 0);
+
   return (
     <Card className="border border-border overflow-hidden">
       {/* The header renders even when the region is empty, so an unused region
@@ -130,7 +135,7 @@ function RegionTable({ region, showOrg }: { region: BillingRegion; showOrg: bool
           make the card metres tall and push the second region table far below
           the fold. Roughly six rows visible, then scroll. */}
       <CardContent className="p-0 max-h-[320px] overflow-auto">
-        {region.projects.length === 0 ? (
+        {rows.length === 0 ? (
           <div className="py-16 text-center text-sm text-muted-foreground">
             No billable projects in this region
           </div>
@@ -148,11 +153,11 @@ function RegionTable({ region, showOrg }: { region: BillingRegion; showOrg: bool
               </TableRow>
             </TableHeader>
             <TableBody>
-              {region.projects.map((p, i) => (
+              {rows.map((p, i) => (
                 <TableRow
                   key={p.domain_id}
-                  // Muted: no keywords tracked, so nothing is charged. Shown
-                  // rather than hidden so the project is visibly present.
+                  // Muted: keywords are tracked but the slab prices them at
+                  // zero, so the row is present but not a charge.
                   className={cn("hover:bg-muted/30", p.price === 0 && "text-muted-foreground")}
                 >
                   <TableCell className="text-center py-2 text-sm text-muted-foreground">{i + 1}</TableCell>
@@ -350,7 +355,7 @@ export default function Billing() {
         <div>
           <p className="text-sm text-muted-foreground">
             Charged per project on the keyword slab it falls into. Projects tracking
-            no keywords are listed but not charged.
+            no keywords are counted in the totals but omitted from the tables.
           </p>
           <p className="text-sm mt-1">
             <span className="text-muted-foreground">Grand total: </span>
