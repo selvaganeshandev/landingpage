@@ -256,7 +256,7 @@ class Command(BaseCommand):
         w(f"  keywords        {len(kept)}"
           + (f"   ({len(kws)} source docs, {dropped} duplicate)" if dropped else ""))
 
-        target = self._resolve_target(opts, host, url, w)
+        target = self._resolve_target(opts, host, url, w, kept)
 
         history_days = opts["history_days"]
         total_hist = 0
@@ -309,7 +309,7 @@ class Command(BaseCommand):
 
     # ------------------------------------------------------------------ write
 
-    def _resolve_target(self, opts, host, url, w):
+    def _resolve_target(self, opts, host, url, w, kept):
         """The Domain to import into, or None to create a fresh one.
 
         Default behaviour is unchanged: a project that already exists is a
@@ -352,14 +352,46 @@ class Command(BaseCommand):
                 f"already tracks {url} — that is '{existing.name}' (id={existing.id})."
             )
 
-        # The guard that makes this safe.
-        has_ranks = SeoKeywordRank.objects.filter(domain=target).count()
-        if has_ranks:
-            raise CommandError(
-                f"'{target.name}' (id={target.id}) already holds {has_ranks} tracked keywords "
-                f"with rank history. Merging into it would interleave two sets of positions on "
-                f"the same charts. Decide which side wins and clear the other first."
+        # The guard that makes this safe: refuse only on an ACTUAL collision.
+        #
+        # "Target has some rank data" is too blunt. A project can legitimately
+        # hold several Rankmax entries that track different things — BitOasis
+        # is one project in English and Arabic, PivotRoots one in India and the
+        # UAE, Shriram one on desktop and mobile. Those share a URL but not a
+        # tracking key, so both halves belong on the same project and neither
+        # overwrites the other.
+        #
+        # What must never happen is two rank histories landing on ONE key. So
+        # compare the keys themselves.
+        incoming = {
+            (
+                (k.get("keyword") or "").strip()[:255],
+                (k.get("platform") or "desktop").lower(),
+                (k.get("language_code") or "en")[:8],
+                (k.get("region") or "google.com")[:20],
             )
+            for k in kept
+            if (k.get("keyword") or "").strip()
+        }
+        held = set(
+            SeoKeywordRank.objects
+            .filter(domain=target)
+            .values_list("keyword__keyword", "platform", "language_code", "region")
+        )
+        clash = incoming & held
+        if clash:
+            sample = ", ".join(repr(c[0]) for c in list(clash)[:3])
+            raise CommandError(
+                f"'{target.name}' (id={target.id}) already tracks {len(clash)} of these "
+                f"{len(incoming)} keywords on the same platform, language and region "
+                f"(e.g. {sample}). Importing would put two rank histories on one keyword. "
+                f"Decide which side wins and clear the other first."
+            )
+
+        held_count = len(held)
+        if held_count:
+            w(f"  target has      {held_count} tracked keywords already — "
+              f"no overlap with the {len(incoming)} incoming")
 
         w(f"  merging into    id={target.id} '{target.name}' {target.url}")
         w(f"                  existing GEO keywords kept, auto_generate_prompts untouched")
