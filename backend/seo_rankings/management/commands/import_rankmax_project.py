@@ -23,10 +23,12 @@ Neither is cosmetic; both are cost controls.
 RANK HISTORY — how dates are derived
 ------------------------------------
 Rankmax stores history as a bare array of ints on each keyword, with no dates:
-`rank: [1, 1, 2, 0, ...]`. Position is implied by index. The mapping is
+`rank: [1, 1, 2, 0, ...]`. Position is implied by index, and the array runs
+BACKWARDS from the most recent crawl:
 
-    date(index i) = keyword.created_date.date() + i days
+    date(index i) = keyword.created_date.date() + (len - 1 - i) days
 
+so index 0 is the latest day and index len-1 is created_date. The span was
 verified across 147 keywords spanning all 49 PivotRoots projects: every one
 implies the same final date (2026-08-09) despite created_date ranging over two
 years and array lengths from 12 to 796. The Crocs project proves it inside a
@@ -34,10 +36,15 @@ single project — two cohorts created three days apart differ by exactly three
 entries and share an end date. The series is therefore a daily append with no
 gaps, which is what makes an index-derived date trustworthy.
 
-`ranknow` is NOT used for the current position. On some keywords it disagrees
-with the last array element, and the engine's own day-over-day field agrees
-with the array (26/27) rather than with ranknow (22/27). Taking rank[-1] keeps
-the number on the page consistent with the end of its own chart.
+The array is stored NEWEST FIRST — index 0 is the most recent crawl. Verified
+on 101 keywords across three projects: `ranknow` equals rank[0] in 101 cases
+and rank[-1] in only 55. Reading it the other way silently reverses every
+history series, which is easy to miss on a project whose positions barely move
+(YCH sits at rank 1 on 26 of 27 keywords, so both ends of its array are
+identical and the direction is undetectable there). Validate direction on a
+project with movement.
+
+So the current position is rank[0], not rank[-1], and it agrees with `ranknow`.
 """
 import datetime
 import json
@@ -167,7 +174,20 @@ class Command(BaseCommand):
     # ------------------------------------------------------------------ mapping
 
     def _rank_rows(self, kw, history_days):
-        """(date, position) per array index, most recent last.
+        """(date, position) pairs, oldest first.
+
+        Rankmax's `rank` array is stored NEWEST FIRST: index 0 is the most
+        recent crawl and index i is i days before it. Confirmed on 101 keywords
+        across three projects — `ranknow` equals rank[0] in 101 cases and
+        rank[-1] in only 55 — and by the engine's own day-over-day figures: a
+        keyword with dayval=96/down reads [0, 4, ...] from the front (dropped
+        out of the top 100 from #4 yesterday) and an unrelated 9-place move
+        from the back.
+
+        The span is created_date .. most recent crawl either way, so index 0
+        is that final date and the array runs backwards from it:
+
+            date(i) = created_date + (len - 1 - i) days
 
         Returns [] when the anchor is missing rather than guessing — a history
         row with an invented date is worse than no history row.
@@ -176,7 +196,12 @@ class Command(BaseCommand):
         start = self._as_date(kw.get("created_date"))
         if not series or not start:
             return []
-        rows = [(start + datetime.timedelta(days=i), int(p or 0)) for i, p in enumerate(series)]
+        last = len(series) - 1
+        rows = [
+            (start + datetime.timedelta(days=last - i), int(p or 0))
+            for i, p in enumerate(series)
+        ]
+        rows.reverse()  # oldest first, so callers can slice the recent tail
         if history_days:
             rows = rows[-history_days:]
         return rows
@@ -300,8 +325,9 @@ class Command(BaseCommand):
                 platform = "desktop"
 
             series = k.get("rank") or []
-            # rank[-1], not ranknow — see module docstring.
-            rank_now = int(series[-1] or 0) if series else int(k.get("ranknow") or 0)
+            # rank[0] — the array is newest-first, so index 0 is today's
+            # position. It agrees with `ranknow` on every keyword checked.
+            rank_now = int(series[0] or 0) if series else int(k.get("ranknow") or 0)
 
             # Keyed on Rankmax's own tracking key: text + region + language +
             # device. One Keyword row can therefore carry several SeoKeywordRank
