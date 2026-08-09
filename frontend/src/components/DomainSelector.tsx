@@ -290,7 +290,7 @@ export const DomainSelector = () => {
             ) : (
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
                 {filtered.map((domain) => {
-                  const faviconUrl = getFaviconUrl(domain.url, 32);
+                  const faviconUrl = getFaviconUrl(domain.url, 64);
                   const isProcessing = domain.processing_status
                     && ['INIT', 'SCHD', 'PROC'].includes(domain.processing_status);
                   const isFailed = domain.processing_status === 'FAIL';
@@ -316,13 +316,17 @@ export const DomainSelector = () => {
                         isDisabled && "opacity-60 cursor-not-allowed hover:border-border hover:bg-transparent",
                       )}
                     >
+                      {/* The icon fills the tile edge to edge — a 24px glyph
+                          floating in a 40px box was hard to pick out when
+                          scanning fifty projects by logo. Favicons are square,
+                          so object-cover fills without cropping. */}
                       <div className="h-10 w-10 flex-shrink-0 rounded-md border border-border bg-muted flex items-center justify-center overflow-hidden">
                         {faviconUrl ? (
                           <img
                             src={faviconUrl}
                             alt=""
-                            className="h-6 w-6 object-contain"
-                            onError={(e) => handleFaviconError(e, domain.url, domain.name, 32)}
+                            className="h-full w-full object-cover"
+                            onError={(e) => handleFaviconError(e, domain.url, domain.name, 64)}
                           />
                         ) : (
                           <Globe className="h-5 w-5 text-muted-foreground" />
