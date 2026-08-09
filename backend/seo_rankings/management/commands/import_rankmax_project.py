@@ -92,6 +92,14 @@ class Command(BaseCommand):
                             help="Attach to an existing PromptMaxx domain id instead of "
                                  "creating one. Only permitted when that domain holds no "
                                  "SEO data — see _resolve_target.")
+        parser.add_argument("--skip-conflicts", action="store_true",
+                            help="With --merge-into: skip incoming keywords that collide with "
+                                 "ones the target already tracks, instead of refusing the whole "
+                                 "import. Skipped keywords are listed, never dropped silently.")
+        parser.add_argument("--replace-existing", action="store_true",
+                            help="With --merge-into: delete ALL of the target's existing SEO "
+                                 "keywords, rank history and daily metrics, then import "
+                                 "Rankmax's in their place. GEO data is untouched.")
         parser.add_argument("--dry-run", action="store_true",
                             help="Report exactly what would be written, then roll back.")
         parser.add_argument("--history-days", type=int, default=0,
@@ -309,6 +317,12 @@ class Command(BaseCommand):
 
     # ------------------------------------------------------------------ write
 
+    # Populated by _resolve_target when --skip-conflicts drops colliding keys.
+    # A class attribute so a non-merge import has an empty set rather than an
+    # AttributeError.
+    _skip_keys = frozenset()
+    _replace_all = False
+
     def _resolve_target(self, opts, host, url, w, kept):
         """The Domain to import into, or None to create a fresh one.
 
@@ -378,15 +392,44 @@ class Command(BaseCommand):
             .filter(domain=target)
             .values_list("keyword__keyword", "platform", "language_code", "region")
         )
+        if opts.get("replace_existing"):
+            # Rankmax is the source of truth for SEO on these projects, so the
+            # target's existing rank data is discarded wholesale rather than
+            # reconciled. Nothing GEO is touched — only SeoKeywordRank, its
+            # history and the derived daily metrics. The delete happens inside
+            # the same transaction as the import, so a failure leaves the
+            # project exactly as it was rather than emptied.
+            existing_kw = len(held)
+            existing_hist = SeoRankHistory.objects.filter(
+                seo_keyword_rank__domain=target).count()
+            w(self.style.WARNING(
+                f"  REPLACING       deleting all {existing_kw} tracked keywords and "
+                f"{existing_hist:,} history rows on this project"))
+            w(f"                  and importing {len(incoming)} from Rankmax in their place")
+            self._replace_all = True
+            return target
+
         clash = incoming & held
-        if clash:
+        if clash and not opts.get("skip_conflicts"):
             sample = ", ".join(repr(c[0]) for c in list(clash)[:3])
             raise CommandError(
                 f"'{target.name}' (id={target.id}) already tracks {len(clash)} of these "
                 f"{len(incoming)} keywords on the same platform, language and region "
                 f"(e.g. {sample}). Importing would put two rank histories on one keyword. "
-                f"Decide which side wins and clear the other first."
+                f"Decide which side wins and clear the other first, or pass --skip-conflicts "
+                f"to import the {len(incoming) - len(clash)} that do not collide."
             )
+        if clash:
+            # Named in full when few, sampled when many — the point is that a
+            # skipped keyword is always visible, never silently discarded.
+            shown = sorted(c[0] for c in clash)
+            w(self.style.WARNING(
+                f"  SKIPPING        {len(clash)} keyword(s) already tracked on this project; "
+                f"their existing history is kept:"))
+            for name_ in shown[:10]:
+                w(f"                    - {name_}")
+            if len(shown) > 10:
+                w(f"                    ... and {len(shown) - 10} more")
 
         held_count = len(held)
         if held_count:
@@ -395,6 +438,7 @@ class Command(BaseCommand):
 
         w(f"  merging into    id={target.id} '{target.name}' {target.url}")
         w(f"                  existing GEO keywords kept, auto_generate_prompts untouched")
+        self._skip_keys = clash
         return target
 
     def _dedupe(self, kws):
@@ -450,6 +494,20 @@ class Command(BaseCommand):
             # belong to the live project, not to Rankmax.
             domain = target
             counts["merged_into_existing_domain"] = 1
+
+            if self._replace_all:
+                # Inside the transaction, so a failed import cannot leave the
+                # project stripped. Deleting SeoKeywordRank cascades to its
+                # rank history; the daily metrics are derived and are rebuilt
+                # from the incoming data below.
+                kws_before = SeoKeywordRank.objects.filter(domain=domain).count()
+                hist_before = SeoRankHistory.objects.filter(seo_keyword_rank__domain=domain).count()
+                metrics_before = SeoDomainDailyMetrics.objects.filter(domain=domain).count()
+                SeoKeywordRank.objects.filter(domain=domain).delete()
+                SeoDomainDailyMetrics.objects.filter(domain=domain).delete()
+                counts["deleted_existing_keywords"] = kws_before
+                counts["deleted_existing_history"] = hist_before
+                counts["deleted_existing_metrics"] = metrics_before
         else:
             domain = Domain.objects.create(
                 name=name,
@@ -463,6 +521,22 @@ class Command(BaseCommand):
             counts["domains"] = 1
 
         kws, counts["duplicate_source_rows"] = self._dedupe(kws)
+
+        # Keys the merge guard flagged as already tracked on this project.
+        # Dropped after dedupe so the counts line up with the pre-flight, which
+        # already named every one of them.
+        if self._skip_keys:
+            before = len(kws)
+            kws = [
+                k for k in kws
+                if (
+                    (k.get("keyword") or "").strip()[:255],
+                    (k.get("platform") or "desktop").lower(),
+                    (k.get("language_code") or "en")[:8],
+                    (k.get("region") or "google.com")[:20],
+                ) not in self._skip_keys
+            ]
+            counts["skipped_already_tracked"] = before - len(kws)
 
         rank_rows = []
         for k in kws:
