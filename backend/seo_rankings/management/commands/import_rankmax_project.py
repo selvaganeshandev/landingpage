@@ -242,10 +242,15 @@ class Command(BaseCommand):
             raise CommandError(f"Group {group_id} has no domain_name")
 
         w = self.stdout.write
+        # Report on the deduped set, so the pre-flight figures are the ones
+        # that will actually be written rather than a raw source count.
+        kept, dropped = self._dedupe(kws)
+
         w(self.style.MIGRATE_HEADING(f"\nRankmax group {group_id} — {name}"))
         w(f"  domain          {url}")
         w(f"  status          {group.get('domain_status')}")
-        w(f"  keywords        {len(kws)}")
+        w(f"  keywords        {len(kept)}"
+          + (f"   ({len(kws)} source docs, {dropped} duplicate)" if dropped else ""))
 
         # Pre-flight: an existing domain is a MERGE, which this command does not
         # do. Refuse rather than half-merge into a live project.
@@ -265,7 +270,7 @@ class Command(BaseCommand):
         history_days = opts["history_days"]
         total_hist = 0
         spans = []
-        for k in kws:
+        for k in kept:
             rows = [] if opts["skip_history"] else self._rank_rows(k, history_days)
             total_hist += len(rows)
             if rows:
@@ -275,9 +280,9 @@ class Command(BaseCommand):
             w(f"  history         {total_hist:,} rows, {min(s[0] for s in spans)} → {max(s[1] for s in spans)}")
         else:
             w("  history         none (skipped)")
-        w(f"  country         {self._country_for(kws)}")
+        w(f"  country         {self._country_for(kept)}")
         w(f"  target org      {opts['org']}")
-        no_anchor = [k for k in kws if (k.get('rank') and not k.get('created_date'))]
+        no_anchor = [k for k in kept if (k.get('rank') and not k.get('created_date'))]
         if no_anchor:
             w(self.style.WARNING(
                 f"  {len(no_anchor)} keyword(s) have history but no created_date — "
@@ -307,6 +312,50 @@ class Command(BaseCommand):
 
     # ------------------------------------------------------------------ write
 
+    def _dedupe(self, kws):
+        """One source doc per tracking key, chosen deterministically.
+
+        Rankmax lets the same keyword be added to a project twice: Nysaa holds
+        80 pairs that share text, region, language and device, differing only in
+        `created_date` and their own crawl identity. Both are crawled every day
+        — the pairs' `lastranked_date` values sit 46 seconds apart — so their
+        histories disagree on up to 90 of 252 shared days purely through SERP
+        volatility. They are one tracked keyword billed and crawled twice, not
+        two things worth keeping apart.
+
+        The keeper is the doc with the longest history, tie-broken on the
+        earliest created_date. Without this the winner was whichever doc the
+        cursor happened to yield first, and the loser's history was dropped
+        silently by ignore_conflicts — the same rows, from a different crawl.
+
+        Returns (kept, dropped_count).
+        """
+        best = {}
+        dropped = 0
+        for k in kws:
+            text = (k.get("keyword") or "").strip()
+            if not text:
+                continue
+            key = (
+                text,
+                (k.get("platform") or "desktop").lower(),
+                (k.get("language_code") or "en")[:8],
+                (k.get("region") or "google.com")[:20],
+            )
+            current = best.get(key)
+            if current is None:
+                best[key] = k
+                continue
+            dropped += 1
+            rank_new, rank_cur = len(k.get("rank") or []), len(current.get("rank") or [])
+            if rank_new > rank_cur:
+                best[key] = k
+            elif rank_new == rank_cur:
+                cd_new, cd_cur = self._as_date(k.get("created_date")), self._as_date(current.get("created_date"))
+                if cd_new and cd_cur and cd_new < cd_cur:
+                    best[key] = k
+        return list(best.values()), dropped
+
     def _write(self, group, kws, opts, name, url):
         counts = Counter()
 
@@ -320,6 +369,8 @@ class Command(BaseCommand):
             # INIT so no engine picks this domain up.
         )
         counts["domains"] = 1
+
+        kws, counts["duplicate_source_rows"] = self._dedupe(kws)
 
         rank_rows = []
         for k in kws:
@@ -398,11 +449,6 @@ class Command(BaseCommand):
                 },
             )
             counts["seo_keyword_ranks"] += int(made)
-            # Rankmax itself sometimes holds the identical tracked item twice
-            # (same text, region, language and device). Those genuinely collapse
-            # to one row — counted so the collapse is visible rather than a
-            # silent discrepancy between the source count and what was written.
-            counts["duplicate_source_rows"] += int(not made)
 
             if opts["skip_history"]:
                 continue
