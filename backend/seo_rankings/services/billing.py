@@ -134,9 +134,13 @@ def region_key_for(country: Optional[str]) -> str:
     return "uae" if (country or "").strip().lower() in UAE_COUNTRIES else "row"
 
 
+# `display_currency` is presentation only — the rate card, the stored price and
+# every calculation stay in INR. UAE clients are invoiced in USD, so the screen
+# leads with USD and keeps the INR figure alongside it; converting for display
+# rather than storing a second price keeps one source of truth for money.
 REGIONS = [
-    {"key": "row", "label": "India & Other Regions"},
-    {"key": "uae", "label": "UAE"},
+    {"key": "row", "label": "India & Other Regions", "display_currency": CURRENCY},
+    {"key": "uae", "label": "UAE", "display_currency": "USD"},
 ]
 
 

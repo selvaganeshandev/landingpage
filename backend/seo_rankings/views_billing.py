@@ -9,6 +9,7 @@ the client sums the rows it receives and does no pricing arithmetic.
 """
 import logging
 from datetime import datetime, timedelta
+from decimal import Decimal
 from io import BytesIO
 
 from django.conf import settings
@@ -154,14 +155,79 @@ def _billing_regions(user, organisation_ids=None, as_of=None):
         buckets.setdefault(region_key_for(row.country), []).append(row)
 
     return [
-        {
-            "key": region["key"],
-            "label": region["label"],
-            "projects": [r.as_dict() for r in buckets.get(region["key"], [])],
-            **summarise(buckets.get(region["key"], [])),
-        }
+        _with_display_currency(
+            {
+                "key": region["key"],
+                "label": region["label"],
+                "projects": [r.as_dict() for r in buckets.get(region["key"], [])],
+                **summarise(buckets.get(region["key"], [])),
+            },
+            region.get("display_currency", CURRENCY),
+        )
         for region in REGIONS
     ]
+
+
+def _usd_rate(as_of, *, required: bool):
+    """The INR->USD rate for `as_of`, via services/fx (which caches in FxRate).
+
+    Two callers with different tolerances for failure, hence `required`:
+    an invoice must refuse to render rather than state a wrong amount, while
+    the billing screen falls back to showing INR. Both read the same rate from
+    the same source, so a figure on screen and the same figure on the invoice
+    for that date can never disagree.
+
+    Returns (Decimal rate, source) or (None, None) when not required.
+    """
+    from .services.fx import FxUnavailable, get_rate
+
+    try:
+        return get_rate(CURRENCY, "USD", as_of)
+    except FxUnavailable:
+        if required:
+            raise
+        logger.warning("No %s->USD rate for %s; showing %s.", CURRENCY, as_of, CURRENCY)
+        return None, None
+
+
+def _with_display_currency(region: dict, display_currency: str) -> dict:
+    """Attach converted amounts for a region invoiced in another currency.
+
+    Prices stay INR everywhere — this only adds a parallel figure for display.
+    Each row is converted individually and the region total is the sum of the
+    converted rows, so the footer always equals what the rows add up to on
+    screen. Converting the INR total separately would round differently and
+    leave the table not summing to its own total.
+
+    Today's rate, not a month-end one: this screen shows what is currently
+    being tracked, unlike an invoice, which must pin the rate at its time of
+    supply (see services/fx). If no rate can be obtained the region simply
+    falls back to INR — a billing page that renders in the wrong currency is
+    worse than one that renders in the original.
+    """
+    region["display_currency"] = CURRENCY
+    if display_currency == CURRENCY:
+        return region
+
+    # Same rate lookup the invoice uses (services/fx.get_rate), differing only
+    # in the date: an invoice pins the rate to its time of supply, this screen
+    # shows what is being tracked right now.
+    rate, source = _usd_rate(timezone.now().date(), required=False)
+    if rate is None:
+        return region
+
+    def convert(amount):
+        return float(round(Decimal(str(amount)) * Decimal(rate), 2))
+
+    for project in region["projects"]:
+        project["price_display"] = convert(project["price"])
+    region["display_currency"] = display_currency
+    region["fx_rate"] = float(rate)
+    region["fx_source"] = source
+    region["total_price_display"] = round(
+        sum(p["price_display"] for p in region["projects"]), 2
+    )
+    return region
 
 
 @api_view(["GET"])
@@ -392,10 +458,10 @@ def billing_invoice(request):
     # downloaded, so reissuing an old invoice reproduces the original figures.
     currency, fx = CURRENCY, None
     if is_export:
-        from .services.fx import FxUnavailable, get_rate
+        from .services.fx import FxUnavailable
         rate_date = (end - timedelta(days=1)).date()  # last day of the month
         try:
-            rate, source = get_rate("INR", "USD", rate_date)
+            rate, source = _usd_rate(rate_date, required=True)
         except FxUnavailable as exc:
             logger.error("Invoice FX unavailable: %s", exc)
             return Response(

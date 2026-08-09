@@ -35,6 +35,8 @@ interface BillingProject {
   currency: string;
   over_top_slab: boolean;
   organisation: string;
+  /** Present only in a region invoiced in another currency (see display_currency). */
+  price_display?: number;
 }
 
 interface BillingRegion {
@@ -45,6 +47,11 @@ interface BillingRegion {
   billable_projects: number;
   total_price: number;
   currency: string;
+  /** Currency this region is invoiced in. Equal to `currency` unless converted. */
+  display_currency: string;
+  total_price_display?: number;
+  fx_rate?: number;
+  fx_source?: string;
 }
 
 interface RatePlan {
@@ -71,6 +78,41 @@ interface BillingResponse {
 }
 
 const inr = (n: number) => n.toLocaleString("en-IN");
+
+const usd = (n: number) =>
+  n.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+
+/**
+ * An amount in the currency its region is invoiced in.
+ *
+ * UAE clients are billed in USD while the rate card is INR, so those rows lead
+ * with USD and keep the rupee figure beside it — the charge is still an INR
+ * amount underneath, and hiding that makes the number impossible to reconcile
+ * against the rate card or the invoice. Regions billed in INR render unchanged.
+ */
+const Money = ({
+  region, inrAmount, displayAmount, large,
+}: {
+  region: BillingRegion; inrAmount: number; displayAmount?: number; large?: boolean;
+}) => {
+  if (region.display_currency === region.currency || displayAmount == null) {
+    return (
+      <>
+        {inr(inrAmount)} <span className={large ? "text-sm" : "font-bold"}>{region.currency}</span>
+      </>
+    );
+  }
+  return (
+    <span className="inline-flex flex-col items-end leading-tight">
+      <span>
+        {usd(displayAmount)} <span className={large ? "text-sm" : "font-bold"}>{region.display_currency}</span>
+      </span>
+      <span className={cn("text-muted-foreground font-normal", large ? "text-xs" : "text-[10px]")}>
+        ({inr(inrAmount)} {region.currency})
+      </span>
+    </span>
+  );
+};
 
 /** "2026-07" -> "July 2026". Parsed as a plain Y/M so the label cannot shift a
  *  month across a timezone boundary the way new Date("2026-07") can. */
@@ -126,7 +168,8 @@ function RegionTable({ region, showOrg }: { region: BillingRegion; showOrg: bool
         <div className="text-right">
           <p className="text-xs text-muted-foreground">Total Price (all rows)</p>
           <p className="text-lg font-bold text-primary">
-            {inr(region.total_price)} <span className="text-sm">{region.currency}</span>
+            <Money region={region} inrAmount={region.total_price}
+                   displayAmount={region.total_price_display} large />
           </p>
         </div>
       </div>
@@ -149,7 +192,7 @@ function RegionTable({ region, showOrg }: { region: BillingRegion; showOrg: bool
                 <TableHead className="text-xs font-semibold py-2">PROJECT</TableHead>
                 <TableHead className="text-center text-xs font-semibold py-2 w-28 whitespace-nowrap">USED KEYWORD</TableHead>
                 <TableHead className="text-center text-xs font-semibold py-2 w-28 whitespace-nowrap">KEYWORD LIMIT</TableHead>
-                <TableHead className="text-center text-xs font-semibold py-2 w-28 whitespace-nowrap">PRICE</TableHead>
+                <TableHead className="text-right text-xs font-semibold py-2 w-32 whitespace-nowrap">PRICE</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
@@ -193,8 +236,8 @@ function RegionTable({ region, showOrg }: { region: BillingRegion; showOrg: bool
                   <TableCell className="text-center py-2 text-sm">
                     {p.keyword_limit > 0 ? inr(p.keyword_limit) : "—"}
                   </TableCell>
-                  <TableCell className="text-center py-2 text-sm">
-                    {inr(p.price)} <span className="font-bold">{p.currency}</span>
+                  <TableCell className="text-right py-2 text-sm">
+                    <Money region={region} inrAmount={p.price} displayAmount={p.price_display} />
                   </TableCell>
                 </TableRow>
               ))}
