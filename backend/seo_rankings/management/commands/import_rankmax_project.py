@@ -162,6 +162,24 @@ class Command(BaseCommand):
         return dt.date() if isinstance(dt, datetime.datetime) else dt
 
     @staticmethod
+    def _int(value, default=0):
+        """Coerce a Rankmax numeric field, which is often a string.
+
+        Rankmax stores these as text — search_volume arrives as '10' or '1600',
+        gsc_clicks as '0' — and uses word sentinels for "not fetched yet":
+        search_volume is 'init' on 78 Carrier India keywords. Django coerces
+        numeric strings happily and raises on the sentinels, so anything
+        non-numeric becomes `default` (None for nullable fields) rather than
+        failing the whole project.
+        """
+        if value is None or isinstance(value, bool):
+            return default
+        try:
+            return int(float(value))
+        except (TypeError, ValueError):
+            return default
+
+    @staticmethod
     def _host(url):
         return (url or "").replace("https://", "").replace("http://", "").strip("/").strip()
 
@@ -198,7 +216,7 @@ class Command(BaseCommand):
             return []
         last = len(series) - 1
         rows = [
-            (start + datetime.timedelta(days=last - i), int(p or 0))
+            (start + datetime.timedelta(days=last - i), self._int(p))
             for i, p in enumerate(series)
         ]
         rows.reverse()  # oldest first, so callers can slice the recent tail
@@ -327,7 +345,7 @@ class Command(BaseCommand):
             series = k.get("rank") or []
             # rank[0] — the array is newest-first, so index 0 is today's
             # position. It agrees with `ranknow` on every keyword checked.
-            rank_now = int(series[0] or 0) if series else int(k.get("ranknow") or 0)
+            rank_now = self._int(series[0]) if series else self._int(k.get("ranknow"))
 
             # Keyed on Rankmax's own tracking key: text + region + language +
             # device. One Keyword row can therefore carry several SeoKeywordRank
@@ -342,15 +360,15 @@ class Command(BaseCommand):
                 region=(k.get("region") or "google.com")[:20],
                 defaults={
                     "rank_now": rank_now,
-                    "top_rank": k.get("top_rank") or None,
-                    "rank_since_start": int(k.get("rank_sincestart") or 0),
-                    "day_val": int(k.get("dayval") or 0),
+                    "top_rank": self._int(k.get("top_rank"), None) or None,
+                    "rank_since_start": self._int(k.get("rank_sincestart")),
+                    "day_val": self._int(k.get("dayval")),
                     "day_mark": (k.get("daymark") or "-")[:5],
-                    "week_val": int(k.get("weekval") or 0),
+                    "week_val": self._int(k.get("weekval")),
                     "week_mark": (k.get("weekmark") or "-")[:5],
-                    "half_month_val": int(k.get("halfmonthval") or 0),
+                    "half_month_val": self._int(k.get("halfmonthval")),
                     "half_month_mark": (k.get("halfmonthmark") or "-")[:5],
-                    "month_val": int(k.get("monthval") or 0),
+                    "month_val": self._int(k.get("monthval")),
                     "month_mark": (k.get("monthmark") or "-")[:5],
                     "status_from_start": (k.get("status_from_start") or "-")[:5],
                     "featured_snippet": bool(k.get("featured_snippet")),
@@ -361,12 +379,12 @@ class Command(BaseCommand):
                     "total_review": str(k.get("total_review") or "-")[:15],
                     "snippets_details": k.get("snippets_details") or {},
                     "keyword_snippet": k.get("keyword_snippet") or {},
-                    "gsc_clicks": int(k.get("gsc_clicks") or 0),
-                    "gsc_impressions": int(k.get("gsc_impressions") or 0),
+                    "gsc_clicks": self._int(k.get("gsc_clicks")),
+                    "gsc_impressions": self._int(k.get("gsc_impressions")),
                     "site_url": (k.get("site_url") or "")[:500],
                     "target_url": (k.get("target") or "")[:500],
                     "search_results": str(k.get("search_results") or "-")[:50],
-                    "search_volume": k.get("search_volume") or None,
+                    "search_volume": self._int(k.get("search_volume"), None),
                     "isocode": (k.get("isocode") or "us")[:5],
                     "geo_target": (k.get("geo_target") or "")[:255],
                     "geo_target_uule": (k.get("geo_target_uule") or "")[:500],
@@ -376,7 +394,7 @@ class Command(BaseCommand):
                     "last_ranked_date": self._as_datetime(k.get("lastranked_date")),
                     "cannibalisation": k.get("cannibalisation") or [],
                     "tags": k.get("tags") or [],
-                    "favour": int(k.get("favour") or 0),
+                    "favour": self._int(k.get("favour")),
                 },
             )
             counts["seo_keyword_ranks"] += int(made)
