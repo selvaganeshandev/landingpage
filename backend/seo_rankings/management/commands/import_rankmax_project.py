@@ -88,6 +88,10 @@ class Command(BaseCommand):
                             help="Rankmax group.id, e.g. 6720 for YCH")
         parser.add_argument("--org", type=int, default=1,
                             help="Target organisation id (default 1, PivotRoots)")
+        parser.add_argument("--merge-into", type=int, default=0,
+                            help="Attach to an existing PromptMaxx domain id instead of "
+                                 "creating one. Only permitted when that domain holds no "
+                                 "SEO data — see _resolve_target.")
         parser.add_argument("--dry-run", action="store_true",
                             help="Report exactly what would be written, then roll back.")
         parser.add_argument("--history-days", type=int, default=0,
@@ -252,20 +256,7 @@ class Command(BaseCommand):
         w(f"  keywords        {len(kept)}"
           + (f"   ({len(kws)} source docs, {dropped} duplicate)" if dropped else ""))
 
-        # Pre-flight: an existing domain is a MERGE, which this command does not
-        # do. Refuse rather than half-merge into a live project.
-        existing = Domain.objects.filter(organisation_id=opts["org"]).filter(url=url).first()
-        if not existing:
-            for d in Domain.objects.filter(organisation_id=opts["org"]):
-                if self._host(d.url).lower().removeprefix("www.") == host.lower().removeprefix("www."):
-                    existing = d
-                    break
-        if existing:
-            raise CommandError(
-                f"'{existing.name}' (id={existing.id}) already tracks {existing.url} in org "
-                f"{opts['org']}. This command only creates NEW projects — merging into an "
-                f"existing one needs a separate decision about which side wins."
-            )
+        target = self._resolve_target(opts, host, url, w)
 
         history_days = opts["history_days"]
         total_hist = 0
@@ -280,7 +271,13 @@ class Command(BaseCommand):
             w(f"  history         {total_hist:,} rows, {min(s[0] for s in spans)} → {max(s[1] for s in spans)}")
         else:
             w("  history         none (skipped)")
-        w(f"  country         {self._country_for(kept)}")
+        # In merge mode the target's own country stands — Rankmax's is shown
+        # only so the difference is visible, never applied.
+        if target is not None:
+            w(f"  country         {target.country}   (kept; rankmax says "
+              f"{self._country_for(kept)})")
+        else:
+            w(f"  country         {self._country_for(kept)}")
         w(f"  target org      {opts['org']}")
         no_anchor = [k for k in kept if (k.get('rank') and not k.get('created_date'))]
         if no_anchor:
@@ -294,7 +291,7 @@ class Command(BaseCommand):
 
         try:
             with transaction.atomic():
-                created = self._write(group, kws, opts, name, url)
+                created = self._write(group, kws, opts, name, url, target)
                 w(self.style.SUCCESS("Written:"))
                 for label, n in created.items():
                     w(f"  {label:<22} {n:,}")
@@ -311,6 +308,62 @@ class Command(BaseCommand):
           "generate GEO prompts (auto_generate_prompts=False).")
 
     # ------------------------------------------------------------------ write
+
+    def _resolve_target(self, opts, host, url, w):
+        """The Domain to import into, or None to create a fresh one.
+
+        Default behaviour is unchanged: a project that already exists is a
+        merge, and a merge needs a decision about which side's rank data wins,
+        so the command refuses.
+
+        --merge-into names that decision explicitly, and is only permitted when
+        the target holds NO SEO data at all. That restriction is the whole
+        safety of this mode: with nothing to collide with, the import is purely
+        additive and there is no "which side wins" question to get wrong. A
+        project that already has rank history must not be merged this way — its
+        existing positions and the incoming ones would silently interleave on
+        one chart.
+        """
+        merge_id = opts.get("merge_into") or 0
+
+        existing = Domain.objects.filter(organisation_id=opts["org"], url=url).first()
+        if not existing:
+            for d in Domain.objects.filter(organisation_id=opts["org"]):
+                if self._host(d.url).lower().removeprefix("www.") == host.lower().removeprefix("www."):
+                    existing = d
+                    break
+
+        if not merge_id:
+            if existing:
+                raise CommandError(
+                    f"'{existing.name}' (id={existing.id}) already tracks {existing.url} in org "
+                    f"{opts['org']}. This command only creates NEW projects — merge it with "
+                    f"--merge-into {existing.id}, which is allowed only when that project holds "
+                    f"no SEO data."
+                )
+            return None
+
+        target = Domain.objects.filter(id=merge_id, organisation_id=opts["org"]).first()
+        if not target:
+            raise CommandError(f"No domain id={merge_id} in organisation {opts['org']}.")
+        if existing and existing.id != target.id:
+            raise CommandError(
+                f"--merge-into {merge_id} ('{target.name}') does not match the project that "
+                f"already tracks {url} — that is '{existing.name}' (id={existing.id})."
+            )
+
+        # The guard that makes this safe.
+        has_ranks = SeoKeywordRank.objects.filter(domain=target).count()
+        if has_ranks:
+            raise CommandError(
+                f"'{target.name}' (id={target.id}) already holds {has_ranks} tracked keywords "
+                f"with rank history. Merging into it would interleave two sets of positions on "
+                f"the same charts. Decide which side wins and clear the other first."
+            )
+
+        w(f"  merging into    id={target.id} '{target.name}' {target.url}")
+        w(f"                  existing GEO keywords kept, auto_generate_prompts untouched")
+        return target
 
     def _dedupe(self, kws):
         """One source doc per tracking key, chosen deterministically.
@@ -356,19 +409,26 @@ class Command(BaseCommand):
                     best[key] = k
         return list(best.values()), dropped
 
-    def _write(self, group, kws, opts, name, url):
+    def _write(self, group, kws, opts, name, url, target=None):
         counts = Counter()
 
-        domain = Domain.objects.create(
-            name=name,
-            url=url,
-            organisation_id=opts["org"],
-            country=self._country_for(kws),
-            # Everything GEO stays untouched: no description, niches, tone,
-            # business model, or competitor config. processing_status stays
-            # INIT so no engine picks this domain up.
-        )
-        counts["domains"] = 1
+        if target is not None:
+            # Merge: attach to the existing project and change nothing about
+            # it. Name, url, country, processing_status and every GEO field
+            # belong to the live project, not to Rankmax.
+            domain = target
+            counts["merged_into_existing_domain"] = 1
+        else:
+            domain = Domain.objects.create(
+                name=name,
+                url=url,
+                organisation_id=opts["org"],
+                country=self._country_for(kws),
+                # Everything GEO stays untouched: no description, niches, tone,
+                # business model, or competitor config. processing_status stays
+                # INIT so no engine picks this domain up.
+            )
+            counts["domains"] = 1
 
         kws, counts["duplicate_source_rows"] = self._dedupe(kws)
 
@@ -387,7 +447,12 @@ class Command(BaseCommand):
                     "source": "rankmax-import",
                 },
             )
+            # `defaults` applies on create only, so a keyword that already
+            # exists keeps its own auto_generate_prompts and source. That
+            # matters in --merge-into: the target's GEO keywords must not be
+            # switched into or out of prompt generation by an SEO import.
             counts["keywords"] += int(made)
+            counts["existing_keywords_reused"] += int(not made)
 
             platform = (k.get("platform") or "desktop").lower()
             if platform not in PLATFORMS:
