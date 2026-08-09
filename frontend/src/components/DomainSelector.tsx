@@ -233,6 +233,14 @@ export const DomainSelector = () => {
 
   const selectedFaviconUrl = selectedDomain ? getFaviconUrl(selectedDomain.url, 32) : null;
 
+  // Footer counts. Processing and failed are surfaced only when non-zero, so a
+  // healthy account shows a plain project count rather than two zeroes.
+  const processingCount = domains.filter(
+    (d) => d.processing_status && ['INIT', 'SCHD', 'PROC'].includes(d.processing_status),
+  ).length;
+  const failedCount = domains.filter((d) => d.processing_status === 'FAIL').length;
+  const isSearching = query.trim().length > 0;
+
   const filtered = domains.filter((d) => {
     const q = query.trim().toLowerCase();
     if (!q) return true;
@@ -363,9 +371,37 @@ export const DomainSelector = () => {
             )}
           </div>
 
-          {canAddDomain && (
-            <div className="flex justify-end pt-2">
+          {/* Footer. Bordered and flush to the dialog edges (-mx-6 -mb-6 against
+              DialogContent's p-6) so the scrolling list has a visible end —
+              without it the rows ran straight into the button. Renders even
+              when the user cannot add a domain, because the counts are the
+              point: with fifty-odd projects, "how many are there" and "how many
+              did my search match" are not answerable by eye. */}
+          <div className="-mx-6 -mb-6 mt-2 flex flex-wrap items-center justify-between gap-3 border-t border-border px-6 py-3">
+            <p className="text-xs text-muted-foreground">
+              {isSearching ? (
+                <>
+                  <span className="font-medium text-foreground">{filtered.length}</span>
+                  {" of "}
+                  <span className="font-medium text-foreground">{domains.length}</span>
+                  {" projects match"}
+                </>
+              ) : (
+                <>
+                  <span className="font-medium text-foreground">{domains.length}</span>
+                  {domains.length === 1 ? " project" : " projects"}
+                </>
+              )}
+              {processingCount > 0 && (
+                <span className="text-orange-500"> · {processingCount} processing</span>
+              )}
+              {failedCount > 0 && (
+                <span className="text-destructive"> · {failedCount} failed</span>
+              )}
+            </p>
+            {canAddDomain && (
               <Button
+                size="sm"
                 onClick={() => {
                   setOpen(false);
                   setAddDomainOpen(true);
@@ -374,8 +410,8 @@ export const DomainSelector = () => {
                 <Plus className="h-4 w-4 mr-2" />
                 Add Domain
               </Button>
-            </div>
-          )}
+            )}
+          </div>
         </DialogContent>
       </Dialog>
 
