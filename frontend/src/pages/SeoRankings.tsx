@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useRef } from "react";
+import { useState, useEffect, useCallback, useMemo, useRef } from "react";
 import { useNavigate } from "react-router-dom";
 import { apiClient } from "@/services/api";
 import { useDomainStore } from "@/stores/domainStore";
@@ -187,6 +187,7 @@ function mapKeywordForUI(kw: SeoKeyword) {
     timeAgo: kw.last_ranked_date ? getTimeAgo(new Date(kw.last_ranked_date)) : '',
     country: kw.isocode?.toUpperCase() || 'US',
     region: kw.region || '',
+    language: kw.language_code || '',
     platform: kw.platform,
     autoCallStatus: kw.auto_call_status,
   };
@@ -752,6 +753,14 @@ const SeoRankings = () => {
   })();
 
   const filteredKeywords = sortedKeywords;
+
+  // Rankmax tracks one term separately per language, so a project like Crocs
+  // Saudi holds the same keyword twice (ar-sa and en) with two rank histories.
+  // The badge only earns its place when a project actually spans languages.
+  const multiLanguage = useMemo(
+    () => new Set(sortedKeywords.map((k) => k.language).filter(Boolean)).size > 1,
+    [sortedKeywords],
+  );
 
   const handleSort = (key: SortKey) => {
     if (sortKey === key) {
@@ -1915,12 +1924,26 @@ const SeoRankings = () => {
                             className="w-5 h-5 object-cover rounded-full shadow-sm flex-shrink-0"
                           />
                           <div className="min-w-0">
-                            <p
-                              className="font-medium text-sm truncate cursor-pointer hover:text-primary hover:underline"
-                              onClick={() => navigate(`/seo-rankings/${keyword.id}`)}
-                            >
-                              {keyword.keyword}
-                            </p>
+                            <div className="flex items-center gap-1.5 min-w-0">
+                              <p
+                                className="font-medium text-sm truncate cursor-pointer hover:text-primary hover:underline"
+                                onClick={() => navigate(`/seo-rankings/${keyword.id}`)}
+                              >
+                                {keyword.keyword}
+                              </p>
+                              {/* Only when this project actually tracks more
+                                  than one language — on a single-language
+                                  project the badge is noise on every row. */}
+                              {multiLanguage && keyword.language && (
+                                <Badge
+                                  variant="secondary"
+                                  className="text-[10px] px-1.5 py-0 flex-shrink-0 uppercase"
+                                  title={`Tracked in ${keyword.language} on ${keyword.region}`}
+                                >
+                                  {keyword.language}
+                                </Badge>
+                              )}
+                            </div>
                             {keyword.url ? (
                               <a
                                 href={keyword.url.startsWith('http') ? keyword.url : `https://${keyword.url}`}

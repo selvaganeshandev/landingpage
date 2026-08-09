@@ -303,10 +303,17 @@ class Command(BaseCommand):
             # rank[-1], not ranknow — see module docstring.
             rank_now = int(series[-1] or 0) if series else int(k.get("ranknow") or 0)
 
+            # Keyed on Rankmax's own tracking key: text + region + language +
+            # device. One Keyword row can therefore carry several SeoKeywordRank
+            # rows — the Arabic and English variants of a term on google.com.sa
+            # are two tracked items with two rank histories, exactly as Rankmax
+            # holds them.
             seo, made = SeoKeywordRank.objects.get_or_create(
                 keyword=kw_obj,
                 domain=domain,
                 platform=platform,
+                language_code=(k.get("language_code") or "en")[:8],
+                region=(k.get("region") or "google.com")[:20],
                 defaults={
                     "rank_now": rank_now,
                     "top_rank": k.get("top_rank") or None,
@@ -334,9 +341,7 @@ class Command(BaseCommand):
                     "target_url": (k.get("target") or "")[:500],
                     "search_results": str(k.get("search_results") or "-")[:50],
                     "search_volume": k.get("search_volume") or None,
-                    "region": (k.get("region") or "google.com")[:20],
                     "isocode": (k.get("isocode") or "us")[:5],
-                    "language_code": (k.get("language_code") or "en")[:8],
                     "geo_target": (k.get("geo_target") or "")[:255],
                     "geo_target_uule": (k.get("geo_target_uule") or "")[:500],
                     "crawl_url": k.get("crawlurl") or "",
@@ -349,6 +354,11 @@ class Command(BaseCommand):
                 },
             )
             counts["seo_keyword_ranks"] += int(made)
+            # Rankmax itself sometimes holds the identical tracked item twice
+            # (same text, region, language and device). Those genuinely collapse
+            # to one row — counted so the collapse is visible rather than a
+            # silent discrepancy between the source count and what was written.
+            counts["duplicate_source_rows"] += int(not made)
 
             if opts["skip_history"]:
                 continue
