@@ -3,6 +3,7 @@ import { apiClient } from "@/services/api";
 import { useDomainStore } from "@/stores/domainStore";
 import { useToast } from "@/hooks/use-toast";
 import { Card, CardContent } from "@/components/ui/card";
+import { MetricCard } from "@/components/MetricCard";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
@@ -122,29 +123,15 @@ const fmtDate = (iso: string | null) =>
  *  A capped pull is ~10 sequential DataForSEO calls, so seconds, not minutes. */
 const POLL_MS = 4000;
 
-/** Spam score is 0-100 and only meaningful at the top end. */
+/** Spam score is 0-100 and only meaningful at the top end. Returned as a theme
+ *  colour name so it can drive MetricCard's icon tint, which is how severity is
+ *  signalled on every other metric surface. */
 const spamTone = (score: number) =>
-  score >= 60 ? "text-destructive" : score >= 30 ? "text-amber-500" : "text-muted-foreground";
+  score >= 60 ? "destructive" : score >= 30 ? "warning" : "primary";
 
-const StatTile = ({
-  label, value, hint, icon: Icon, tone,
-}: {
-  label: string; value: string; hint?: string;
-  icon: React.ElementType; tone?: string;
-}) => (
-  <Card className="border border-border">
-    <CardContent className="p-4">
-      <div className="flex items-start justify-between gap-2">
-        <div className="min-w-0">
-          <p className="text-xs text-muted-foreground truncate">{label}</p>
-          <p className={cn("text-2xl font-bold mt-1", tone)}>{value}</p>
-          {hint && <p className="text-[11px] text-muted-foreground mt-0.5">{hint}</p>}
-        </div>
-        <Icon className="h-4 w-4 text-muted-foreground flex-shrink-0" />
-      </div>
-    </CardContent>
-  </Card>
-);
+/** Table cells still need the raw class rather than a colour name. */
+const spamTextTone = (score: number) =>
+  score >= 60 ? "text-destructive" : score >= 30 ? "text-warning" : "text-muted-foreground";
 
 /** Breakdown dicts come back already aggregated from DataForSEO's summary
  *  call, so these bars cost nothing extra to render. */
@@ -481,28 +468,45 @@ export default function SeoBacklinks() {
         </Alert>
       ) : null}
 
-      {/* Headline metrics */}
-      <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3">
-        <StatTile label="Domain rank" value={fmt(snapshot.rank)} hint="0–1000" icon={TrendingUp} />
-        <StatTile label="Backlinks" value={fmt(snapshot.backlinks)} icon={Link2} />
-        <StatTile label="Referring domains" value={fmt(snapshot.referring_main_domains)} icon={Globe} />
-        <StatTile
-          label="Spam score"
+      {/* Headline metrics — the shared MetricCard, as on the dashboard. */}
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6 gap-6">
+        <MetricCard
+          title="Domain rank"
+          value={fmt(snapshot.rank)}
+          icon={<TrendingUp />}
+          tooltip="DataForSEO's authority score for the whole domain, from 0 to 1000. It reflects the strength of everything linking to you, and moves slowly."
+        />
+        <MetricCard
+          title="Backlinks"
+          value={fmt(snapshot.backlinks)}
+          icon={<Link2 />}
+          tooltip="Every inbound link found across the profile, including several from the same site."
+        />
+        <MetricCard
+          title="Referring domains"
+          value={fmt(snapshot.referring_main_domains)}
+          icon={<Globe />}
+          tooltip="How many distinct websites link to you. Usually a better measure of reach than the raw backlink count."
+        />
+        <MetricCard
+          title="Spam score"
           value={`${snapshot.backlinks_spam_score}%`}
-          icon={ShieldAlert}
-          tone={spamTone(snapshot.backlinks_spam_score)}
+          icon={<ShieldAlert />}
+          iconColor={spamTone(snapshot.backlinks_spam_score)}
+          tooltip="How much of the profile comes from low-quality sources, from 0 to 100. Only worth acting on at the high end."
         />
-        <StatTile
-          label="Broken backlinks"
+        <MetricCard
+          title="Broken backlinks"
           value={fmt(snapshot.broken_backlinks)}
-          hint="Point at a dead page"
-          icon={AlertTriangle}
+          icon={<AlertTriangle />}
+          iconColor={snapshot.broken_backlinks > 0 ? "warning" : "primary"}
+          tooltip="Links pointing at a page that no longer loads. Each one is earned authority being thrown away, and is usually fixable with a redirect."
         />
-        <StatTile
-          label="Referring IPs"
+        <MetricCard
+          title="Referring IPs"
           value={fmt(snapshot.referring_ips)}
-          hint={`${fmt(snapshot.referring_subnets)} subnets`}
-          icon={Globe}
+          icon={<Globe />}
+          tooltip={`Distinct IP addresses sending links, across ${fmt(snapshot.referring_subnets)} subnets. Many links from one IP often mean one network rather than genuine independent coverage.`}
         />
       </div>
 
@@ -694,7 +698,7 @@ export default function SeoBacklinks() {
                       </a>
                     </TableCell>
                     <TableCell className="py-2 text-sm text-center">{fmt(r.domain_from_rank)}</TableCell>
-                    <TableCell className={cn("py-2 text-sm text-center", spamTone(r.backlink_spam_score))}>
+                    <TableCell className={cn("py-2 text-sm text-center", spamTextTone(r.backlink_spam_score))}>
                       {r.backlink_spam_score}%
                     </TableCell>
                     <TableCell className="py-2 text-center">
