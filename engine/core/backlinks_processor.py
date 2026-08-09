@@ -84,13 +84,42 @@ def row_caps() -> Dict[str, int]:
     return caps
 
 
-def _credentials() -> Tuple[str, str]:
+def _credentials(organisation=None) -> Tuple[str, str]:
+    """Credentials for this fetch: the organisation's own, else the system pair.
+
+    An organisation that supplies its own DataForSEO account in Organization
+    Settings is billed on that account. Both halves must be present — a login
+    with no password is a misconfiguration, and pairing it with the system
+    password would silently bill the wrong account.
+    """
+    if organisation is not None:
+        login = (getattr(organisation, "dataforseo_login", "") or "").strip()
+        encrypted = getattr(organisation, "dataforseo_password_enc", None)
+        if login and encrypted:
+            try:
+                from shared_models.crypto import decrypt_value
+                password = decrypt_value(encrypted)
+            except Exception:
+                logger.exception(
+                    "[BL] Could not decrypt the DataForSEO password for org %s — "
+                    "falling back to the system account.", getattr(organisation, "id", "?"),
+                )
+                password = ""
+            if password:
+                return login, password
+        if login and not encrypted:
+            logger.warning(
+                "[BL] Org %s has a DataForSEO login with no password — using the "
+                "system account.", getattr(organisation, "id", "?"),
+            )
+
     login = getattr(settings, "DATAFORSEO_LOGIN", None)
     password = getattr(settings, "DATAFORSEO_PASSWORD", None)
     if not login or not password:
         raise DataForSeoBacklinksError(
             "DATAFORSEO_LOGIN / DATAFORSEO_PASSWORD are not configured. "
-            "Set them in engine/.env."
+            "Set them in engine/.env, or give this organisation its own "
+            "credentials in Organization Settings."
         )
     return login, password
 
@@ -132,8 +161,8 @@ class BacklinksClient:
     rather than an estimate.
     """
 
-    def __init__(self):
-        self.auth = _credentials()
+    def __init__(self, organisation=None):
+        self.auth = _credentials(organisation)
         self.cost = 0.0
         self.requests_made = 0
 
@@ -432,7 +461,15 @@ def run_snapshot(snapshot_id: int) -> dict:
     snapshot.status = 'RUN'
     snapshot.save(update_fields=['status'])
 
-    client = BacklinksClient()
+    # Bill the owning organisation's own DataForSEO account when it has one.
+    organisation = None
+    try:
+        from shared_models.models import Organisation
+        organisation = Organisation.objects.filter(id=domain.organisation_id).first()
+    except Exception:
+        logger.exception("[BL] Could not load the organisation for domain %s", domain.id)
+
+    client = BacklinksClient(organisation)
     caps = row_caps()
 
     try:

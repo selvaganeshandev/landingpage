@@ -2448,6 +2448,20 @@ export const apiClient = {
   getSeoOpportunityDetail: (seoKwId: string | number) =>
     apiRequest(`/seo/opportunities/${seoKwId}/`),
 
+  // ----- DataForSEO credentials (Organization Settings -> API Keys) -----
+  getDataForSeoCredentials: () => apiRequest('/auth/organization/dataforseo/'),
+
+  saveDataForSeoCredentials: (data: { login: string; password: string }) =>
+    apiRequest('/auth/organization/dataforseo/', {
+      method: 'PUT',
+      body: JSON.stringify(data),
+    }),
+
+  clearDataForSeoCredentials: () =>
+    apiRequest('/auth/organization/dataforseo/', { method: 'DELETE' }),
+
+  revealDataForSeoPassword: () => apiRequest('/auth/organization/dataforseo/reveal/'),
+
   // ----- Backlinks (DataForSEO) -----
   // Fetching is manual and rate-limited to once a month per project; the
   // backend returns 429 with `next_refresh_allowed_at` when it is too soon.

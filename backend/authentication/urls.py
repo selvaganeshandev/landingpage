@@ -11,6 +11,7 @@ from .auth_views import (
     delete_permission, get_available_modules, bulk_assign_permissions,
     revoke_all_permissions, grant_all_permissions, get_permission_summary,
     organization_management, reveal_api_key, team_members, team_member_management,
+    dataforseo_credentials, reveal_dataforseo_password,
     forgot_password, reset_password, verify_reset_token,
     content_generation_key, reveal_content_key, content_generation_usage,
     reveal_admin_key
@@ -53,6 +54,8 @@ urlpatterns = [
     # Organization Management APIs
     path('organization/', organization_management, name='organization_management'),
     path('organization/api-keys/<str:provider>/reveal/', reveal_api_key, name='reveal_api_key'),
+    path('organization/dataforseo/', dataforseo_credentials, name='dataforseo_credentials'),
+    path('organization/dataforseo/reveal/', reveal_dataforseo_password, name='reveal_dataforseo_password'),
 
     # Dedicated Content Generation key (Claude) — super admin only
     path('organization/content-key/', content_generation_key, name='content_generation_key'),

@@ -6,6 +6,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { Label } from "@/components/ui/label";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { DataForSeoCredentialsCard } from "@/components/DataForSeoCredentialsCard";
 import Clients from "@/pages/Clients";
 import InvoiceDetailsTab from "@/components/InvoiceDetailsTab";
 import { Badge } from "@/components/ui/badge";
@@ -2072,6 +2073,10 @@ export default function OrganizationSettings() {
                 </div>
               </CardContent>
             </Card>
+
+            {/* Not an LLM provider, so it sits in its own card rather than the
+                grid above — different auth shape, and a different bill. */}
+            <DataForSeoCredentialsCard />
           </TabsContent>
         )}
 

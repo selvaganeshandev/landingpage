@@ -270,6 +270,27 @@ class Organisation(models.Model):
     def content_admin_key(self, value):
         self.content_admin_api_key = encrypt_value(value) if value else None
 
+    # ----- DataForSEO (backlinks + keyword search volume) -----
+    # Not an LLM provider, so deliberately outside LLM_PROVIDERS / BYOK: it is
+    # never probed as a chat model and never appears in that list. It also
+    # authenticates with HTTP Basic rather than a bearer token, hence two
+    # fields — the login is an email address and is not a secret, so only the
+    # password is encrypted.
+    dataforseo_login = models.CharField(
+        max_length=255, blank=True, default='',
+        help_text="DataForSEO account login (an email address; not secret)",
+    )
+    dataforseo_password_enc = models.TextField(
+        blank=True, null=True, help_text="Encrypted DataForSEO API password",
+    )
+
+    @property
+    def dataforseo_password(self):
+        return decrypt_value(self.dataforseo_password_enc)
+
+    @dataforseo_password.setter
+    def dataforseo_password(self, value):
+        self.dataforseo_password_enc = encrypt_value(value) if value else None
 
     class Meta:
         db_table = 'organisations'
