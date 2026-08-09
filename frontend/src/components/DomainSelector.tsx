@@ -371,13 +371,16 @@ export const DomainSelector = () => {
             )}
           </div>
 
-          {/* Footer. Bordered and flush to the dialog edges (-mx-6 -mb-6 against
-              DialogContent's p-6) so the scrolling list has a visible end —
-              without it the rows ran straight into the button. Renders even
-              when the user cannot add a domain, because the counts are the
-              point: with fifty-odd projects, "how many are there" and "how many
-              did my search match" are not answerable by eye. */}
-          <div className="-mx-6 -mb-6 mt-2 flex flex-wrap items-center justify-between gap-3 border-t border-border px-6 py-3">
+          {/* Footer. Flush to the dialog edges: -mx-6 -mb-6 cancels
+              DialogContent's p-6, and -mt-4 cancels its grid `gap-4` — without
+              that the border floated below a band of empty dialog background
+              rather than sitting on the list's bottom edge. rounded-b-lg keeps
+              the tinted bar inside the dialog's own corner radius.
+
+              Renders even when the user cannot add a domain, because the counts
+              are the point: with fifty-odd projects, "how many are there" and
+              "how many did my search match" are not answerable by eye. */}
+          <div className="-mx-6 -mb-6 -mt-4 flex flex-wrap items-center justify-between gap-3 rounded-b-lg border-t border-border bg-muted/30 px-6 py-3">
             <p className="text-xs text-muted-foreground">
               {isSearching ? (
                 <>
