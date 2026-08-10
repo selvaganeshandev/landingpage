@@ -1554,3 +1554,88 @@ def reveal_dataforseo_password(request):
     response['Cache-Control'] = 'no-store'
     response['Pragma'] = 'no-cache'
     return response
+
+
+# ---------------------------------------------------------------------------
+# OpenRouter balance
+# ---------------------------------------------------------------------------
+# Every tracked prompt for ChatGPT, Claude and Perplexity bills to this one
+# account, so "how much is left" is the question anyone opening the API Keys
+# screen actually has. OpenRouter answers it for free — no tokens, no model
+# call — which is the same reason the DataForSEO balance is shown there.
+
+@api_view(['GET'])
+@permission_classes([IsAuthenticated])
+def openrouter_balance(request):
+    """Live credit balance for the OpenRouter account in use.
+
+    Read-only and free. Cached briefly so opening the settings page repeatedly
+    does not hammer the endpoint, but short enough that a top-up shows up
+    without waiting.
+    """
+    import requests
+
+    if request.user.role != 'super_admin':
+        return Response(
+            {'error': 'Only super administrators can view the balance'},
+            status=status.HTTP_403_FORBIDDEN,
+        )
+
+    org = request.user.organisation
+    cache_key = f'org_{org.id}_openrouter_balance'
+    cached = cache.get(cache_key)
+    if cached:
+        return Response(cached)
+
+    # Same resolution order the engine uses: this organisation's own key if it
+    # has one, otherwise the system key.
+    key = None
+    encrypted = getattr(org, 'openrouter_api_key', None)
+    if encrypted:
+        try:
+            key = decrypt_value(encrypted)
+        except Exception:
+            key = None
+    if not key:
+        key = getattr(settings, 'OPENROUTER_API_KEY', '') or ''
+
+    if not key:
+        payload = {'configured': False, 'balance': None,
+                   'error': 'No OpenRouter key configured.'}
+        response = Response(payload)
+        response['Cache-Control'] = 'no-store'
+        return response
+
+    try:
+        r = requests.get(
+            'https://openrouter.ai/api/v1/credits',
+            headers={'Authorization': f'Bearer {key}'},
+            timeout=10,
+        )
+        if r.status_code == 401:
+            payload = {'configured': True, 'balance': None,
+                       'error': 'The key was rejected.'}
+        else:
+            r.raise_for_status()
+            data = r.json().get('data') or {}
+            credits = float(data.get('total_credits') or 0)
+            used = float(data.get('total_usage') or 0)
+            payload = {
+                'configured': True,
+                # What is actually left to spend. OpenRouter reports the two
+                # halves separately and never the difference, which is the one
+                # number worth showing.
+                'balance': round(credits - used, 2),
+                'total_credits': round(credits, 2),
+                'total_usage': round(used, 2),
+                'error': '',
+            }
+            cache.set(cache_key, payload, 120)
+    except Exception as exc:
+        logger.warning("OpenRouter balance lookup failed: %s", exc)
+        payload = {'configured': True, 'balance': None,
+                   'error': 'Could not reach OpenRouter.'}
+
+    response = Response(payload)
+    response['Cache-Control'] = 'no-store'
+    return response

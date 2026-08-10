@@ -2471,6 +2471,10 @@ export const apiClient = {
   },
 
   // ----- DataForSEO credentials (Organization Settings -> API Keys) -----
+  // Free to read — no tokens, no model call. Every tracked prompt for ChatGPT,
+  // Claude and Perplexity bills to this one account.
+  getOpenRouterBalance: () => apiRequest('/auth/organization/openrouter/balance/'),
+
   getDataForSeoCredentials: () => apiRequest('/auth/organization/dataforseo/'),
 
   saveDataForSeoCredentials: (data: { login: string; password: string }) =>
