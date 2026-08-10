@@ -157,6 +157,16 @@ class Organisation(models.Model):
             "state_code": self.billing_state_code,
         }
     seo_keyword_limit = models.PositiveIntegerField(default=3000, help_text="Maximum number of SEO keywords allowed for this organisation")
+
+    # A flat monthly platform fee invoiced alongside per-project usage. Per
+    # organisation because it is negotiated per client, and 0 by default so no
+    # existing account starts being charged one. Always INR: it appears only on
+    # domestic invoices, and export invoices are raised outside India where this
+    # fee does not apply.
+    subscription_fee = models.DecimalField(
+        max_digits=12, decimal_places=2, default=0,
+        help_text="Flat monthly subscription added to Indian invoices. 0 = not charged.",
+    )
     created_at = models.DateTimeField(auto_now_add=True, help_text="Timestamp when the organisation was created")
     modified_at = models.DateTimeField(auto_now=True, help_text="Timestamp when the organisation was last modified")
     

@@ -402,7 +402,9 @@ def billing_invoice(request):
         return Response({"error": "Invalid region"}, status=status.HTTP_400_BAD_REQUEST)
     regions = [r for r in regions if r["key"] == region_key]
 
-    subtotal = sum(r["total_price"] for r in regions)
+    # The per-project charges. Named for what it is, because the invoice can
+    # now carry a second line beside it.
+    usage_amount = sum(r["total_price"] for r in regions)
 
     from .models_invoice import InvoiceSettings
     from .services.invoice_template import render_invoice_html
@@ -419,6 +421,18 @@ def billing_invoice(request):
     # Exports carry no GST: the supply is outside India, so no tax line, no
     # HSN/SAC summary and no tax in words. Domestic invoices are unchanged.
     is_export = bool(region_key and region_key not in ("", "all", "row"))
+
+    # Flat platform fee, charged per organisation and only on domestic
+    # invoices. It is an INR charge raised in India; an export invoice is
+    # raised outside India, where it does not apply. Organisations that have
+    # not negotiated one carry 0 and see no such line.
+    subscription_fee = 0
+    if not is_export:
+        from authentication.models import Organisation as _Org
+        _buyer = _Org.objects.filter(id=(org_ids[0] if org_ids else request.user.organisation_id)).first()
+        subscription_fee = int(round(float(getattr(_buyer, "subscription_fee", 0) or 0)))
+    subtotal = usage_amount + subscription_fee
+
     if is_export:
         tax_rate, tax_amount, tax_label = 0.0, 0, ""
     else:
@@ -447,11 +461,21 @@ def billing_invoice(request):
     # Page 1 carries one consolidated charge — a GST invoice reads better with a
     # single service line than with dozens of brand rows. The per-brand detail
     # goes on page 2 as an itemised bill.
-    items = [{
-        "particulars": "Promptmaxx Subscription Payment",
-        "sub": period,
-        "amount": subtotal,
-    }]
+    items = [
+        {
+            "particulars": "Promptmaxx project usage payment",
+            "sub": period,
+            "amount": usage_amount,
+        },
+    ]
+    # Omitted rather than shown as zero when this organisation has no fee, or
+    # when the invoice is an export.
+    if subscription_fee:
+        items.append({
+            "particulars": "Promptmaxx Subscription Payment",
+            "sub": period,
+            "amount": subscription_fee,
+        })
 
     # Export invoices are raised in USD. The rate is the one in force at the
     # close of the billing month — the time of supply — not the day the PDF is
