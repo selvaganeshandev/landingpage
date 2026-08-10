@@ -235,39 +235,44 @@ export default function SeoContentGapDetail() {
 
   return (
     <div className="p-8 space-y-8 bg-background animate-fade-in">
-      <Button
-        variant="ghost"
-        className="-ml-3"
-        onClick={() => navigate("/seo-content-gaps")}
-      >
-        <ArrowLeft className="h-4 w-4 mr-2" />
-        Back to SEO Content Gaps
-      </Button>
-
-      <div className="flex items-start justify-between gap-4 flex-wrap">
-        <div className="min-w-0">
-          <div className="flex items-center gap-3 flex-wrap">
-            <h1 className="text-4xl font-bold tracking-tight break-words">
-              {data.keyword}
-            </h1>
-            <Badge
-              variant={
-                data.bucket === "quick_win"
-                  ? "default"
-                  : data.bucket === "strategic_bet"
-                  ? "secondary"
-                  : "outline"
-              }
-            >
-              {BUCKET_LABEL[data.bucket]}
-            </Badge>
+      {/* Detail-view header, matching SeoOpportunityDetail and SeoKeywordDetail:
+          an icon-only back button inline to the left of the title with a rule
+          under the row. A full-width text button above a text-4xl title reads
+          as a top-level page rather than a detail view. */}
+      <div className="flex items-center justify-between pb-4 border-b border-border/50 gap-4 flex-wrap">
+        <div className="flex items-center gap-4 min-w-0">
+          <Button
+            variant="outline"
+            size="icon"
+            className="border-border/50 flex-shrink-0"
+            onClick={() => navigate("/seo-content-gaps")}
+          >
+            <ArrowLeft className="h-4 w-4" />
+          </Button>
+          <div className="min-w-0">
+            <div className="flex items-center gap-3 flex-wrap">
+              <h1 className="text-2xl font-bold tracking-tight">
+                {data.keyword}
+              </h1>
+              <Badge
+                variant={
+                  data.bucket === "quick_win"
+                    ? "default"
+                    : data.bucket === "strategic_bet"
+                    ? "secondary"
+                    : "outline"
+                }
+              >
+                {BUCKET_LABEL[data.bucket]}
+              </Badge>
+            </div>
+            <p className="text-muted-foreground mt-0.5 text-sm">
+              {data.domain_name} · {data.platform} ·{" "}
+              {data.action === "create"
+                ? "no page of yours ranks for this"
+                : `your best page sits at position ${data.our_rank}`}
+            </p>
           </div>
-          <p className="text-muted-foreground mt-2">
-            {data.domain_name} · {data.platform} ·{" "}
-            {data.action === "create"
-              ? "no page of yours ranks for this"
-              : `your best page sits at position ${data.our_rank}`}
-          </p>
         </div>
         <Button onClick={() => setGenerateOpen(true)}>
           <PenLine className="h-4 w-4 mr-2" />
