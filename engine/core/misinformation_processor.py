@@ -387,6 +387,22 @@ class MisinformationProcessor:
             }
         )
 
+        # crawl_status stays the LINK's health and is deliberately not touched
+        # by the extraction outcome — see the note above where it is set. A
+        # reachable page whose body yields no prose is still a working link,
+        # and marking it otherwise would drop it out of the Valid count on the
+        # Citations page, which is the bug that note records fixing.
+        #
+        # The extraction outcome is carried by extracted_text being empty, and
+        # logged here so a silent parser failure is visible in the worker log
+        # rather than only as an absence of alerts.
+        extracted = parsed['extracted_text']
+        if not extracted:
+            logger.warning(
+                "No readable text extracted from %s (body %d chars) — "
+                "misinformation comparison skipped for this URL.",
+                url, len(html or ''),
+            )
         citation_url.crawl_status = 'success'
         citation_url.last_crawled_at = timezone.now()
         citation_url.crawl_error = None
@@ -394,9 +410,9 @@ class MisinformationProcessor:
 
         # Compare LLM claims against source content
         alert_created = False
-        if parsed['extracted_text']:
+        if extracted:
             alert_created = self._compare_content(
-                pa, citation_url, parsed['extracted_text'], url, domain, MisinformationAlert, scan
+                pa, citation_url, extracted, url, domain, MisinformationAlert, scan
             )
 
         return alert_created
