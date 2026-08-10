@@ -4,6 +4,7 @@ from rest_framework import status
 from rest_framework.permissions import AllowAny, IsAuthenticated
 from rest_framework_simplejwt.tokens import RefreshToken
 from django.contrib.auth import authenticate
+from django.contrib.auth.models import update_last_login
 from django.shortcuts import get_object_or_404
 from llm_monitor.email_utils import send_mail
 from django.utils import timezone
@@ -187,6 +188,17 @@ def login(request):
     # account_status must be active: a suspended account can have is_active=True
     # but must not be allowed to start a new session.
     if user and user.is_active and getattr(user, 'account_status', 'active') == 'active':
+        # This API is stateless, so it never calls django.contrib.auth.login()
+        # and the user_logged_in signal that normally maintains last_login never
+        # fires. Without this the column stays NULL for everyone, which makes
+        # "never signed in" indistinguishable from "signs in daily" — the figure
+        # is used to judge who is dormant and whether invited users onboarded.
+        #
+        # Only a password login counts. Token refreshes are deliberately not
+        # recorded: a browser quietly renewing a token would otherwise keep a
+        # dormant account looking active.
+        update_last_login(None, user)
+
         refresh = RefreshToken.for_user(user)
         access_token = refresh.access_token
         access_token['email'] = user.email
