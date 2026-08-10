@@ -1,7 +1,9 @@
 from __future__ import annotations
 
+import random
 import re
 import logging
+import time
 from typing import Any, Dict, List, Optional
 
 from django.conf import settings
@@ -602,6 +604,56 @@ def _gemini_vertex_client() -> Any:
     return _VERTEX_CLIENT
 
 
+def _is_rate_limited(exc: Exception) -> bool:
+    """Is this a 429 from Vertex, as opposed to a real failure?
+
+    The SDK surfaces the status in different places depending on version and on
+    whether the error came back as a typed error or a transport exception, so
+    the code attribute is checked first and the message only as a fallback.
+    """
+    for attr in ('code', 'status_code'):
+        if getattr(exc, attr, None) == 429:
+            return True
+    text = str(exc)
+    return '429' in text or 'RESOURCE_EXHAUSTED' in text
+
+
+def _call_with_backoff(fn, label: str):
+    """Run a Vertex call, retrying only on 429.
+
+    Exponential with full jitter. The jitter is the point, not a detail: twelve
+    worker threads hit the limit within the same second, and a fixed backoff
+    would march them all into the next window together and collide again.
+
+    Anything that is not a 429 is re-raised immediately — retrying a bad request
+    or an auth failure would just spend the wait budget before failing anyway.
+    """
+    attempts = max(0, int(getattr(settings, 'GEMINI_RATE_LIMIT_RETRIES', 4)))
+    base = float(getattr(settings, 'GEMINI_RATE_LIMIT_BASE_DELAY', 2.0))
+    max_wait = float(getattr(settings, 'GEMINI_RATE_LIMIT_MAX_WAIT', 90.0))
+
+    waited = 0.0
+    for attempt in range(attempts + 1):
+        try:
+            return fn()
+        except Exception as exc:
+            if not _is_rate_limited(exc) or attempt == attempts:
+                raise
+            delay = random.uniform(0, base * (2 ** attempt))
+            if waited + delay > max_wait:
+                logger.warning(
+                    "Gemini rate limited on %s; wait budget %.0fs exhausted after "
+                    "%d attempts, giving up.", label, max_wait, attempt + 1,
+                )
+                raise
+            waited += delay
+            logger.info(
+                "Gemini rate limited on %s (attempt %d/%d); retrying in %.1fs.",
+                label, attempt + 1, attempts + 1, delay,
+            )
+            time.sleep(delay)
+
+
 def _process_prompt_with_gemini_vertex(prompt_text: str, user_domain: str, group: Any = None) -> Dict[str, Any]:
     """Vertex AI path for Gemini.
 
@@ -650,8 +702,17 @@ def _process_prompt_with_gemini_vertex(prompt_text: str, user_domain: str, group
     )
     if use_grounding:
         try:
-            text = getattr(_call([genai_types.Tool(google_search=genai_types.GoogleSearch())]), 'text', '') or ""
+            text = getattr(_call_with_backoff(
+                lambda: _call([genai_types.Tool(google_search=genai_types.GoogleSearch())]),
+                'grounded generation',
+            ), 'text', '') or ""
         except Exception as ws_err:
+            # A rate limit says nothing about whether this model supports
+            # grounding. Adding it to the unsupported set on a 429 would
+            # silently disable grounding for the rest of the process over a
+            # transient error.
+            if _is_rate_limited(ws_err):
+                raise
             _GEMINI_GROUNDING_UNSUPPORTED.add(model_name)
             logger.warning(
                 "Vertex Gemini grounding unavailable for %s (%s); using ungrounded generation.",
@@ -660,7 +721,7 @@ def _process_prompt_with_gemini_vertex(prompt_text: str, user_domain: str, group
             text = ""
 
     if not text:
-        text = getattr(_call(None), 'text', '') or ""
+        text = getattr(_call_with_backoff(lambda: _call(None), 'generation'), 'text', '') or ""
     return _basic_text_metrics(text, user_domain, _brand_name_of(group))
 
 
