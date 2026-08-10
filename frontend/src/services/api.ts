@@ -2448,6 +2448,28 @@ export const apiClient = {
   getSeoOpportunityDetail: (seoKwId: string | number) =>
     apiRequest(`/seo/opportunities/${seoKwId}/`),
 
+  // ----- SEO content gaps (organic search, not the GEO content-gaps page) -----
+  getSeoContentGaps: (params: {
+    domain_id: string; platform?: string; bucket?: string; intent?: string;
+    content_type?: string; action?: string; search?: string; page?: number;
+  }) => {
+    const sp = new URLSearchParams({ domain_id: params.domain_id });
+    (['platform', 'bucket', 'intent', 'content_type', 'action', 'search'] as const)
+      .forEach((k) => { if (params[k]) sp.append(k, String(params[k])); });
+    if (params.page) sp.append('page', String(params.page));
+    return apiRequest(`/seo/content-gaps/?${sp.toString()}`);
+  },
+
+  getSeoContentGapDetail: (seoKwId: string | number) =>
+    apiRequest(`/seo/content-gaps/${seoKwId}/`),
+
+  exportSeoContentGaps: (params: { domain_id: string; platform?: string; filename?: string }) => {
+    const sp = new URLSearchParams({ domain_id: params.domain_id });
+    if (params.platform) sp.append('platform', params.platform);
+    return downloadFile(`/seo/content-gaps/export/?${sp.toString()}`,
+      `${params.filename || 'seo-content-gaps'}.xlsx`);
+  },
+
   // ----- DataForSEO credentials (Organization Settings -> API Keys) -----
   getDataForSeoCredentials: () => apiRequest('/auth/organization/dataforseo/'),
 

@@ -304,7 +304,7 @@ const ContentGaps = () => {
     <div className="p-8 space-y-8 bg-background animate-fade-in">
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-4xl font-bold tracking-tight">Content Gap Analysis</h1>
+          <h1 className="text-4xl font-bold tracking-tight">GEO Content Gaps</h1>
           <p className="text-muted-foreground mt-2">
             Discover untapped opportunities and AI-powered recommendations
           </p>

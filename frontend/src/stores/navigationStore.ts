@@ -10,6 +10,7 @@ import {
   Target,
   Link2,
   LineChart,
+  FileSearch,
   Bell,
   Users,
   FileText,
@@ -189,7 +190,8 @@ const allNavGroups: NavGroup[] = [
     name: "Strategy",
     icon: Lightbulb,
     items: [
-      { name: "Content Gaps", path: "/content-gaps", icon: Target, module: MODULES.CONTENT_GAPS },
+      { name: "GEO Content Gaps", path: "/content-gaps", icon: Target, module: MODULES.CONTENT_GAPS },
+      { name: "SEO Content Gaps", path: "/seo-content-gaps", icon: FileSearch, module: MODULES.KEYWORD_RANKINGS },
       { name: "Content Planner", path: "/content-calendar", icon: Calendar, module: MODULES.CONTENT_PLANNER },
     ],
   },

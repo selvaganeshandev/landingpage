@@ -1,5 +1,5 @@
 from django.urls import path
-from . import views, views_billing, views_invoice_settings, views_insights, views_backlinks
+from . import views, views_billing, views_invoice_settings, views_insights, views_backlinks, views_content_gap
 
 urlpatterns = [
     # Keyword rankings
@@ -31,6 +31,12 @@ urlpatterns = [
     path('backlinks/list/', views_backlinks.backlinks_list, name='seo-backlinks-list'),
     path('backlinks/fetch/', views_backlinks.backlinks_fetch, name='seo-backlinks-fetch'),
     path('backlinks/export/', views_backlinks.backlinks_export, name='seo-backlinks-export'),
+
+    # Content gaps (organic search) — distinct from competitors/content-gaps/,
+    # which is the GEO/LLM version.
+    path('content-gaps/', views_content_gap.seo_content_gaps, name='seo-content-gaps'),
+    path('content-gaps/export/', views_content_gap.seo_content_gaps_export, name='seo-content-gaps-export'),
+    path('content-gaps/<int:seo_kw_id>/', views_content_gap.seo_content_gap_detail, name='seo-content-gap-detail'),
 
     # Bulk operations
     path('keywords/bulk-delete/', views.seo_keyword_bulk_delete, name='seo-keyword-bulk-delete'),

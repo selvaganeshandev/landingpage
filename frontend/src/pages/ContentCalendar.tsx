@@ -90,11 +90,30 @@ interface ContentItem {
   scheduledDate: Date;
   targetKeywords: string[];
   opportunitySource: string;
+  // "SEO" or "GEO" where the item came from a content gap, null otherwise. The
+  // two disciplines look identical once a draft exists, so the calendar has to
+  // carry the distinction or it is lost the moment content is generated.
+  gapType: "SEO" | "GEO" | null;
   estimatedImpact: number;
   wordCount: number;
   totalComments: number;
   pendingComments: number;
 }
+
+const SOURCE_LABEL: Record<string, string> = {
+  content_gap: "GEO Content Gap",
+  seo_content_gap: "SEO Content Gap",
+  answer_gap: "Answer Gap",
+  topic: "Topic",
+  manual: "Manual",
+};
+
+// Only the two gap modules carry a discipline; a topic or a manual draft has
+// none, and inventing one would be worse than showing nothing.
+const SOURCE_DISCIPLINE: Record<string, "SEO" | "GEO"> = {
+  content_gap: "GEO",
+  seo_content_gap: "SEO",
+};
 
 const contentTypeIconMap: Record<string, { icon: LucideIcon; gradient: string }> = {
   // Articles
@@ -174,7 +193,8 @@ const ContentCalendar = () => {
             priority: item.priority || "medium",
             scheduledDate: item.scheduled_date ? new Date(item.scheduled_date) : new Date(),
             targetKeywords: item.keywords ? item.keywords.split(",").map((k: string) => k.trim()) : [],
-            opportunitySource: item.source_type === "content_gap" ? "Content Gap" : item.source_type === "topic" ? "Topic" : "Manual",
+            opportunitySource: SOURCE_LABEL[item.source_type] || "Manual",
+            gapType: SOURCE_DISCIPLINE[item.source_type] || null,
             estimatedImpact: 75,
             wordCount: item.actual_word_count || item.word_count || 0,
             totalComments: item.total_comments || 0,
@@ -288,6 +308,7 @@ const ContentCalendar = () => {
           scheduledDate: item.scheduled_date ? new Date(item.scheduled_date) : new Date(),
           targetKeywords: item.keywords ? item.keywords.split(',').map((k: string) => k.trim()) : [],
           opportunitySource: 'Manual',
+          gapType: null,
           estimatedImpact: 0,
           wordCount: item.word_count || 1500,
           totalComments: 0,
@@ -327,6 +348,7 @@ const ContentCalendar = () => {
           scheduledDate: new Date(),
           targetKeywords: typeof params.keywords === 'string' ? params.keywords.split(', ') : (params.keywords || []),
           opportunitySource: params.source || "Manual",
+          gapType: null,
           estimatedImpact: 75,
           wordCount: params.wordCount || 1500,
           // Pass through source tracking
@@ -582,7 +604,14 @@ const ContentCalendar = () => {
                       <div className="grid grid-cols-2 gap-4 text-sm">
                         <div>
                           <p className="text-muted-foreground mb-1">Source</p>
-                          <p className="font-medium">{item.opportunitySource}</p>
+                          <p className="font-medium flex items-center gap-2">
+                            {item.opportunitySource}
+                            {item.gapType && (
+                              <Badge variant="outline" className="font-normal">
+                                {item.gapType}
+                              </Badge>
+                            )}
+                          </p>
                         </div>
                         <div>
                           <p className="text-muted-foreground mb-1">Estimated Impact</p>
@@ -861,6 +890,7 @@ const ContentCalendar = () => {
                               scheduledDate: item.scheduledDate,
                               targetKeywords: item.targetKeywords,
                               opportunitySource: item.opportunitySource,
+                              gapType: item.gapType,
                               estimatedImpact: 0,
                               wordCount: item.wordCount,
                               totalComments: 0,
