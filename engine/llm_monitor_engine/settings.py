@@ -491,6 +491,12 @@ CELERY_TASK_ROUTES = {
     # requests), so they belong on the same dedicated worker rather than behind
     # the prompt-analytics backlog.
     'core.processing_tasks.fetch_backlinks_task': {'queue': 'seo'},
+    # Just-added keywords get their own queue and their own worker. The `seo`
+    # queue spends most of the night saturated by the 02:00 sweep chaining
+    # 500-keyword batches, so anything sharing it waits hours — which is not
+    # what "scrape the keywords I just added" means. Requires a worker running
+    # `-Q seo_instant` (engine-celery-seo-instant.service).
+    'core.processing_tasks.process_new_keywords_task': {'queue': 'seo_instant'},
 }
 
 # Prompt analytics fans one Celery task out per prompt, and each task is a long

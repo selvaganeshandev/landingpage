@@ -1870,6 +1870,63 @@ def seo_process_keyword(request):
 
 @api_view(['POST'])
 @permission_classes([AllowAny])
+def seo_process_new_keywords(request):
+    """
+    Scrape a specific set of just-added keywords immediately.
+
+    Body: { domain_id: int, seo_keyword_rank_ids: [int, ...] }
+
+    Separate from `seo_process_domain` on purpose: this dispatches to the
+    `seo_instant` queue so it never waits behind the nightly sweep, and it
+    scrapes only the ids given rather than every 'avail' row on the domain.
+    """
+    from .processing_tasks import process_new_keywords_task
+
+    domain_id = request.data.get('domain_id')
+    keyword_ids = request.data.get('seo_keyword_rank_ids') or []
+
+    if not domain_id:
+        return Response(
+            {'error': 'domain_id is required'},
+            status=status.HTTP_400_BAD_REQUEST
+        )
+    if not isinstance(keyword_ids, list) or not keyword_ids:
+        return Response(
+            {'error': 'seo_keyword_rank_ids must be a non-empty list'},
+            status=status.HTTP_400_BAD_REQUEST
+        )
+
+    try:
+        ids = [int(k) for k in keyword_ids]
+    except (TypeError, ValueError):
+        return Response(
+            {'error': 'seo_keyword_rank_ids must all be integers'},
+            status=status.HTTP_400_BAD_REQUEST
+        )
+
+    try:
+        process_new_keywords_task.apply_async(
+            args=[int(domain_id), ids],
+            queue='seo_instant',
+        )
+        logger.info(
+            f"[SEO instant] Queued {len(ids)} new keywords for domain {domain_id}"
+        )
+        return Response({
+            'message': f'{len(ids)} new keywords queued for immediate scraping',
+            'domain_id': domain_id,
+            'keyword_count': len(ids),
+        })
+    except Exception as e:
+        logger.error(f"[SEO instant] Error queuing new keywords for domain {domain_id}: {e}")
+        return Response(
+            {'error': str(e)},
+            status=status.HTTP_500_INTERNAL_SERVER_ERROR
+        )
+
+
+@api_view(['POST'])
+@permission_classes([AllowAny])
 def seo_process_domain(request):
     """
     Trigger SEO rank processing for all keywords of a domain.
