@@ -25,6 +25,7 @@ from rest_framework.decorators import api_view, permission_classes
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 
+from core.permissions import MODULE_PROMPTS_ADD, user_has_module_permission
 from domains.models import Domain
 from .models import Prompt, PromptCandidate, PromptGenerationRun, PromptGroup
 
@@ -221,6 +222,14 @@ def accept_generation_run(request, run_id):
     existing schema. Prompts are created with track_status INIT so the normal
     engine pipeline picks them up with no special casing.
     """
+    # Generating candidates is harmless; this is the step that actually writes
+    # prompts, so it is the one the add right gates.
+    if not user_has_module_permission(request.user, MODULE_PROMPTS_ADD):
+        return Response(
+            {'error': 'You do not have permission to add prompts'},
+            status=status.HTTP_403_FORBIDDEN,
+        )
+
     run = get_object_or_404(
         PromptGenerationRun.objects.select_related('domain'), id=run_id,
     )

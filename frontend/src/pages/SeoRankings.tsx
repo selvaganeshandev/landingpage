@@ -312,7 +312,10 @@ const SeoRankings = () => {
   } | null>(null);
 
   const { toast } = useToast();
-  const { user } = useAuth();
+  const { user, checkPermission } = useAuth();
+  const canAddKeywords = checkPermission('keywords_add');
+  const canEditKeywords = checkPermission('keywords_edit');
+  const canDeleteKeywords = checkPermission('keywords_delete');
 
   // Use the domain store (same source as the sidebar DomainSelector)
   const { isOpen: sidebarOpen } = useSidebar();
@@ -1239,10 +1242,12 @@ const SeoRankings = () => {
             Track your organic search rankings and keyword performance
           </p>
         </div>
-        <Button className="gradient-primary shadow-md shadow-primary/20" onClick={() => navigate('/seo-rankings/add-keyword')} disabled={!activeDomainId}>
-          <Plus className="h-4 w-4 mr-2" />
-          Add Keyword
-        </Button>
+        {canAddKeywords && (
+          <Button className="gradient-primary shadow-md shadow-primary/20" onClick={() => navigate('/seo-rankings/add-keyword')} disabled={!activeDomainId}>
+            <Plus className="h-4 w-4 mr-2" />
+            Add Keyword
+          </Button>
+        )}
       </div>
 
       {loading && (
@@ -1658,16 +1663,18 @@ const SeoRankings = () => {
             </div>
 
             <div className="flex items-center gap-2">
-              <TooltipProvider>
-                <Tooltip>
-                  <TooltipTrigger asChild>
-                    <Button variant="outline" size="icon" onClick={handleOpenTagDialog}>
-                      <Tag className="h-4 w-4" />
-                    </Button>
-                  </TooltipTrigger>
-                  <TooltipContent>{selectedKeywords.length > 0 ? "Manage tags for selected keywords" : "Select keywords to add tags"}</TooltipContent>
-                </Tooltip>
-              </TooltipProvider>
+              {canEditKeywords && (
+                <TooltipProvider>
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <Button variant="outline" size="icon" onClick={handleOpenTagDialog}>
+                        <Tag className="h-4 w-4" />
+                      </Button>
+                    </TooltipTrigger>
+                    <TooltipContent>{selectedKeywords.length > 0 ? "Manage tags for selected keywords" : "Select keywords to add tags"}</TooltipContent>
+                  </Tooltip>
+                </TooltipProvider>
+              )}
               <TooltipProvider>
                 <Tooltip>
                   <TooltipTrigger asChild>
@@ -1678,16 +1685,18 @@ const SeoRankings = () => {
                   <TooltipContent>Refresh rankings</TooltipContent>
                 </Tooltip>
               </TooltipProvider>
-              <TooltipProvider>
-                <Tooltip>
-                  <TooltipTrigger asChild>
-                    <Button variant="outline" size="icon" onClick={handleOpenDelete}>
-                      <Trash2 className="h-4 w-4" />
-                    </Button>
-                  </TooltipTrigger>
-                  <TooltipContent>{selectedKeywords.length > 0 ? "Delete selected keywords" : "Select keywords to delete"}</TooltipContent>
-                </Tooltip>
-              </TooltipProvider>
+              {canDeleteKeywords && (
+                <TooltipProvider>
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <Button variant="outline" size="icon" onClick={handleOpenDelete}>
+                        <Trash2 className="h-4 w-4" />
+                      </Button>
+                    </TooltipTrigger>
+                    <TooltipContent>{selectedKeywords.length > 0 ? "Delete selected keywords" : "Select keywords to delete"}</TooltipContent>
+                  </Tooltip>
+                </TooltipProvider>
+              )}
 
               {/* Column Selection Popover - List view only */}
               {viewMode === "list" && (

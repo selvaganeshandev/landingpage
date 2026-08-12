@@ -22,6 +22,17 @@ type AuthAction =
   | { type: 'UPDATE_PERMISSIONS'; payload: Permission[] }
   | { type: 'SET_LOADING'; payload: boolean };
 
+// Action rights that sit under a parent module rather than granting page
+// access of their own. Kept in sync with UserPermission.MODULE_CHOICES.
+const ACTION_MODULES = [
+  'prompts_add',
+  'prompts_edit',
+  'prompts_delete',
+  'keywords_add',
+  'keywords_edit',
+  'keywords_delete',
+];
+
 // Initial state
 const initialState: AuthState = {
   user: null,
@@ -301,6 +312,16 @@ export function AuthProvider({ children }: AuthProviderProps) {
     // Super admin shortcut: full access
     if (state.user?.role === 'super_admin') {
       return true;
+    }
+
+    // Fine-grained action rights (add/edit/delete prompts and keywords).
+    // Mirrors core/permissions.user_has_module_permission on the backend:
+    // admins hold these by role and never carry an explicit grant, clients
+    // never hold them at all. Everyone else needs the row.
+    if (ACTION_MODULES.includes(module)) {
+      if (state.user?.role === 'admin') return true;
+      if (state.user?.role === 'client') return false;
+      return !!permission;
     }
 
     // Client: read-only access to data modules, never admin modules.

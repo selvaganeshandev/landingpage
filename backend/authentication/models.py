@@ -501,8 +501,13 @@ class UserPermission(models.Model):
         # Tracking
         ('mentions', 'Mentions'),
         ('prompts', 'Prompts'),
+        # Action rights nested under 'prompts'. Granting these alone does
+        # nothing — the module itself gates whether the page is reachable.
+        ('prompts_add', 'Add Prompts'),
+        ('prompts_edit', 'Edit Prompts'),
+        ('prompts_delete', 'Delete Prompts'),
         ('alerts', 'Alerts'),
-        
+
         # Analytics
         ('sentiment_analysis', 'Sentiment Analysis'),
         ('topics', 'Topics'),
@@ -524,6 +529,12 @@ class UserPermission(models.Model):
         
         # SEO Monitoring
         ('keyword_rankings', 'Keyword Rankings'),
+        # Action rights nested under 'keyword_rankings'. Before these existed
+        # keyword writes were hardcoded admin-only; a plain user needs the
+        # matching grant here to add/edit/delete.
+        ('keywords_add', 'Add Keywords'),
+        ('keywords_edit', 'Edit Keywords'),
+        ('keywords_delete', 'Delete Keywords'),
         ('seo_competitors', 'SEO Competitors'),
         ('organic_reports', 'Organic Reports'),
         ('backlinks', 'Backlinks'),

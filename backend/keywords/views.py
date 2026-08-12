@@ -8,6 +8,12 @@ from django.db import IntegrityError
 from django.utils import timezone
 from .models import Keyword, SecondaryKeyword
 from .serializers import KeywordSerializer, SecondaryKeywordSerializer
+from core.permissions import (
+    MODULE_KEYWORDS_ADD,
+    MODULE_KEYWORDS_DELETE,
+    MODULE_KEYWORDS_EDIT,
+    user_has_module_permission,
+)
 from domains.models import Domain
 from domains.services import schedule_domain_processing
 
@@ -33,13 +39,12 @@ def keyword_list(request):
         return Response(serializer.data)
     
     elif request.method == 'POST':
-        # Only admins can create keywords
-        if request.user.role not in ['admin', 'super_admin']:
+        if not user_has_module_permission(request.user, MODULE_KEYWORDS_ADD):
             return Response(
-                {'error': 'Only organization administrators can add keywords'}, 
+                {'error': 'You do not have permission to add keywords'},
                 status=status.HTTP_403_FORBIDDEN
             )
-        
+
         serializer = KeywordSerializer(data=request.data)
         if serializer.is_valid():
             # Normalize keyword to lowercase
@@ -120,10 +125,9 @@ def keyword_list(request):
 @permission_classes([IsAuthenticated])
 def bulk_create_keywords(request):
     """Bulk create keywords with semantic metadata"""
-    # Only admins can create keywords
-    if request.user.role not in ['admin', 'super_admin']:
+    if not user_has_module_permission(request.user, MODULE_KEYWORDS_ADD):
         return Response(
-            {'error': 'Only organization administrators can add keywords'},
+            {'error': 'You do not have permission to add keywords'},
             status=status.HTTP_403_FORBIDDEN
         )
 
@@ -198,10 +202,9 @@ def bulk_create_keywords(request):
 @permission_classes([IsAuthenticated])
 def bulk_create_secondary_keywords(request):
     """Bulk create secondary keywords (unselected AI-generated keywords)"""
-    # Only admins can create keywords
-    if request.user.role not in ['admin', 'super_admin']:
+    if not user_has_module_permission(request.user, MODULE_KEYWORDS_ADD):
         return Response(
-            {'error': 'Only organization administrators can add keywords'},
+            {'error': 'You do not have permission to add keywords'},
             status=status.HTTP_403_FORBIDDEN
         )
 
@@ -270,6 +273,11 @@ def keyword_detail(request, pk):
         return Response(serializer.data)
 
     elif request.method == 'PUT':
+        if not user_has_module_permission(request.user, MODULE_KEYWORDS_EDIT):
+            return Response(
+                {'error': 'You do not have permission to edit keywords'},
+                status=status.HTTP_403_FORBIDDEN
+            )
         serializer = KeywordSerializer(keyword, data=request.data)
         if serializer.is_valid():
             serializer.save()
@@ -277,5 +285,10 @@ def keyword_detail(request, pk):
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
     elif request.method == 'DELETE':
+        if not user_has_module_permission(request.user, MODULE_KEYWORDS_DELETE):
+            return Response(
+                {'error': 'You do not have permission to delete keywords'},
+                status=status.HTTP_403_FORBIDDEN
+            )
         keyword.delete()
         return Response(status=status.HTTP_204_NO_CONTENT)

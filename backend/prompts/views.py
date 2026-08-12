@@ -3,6 +3,12 @@ from rest_framework.response import Response
 from rest_framework import status
 from rest_framework.permissions import IsAuthenticated, AllowAny
 from core.queryset_scoping import user_can_access_domain
+from core.permissions import (
+    MODULE_PROMPTS_ADD,
+    MODULE_PROMPTS_DELETE,
+    MODULE_PROMPTS_EDIT,
+    user_has_module_permission,
+)
 from django.db.models import Q, Count, Avg, F, Sum, Prefetch, Max
 from django.shortcuts import get_object_or_404
 from django.utils import timezone
@@ -1616,6 +1622,11 @@ def prompt_groups_list(request):
             )
     
     elif request.method == 'POST':
+        if not user_has_module_permission(request.user, MODULE_PROMPTS_ADD):
+            return Response(
+                {'error': 'You do not have permission to add prompts'},
+                status=status.HTTP_403_FORBIDDEN
+            )
         try:
             # Validate required fields
             group_id = request.data.get('group_id')
@@ -2238,6 +2249,11 @@ def prompt_group_detail(request, group_id):
             })
         
         elif request.method == 'PUT':
+            if not user_has_module_permission(request.user, MODULE_PROMPTS_EDIT):
+                return Response(
+                    {'error': 'You do not have permission to edit prompts'},
+                    status=status.HTTP_403_FORBIDDEN
+                )
             # Update group information and prompts (primary + variants)
             group_id_new = request.data.get('group_id', group.group_id)
             domain_id = request.data.get('domain_id', group.domain.id)
@@ -2317,6 +2333,11 @@ def prompt_group_detail(request, group_id):
             })
         
         elif request.method == 'DELETE':
+            if not user_has_module_permission(request.user, MODULE_PROMPTS_DELETE):
+                return Response(
+                    {'error': 'You do not have permission to delete prompts'},
+                    status=status.HTTP_403_FORBIDDEN
+                )
             # Delete the group (this will cascade delete all prompts and analytics)
             group.delete()
             return Response({
@@ -2475,6 +2496,11 @@ def prompts_list(request):
             )
     
     elif request.method == 'POST':
+        if not user_has_module_permission(request.user, MODULE_PROMPTS_ADD):
+            return Response(
+                {'error': 'You do not have permission to add prompts'},
+                status=status.HTTP_403_FORBIDDEN
+            )
         try:
             # Validate required fields
             prompt_text = request.data.get('prompt')
@@ -2582,6 +2608,11 @@ def prompt_detail(request, prompt_id):
             })
         
         elif request.method == 'PUT':
+            if not user_has_module_permission(request.user, MODULE_PROMPTS_EDIT):
+                return Response(
+                    {'error': 'You do not have permission to edit prompts'},
+                    status=status.HTTP_403_FORBIDDEN
+                )
             # Update prompt information
             prompt.prompt = request.data.get('prompt', prompt.prompt)
             prompt.group_id = request.data.get('group_id', prompt.group_id)
@@ -2603,6 +2634,11 @@ def prompt_detail(request, prompt_id):
             })
         
         elif request.method == 'DELETE':
+            if not user_has_module_permission(request.user, MODULE_PROMPTS_DELETE):
+                return Response(
+                    {'error': 'You do not have permission to delete prompts'},
+                    status=status.HTTP_403_FORBIDDEN
+                )
             # Delete the prompt (this will cascade delete all analytics)
             prompt.delete()
             return Response({
@@ -2622,6 +2658,11 @@ def bulk_update_prompts(request):
     """
     Bulk update prompts (track status, type, etc.)
     """
+    if not user_has_module_permission(request.user, MODULE_PROMPTS_EDIT):
+        return Response(
+            {'error': 'You do not have permission to edit prompts'},
+            status=status.HTTP_403_FORBIDDEN
+        )
     try:
         prompt_ids = request.data.get('prompt_ids', [])
         updates = request.data.get('updates', {})

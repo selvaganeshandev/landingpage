@@ -13,6 +13,12 @@ from django.db import transaction
 from django.db.models import Case, IntegerField, Value, When
 from django.conf import settings
 
+from core.permissions import (
+    MODULE_KEYWORDS_ADD,
+    MODULE_KEYWORDS_DELETE,
+    MODULE_KEYWORDS_EDIT,
+    user_has_module_permission,
+)
 from domains.models import Domain
 from .models import (
     SeoKeywordRank, SeoRankHistory, SeoSerpFeatureHistory, SeoDomainDailyMetrics,
@@ -178,8 +184,11 @@ def seo_keyword_add(request):
     Add a keyword to SEO rank tracking.
     Body: { keyword, domain, platform, target_url, region, isocode, language_code, ... }
     """
-    if request.user.role not in ['admin', 'super_admin']:
-        return Response({'error': 'Only admins can add SEO keywords'}, status=status.HTTP_403_FORBIDDEN)
+    if not user_has_module_permission(request.user, MODULE_KEYWORDS_ADD):
+        return Response(
+            {'error': 'You do not have permission to add keywords'},
+            status=status.HTTP_403_FORBIDDEN,
+        )
 
     serializer = SeoKeywordRankCreateSerializer(data=request.data)
     if not serializer.is_valid():
@@ -208,8 +217,11 @@ def seo_keyword_bulk_add(request):
     Bulk-add keywords to SEO tracking.
     Body: { domain_id, keywords: [{ keyword_id, platform, target_url, region, isocode, language_code }] }
     """
-    if request.user.role not in ['admin', 'super_admin']:
-        return Response({'error': 'Only admins can add SEO keywords'}, status=status.HTTP_403_FORBIDDEN)
+    if not user_has_module_permission(request.user, MODULE_KEYWORDS_ADD):
+        return Response(
+            {'error': 'You do not have permission to add keywords'},
+            status=status.HTTP_403_FORBIDDEN,
+        )
 
     domain_id = request.data.get('domain_id')
     keywords_data = request.data.get('keywords', [])
@@ -298,8 +310,11 @@ def seo_keyword_import(request):
 
     Returns: { created_count, skipped_count, seo_created_count, seo_skipped_count, details }
     """
-    if request.user.role not in ['admin', 'super_admin']:
-        return Response({'error': 'Only admins can import keywords'}, status=status.HTTP_403_FORBIDDEN)
+    if not user_has_module_permission(request.user, MODULE_KEYWORDS_ADD):
+        return Response(
+            {'error': 'You do not have permission to add keywords'},
+            status=status.HTTP_403_FORBIDDEN,
+        )
 
     domain_id = request.data.get('domain_id')
     if not domain_id:
@@ -469,8 +484,11 @@ def seo_keyword_detail(request, pk):
         return Response(SeoKeywordRankSerializer(seo_kw).data)
 
     if request.method == 'DELETE':
-        if request.user.role not in ['admin', 'super_admin']:
-            return Response({'error': 'Only admins can delete'}, status=status.HTTP_403_FORBIDDEN)
+        if not user_has_module_permission(request.user, MODULE_KEYWORDS_DELETE):
+            return Response(
+                {'error': 'You do not have permission to delete keywords'},
+                status=status.HTTP_403_FORBIDDEN,
+            )
         seo_kw.delete()
         return Response(status=status.HTTP_204_NO_CONTENT)
 
@@ -954,8 +972,11 @@ def seo_keyword_bulk_delete(request):
     Delete multiple SEO keywords and their related history.
     Body: { ids: [1, 2, 3] }
     """
-    if request.user.role not in ['admin', 'super_admin']:
-        return Response({'error': 'Only admins can delete keywords'}, status=status.HTTP_403_FORBIDDEN)
+    if not user_has_module_permission(request.user, MODULE_KEYWORDS_DELETE):
+        return Response(
+            {'error': 'You do not have permission to delete keywords'},
+            status=status.HTTP_403_FORBIDDEN,
+        )
 
     ids = request.data.get('ids', [])
     if not ids:
@@ -997,6 +1018,12 @@ def seo_keyword_update_tags(request):
     mode=replace: replaces all tags.
     Max 20 tags per keyword.
     """
+    if not user_has_module_permission(request.user, MODULE_KEYWORDS_EDIT):
+        return Response(
+            {'error': 'You do not have permission to edit keywords'},
+            status=status.HTTP_403_FORBIDDEN,
+        )
+
     ids = request.data.get('ids', [])
     new_tags = request.data.get('tags', [])
     mode = request.data.get('mode', 'merge')
@@ -1034,6 +1061,12 @@ def seo_keyword_remove_tag(request):
     Remove a specific tag from all keywords in a domain.
     Body: { domain_id: 50, tag: "tagname" }
     """
+    if not user_has_module_permission(request.user, MODULE_KEYWORDS_EDIT):
+        return Response(
+            {'error': 'You do not have permission to edit keywords'},
+            status=status.HTTP_403_FORBIDDEN,
+        )
+
     domain_id = request.data.get('domain_id')
     tag_name = request.data.get('tag', '').strip().lower()
 
