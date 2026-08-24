@@ -29,6 +29,16 @@ import re
 import threading
 
 from django.conf import settings
+
+# The `reasoning` argument is OpenRouter-specific: OpenRouter accepts it for any
+# model (ignoring it where not applicable), but the OpenAI API rejects it with
+# "Unrecognized request argument". When OPENROUTER_BASE_URL is pointed directly
+# at api.openai.com (local dev with a bare OpenAI key), send no extra_body.
+def _reasoning_extra_body():
+    from django.conf import settings as _s
+    base = (getattr(_s, 'OPENROUTER_BASE_URL', '') or '')
+    return {"reasoning": {"effort": "low"}} if 'openrouter' in base else {}
+
 from django.db import close_old_connections
 
 logger = logging.getLogger(__name__)
@@ -286,7 +296,7 @@ def generate_keywords_for_domain(domain, count=DEFAULT_KEYWORD_COUNT):
             # so 50 keywords of JSON needs headroom or the reply comes back
             # truncated — or empty with finish_reason=length.
             max_tokens=12000,
-            extra_body={"reasoning": {"effort": "low"}},
+            extra_body=_reasoning_extra_body(),
         )
         reply = (response.choices[0].message.content or '') if response.choices else ''
     except Exception as exc:

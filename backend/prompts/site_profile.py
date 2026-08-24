@@ -27,6 +27,13 @@ from typing import Any, Dict, Optional
 
 from django.conf import settings
 
+# OpenRouter-only argument: api.openai.com rejects `reasoning`. No-op extra_body
+# when OPENROUTER_BASE_URL points directly at OpenAI (local dev, bare key).
+def _reasoning_extra_body():
+    from django.conf import settings as _s
+    return {"reasoning": {"effort": "low"}} if 'openrouter' in (getattr(_s, 'OPENROUTER_BASE_URL', '') or '') else {}
+
+
 logger = logging.getLogger(__name__)
 
 # Mirrors views_generation's field lists. Text fields arrive as strings, list
@@ -229,7 +236,7 @@ def infer_profile(domain) -> Dict[str, Any]:
             # is already in front of the model, not a problem to think through.
             max_tokens=4000,
             temperature=0.2,   # extraction, not invention
-            extra_body={'reasoning': {'effort': 'low'}},
+            extra_body=_reasoning_extra_body(),
         )
         reply = (response.choices[0].message.content or '') if response.choices else ''
         if not reply:

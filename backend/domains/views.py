@@ -8,6 +8,16 @@ from django.db import transaction, connection
 from django.db import IntegrityError
 from django.db.utils import ProgrammingError
 from django.conf import settings
+
+# The `reasoning` argument is OpenRouter-specific: OpenRouter accepts it for any
+# model (ignoring it where not applicable), but the OpenAI API rejects it with
+# "Unrecognized request argument". When OPENROUTER_BASE_URL is pointed directly
+# at api.openai.com (local dev with a bare OpenAI key), send no extra_body.
+def _reasoning_extra_body():
+    from django.conf import settings as _s
+    base = (getattr(_s, 'OPENROUTER_BASE_URL', '') or '')
+    return {"reasoning": {"effort": "low"}} if 'openrouter' in base else {}
+
 from rest_framework.parsers import MultiPartParser, FormParser, JSONParser
 from .models import Domain, DomainAccess, InternalLinkMap, ReferenceDocument, BrandLink, BrandLinkChunk
 from authentication.models import UserPermission, Account
@@ -737,7 +747,7 @@ Provide helpful, realistic information that would be useful for brand monitoring
             ],
             temperature=0.7,
             max_tokens=3000,
-            extra_body={"reasoning": {"effort": "low"}},
+            extra_body=_reasoning_extra_body(),
         )
 
         result_text = (response.choices[0].message.content or '').strip()
@@ -837,7 +847,7 @@ Provide the response as a valid JSON array only, no additional text."""
                     # gpt-5-mini reasons before answering; at 500 tokens it spent
                     # 448 on reasoning and emitted two characters.
                     max_tokens=2500,
-                    extra_body={"reasoning": {"effort": "low"}},
+                    extra_body=_reasoning_extra_body(),
                 )
                 result_text = (openai_response.choices[0].message.content or '').strip()
             else:
@@ -1003,7 +1013,7 @@ Return ONLY a valid JSON object with this structure (no markdown, no commentary)
                     # gpt-5-mini reasons before answering, and that reasoning is
                     # charged against max_tokens. At 8000 the 50-keyword payload
                     # could be truncated to nothing (finish_reason=length).
-                    extra_body={"reasoning": {"effort": "low"}},
+                    extra_body=_reasoning_extra_body(),
                     # Hard cap so a stalled OpenAI request can't hold the
                     # connection beyond the frontend's 5-min window.
                     timeout=180,
@@ -2619,7 +2629,7 @@ Provide the response as a valid JSON array only, no additional text."""
                     # (finish_reason=length). Low effort + headroom returns the
                     # answer instead of the thinking.
                     max_tokens=2500,
-                    extra_body={"reasoning": {"effort": "low"}},
+                    extra_body=_reasoning_extra_body(),
                 )
                 result_text = (response.choices[0].message.content or '').strip()
 
@@ -2728,7 +2738,7 @@ Return ONLY a valid JSON object with this structure:
                 # Low effort matters twice here: it stops reasoning from eating
                 # the 50-keyword JSON's budget, and it is what keeps this
                 # synchronous onboarding call fast instead of minutes-long.
-                extra_body={"reasoning": {"effort": "low"}},
+                extra_body=_reasoning_extra_body(),
             )
             result_text = (response.choices[0].message.content or '').strip()
 
@@ -2778,7 +2788,7 @@ Return ONLY a valid JSON object with these fields:
                 ],
                 temperature=0.7,
                 max_tokens=3000,
-                extra_body={"reasoning": {"effort": "low"}},
+                extra_body=_reasoning_extra_body(),
             )
 
             result_text = response.choices[0].message.content.strip()
@@ -2976,7 +2986,7 @@ def _brand_facts_from_knowledge(brand_name, website):
             # Reasoning model: budget for thinking AND the answer, or the reply
             # comes back empty with finish_reason="length".
             max_tokens=4000,
-            extra_body={"reasoning": {"effort": "low"}},
+            extra_body=_reasoning_extra_body(),
         )
         reply = (response.choices[0].message.content or '') if response.choices else ''
     except Exception as exc:

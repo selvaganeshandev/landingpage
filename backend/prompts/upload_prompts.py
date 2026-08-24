@@ -27,6 +27,13 @@ from typing import Any, Dict, List
 
 from django.conf import settings
 
+# OpenRouter-only argument: api.openai.com rejects `reasoning`. No-op extra_body
+# when OPENROUTER_BASE_URL points directly at OpenAI (local dev, bare key).
+def _reasoning_extra_body():
+    from django.conf import settings as _s
+    return {"reasoning": {"effort": "low"}} if 'openrouter' in (getattr(_s, 'OPENROUTER_BASE_URL', '') or '') else {}
+
+
 logger = logging.getLogger(__name__)
 
 # Guard rails. The cap is about the review table staying usable and the grouping
@@ -255,7 +262,7 @@ def _ask(client, model, system: str, payload: Any, *, max_tokens: int) -> str:
             # empty with finish_reason="length".
             max_tokens=max_tokens,
             temperature=0.1,
-            extra_body={'reasoning': {'effort': 'low'}},
+            extra_body=_reasoning_extra_body(),
         )
         return (resp.choices[0].message.content or '') if resp.choices else ''
     except Exception as exc:

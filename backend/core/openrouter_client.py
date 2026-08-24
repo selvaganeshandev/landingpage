@@ -211,7 +211,13 @@ class _MessagesAPI:
         if plugins:
             extra_body["plugins"] = plugins
         if reasoning is not None:
-            extra_body["reasoning"] = reasoning
+            # OpenRouter-only argument: the OpenAI API rejects `reasoning` with
+            # "Unrecognized request argument". When OPENROUTER_BASE_URL is
+            # pointed directly at api.openai.com (local dev with a bare OpenAI
+            # key), drop it so every caller keeps working on both transports.
+            from django.conf import settings as _s
+            if 'openrouter' in (getattr(_s, 'OPENROUTER_BASE_URL', '') or ''):
+                extra_body["reasoning"] = reasoning
         if extra_body:
             kwargs["extra_body"] = extra_body
 

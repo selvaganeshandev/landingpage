@@ -28,6 +28,13 @@ from rest_framework.response import Response
 from domains.models import Domain
 from .models import Prompt, PromptCandidate, PromptGenerationRun, PromptGroup
 
+# OpenRouter-only argument: api.openai.com rejects `reasoning`. No-op extra_body
+# when OPENROUTER_BASE_URL points directly at OpenAI (local dev, bare key).
+def _reasoning_extra_body():
+    from django.conf import settings as _s
+    return {"reasoning": {"effort": "low"}} if 'openrouter' in (getattr(_s, 'OPENROUTER_BASE_URL', '') or '') else {}
+
+
 logger = logging.getLogger(__name__)
 
 # Everything built from Search Console lands in one group, and later fetches
@@ -585,7 +592,7 @@ def create_run_from_search_console(request):
             ],
             temperature=0.4,
             max_tokens=8000,
-            extra_body={'reasoning': {'effort': 'low'}},
+            extra_body=_reasoning_extra_body(),
         )
         reply = (response.choices[0].message.content or '') if response.choices else ''
     except Exception as exc:
