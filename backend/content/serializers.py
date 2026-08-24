@@ -74,8 +74,11 @@ class ContentGenerationRequestSerializer(serializers.Serializer):
     audience = serializers.CharField(default='general')
     depth = serializers.CharField(default='comprehensive')
     word_count = serializers.IntegerField(default=1500)
+    # Taken from the model rather than restated. This list was hardcoded and
+    # silently lagged behind SOURCE_TYPE_CHOICES, so a newly added source type
+    # was rejected here with no sign of why.
     source_type = serializers.ChoiceField(
-        choices=['topic', 'content_gap', 'answer_gap', 'manual'],
+        choices=[c[0] for c in GeneratedContent.SOURCE_TYPE_CHOICES],
         default='manual'
     )
     source_id = serializers.IntegerField(required=False, allow_null=True)

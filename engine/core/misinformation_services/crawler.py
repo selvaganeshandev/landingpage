@@ -9,11 +9,12 @@ error was recorded per-URL as an ordinary crawl failure. DataBlue is the scraper
 this product already pays for, so the crawl now goes through the same account as
 SERP tracking and link validation.
 
-DataBlue returns rendered **markdown**, not raw HTML. `ContentParser` runs
-BeautifulSoup over the result, which degrades to plain text extraction on
-markdown, so the comparison step still receives readable prose. `metadata` also
-carries the origin's real HTTP status, which is what makes 404s distinguishable
-from anti-bot blocks.
+DataBlue returns rendered **markdown**, not raw HTML. `ContentParser` sniffs the
+body and strips markdown to prose itself; it does NOT run BeautifulSoup, and it
+must not be handed markdown expecting trafilatura to cope — trafilatura parses
+HTML only and returns None for markdown, which is exactly what happened between
+this migration and the fix. `metadata` also carries the origin's real HTTP
+status, which is what makes 404s distinguishable from anti-bot blocks.
 """
 import logging
 import time

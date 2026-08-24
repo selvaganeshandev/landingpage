@@ -427,6 +427,12 @@ DATAFORSEO_PASSWORD = config('DATAFORSEO_PASSWORD', default=None)
 # False once the live Backlinks plan is active — same code path.
 DATAFORSEO_USE_SANDBOX = config('DATAFORSEO_USE_SANDBOX', default=False, cast=bool)
 
+# Backlinks: allow a project with NO existing data to be pulled for the first
+# time. Off by default — every first pull is a fresh charge against a shared
+# prepaid balance, and there are ~45 projects that have never been fetched.
+# Projects that already hold backlink data can still be refreshed monthly.
+BACKLINK_FIRST_FETCH_ENABLED = config('BACKLINK_FIRST_FETCH_ENABLED', default=False, cast=bool)
+
 # Google OAuth Configuration
 GOOGLE_OAUTH_CLIENT_ID = config('GOOGLE_OAUTH_CLIENT_ID', default='1080254283876-0o3ur4sr7ii1kh4ugaij4c7n1ptibn4j.apps.googleusercontent.com')
 GOOGLE_OAUTH_CLIENT_SECRET = config('GOOGLE_OAUTH_CLIENT_SECRET', default='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')

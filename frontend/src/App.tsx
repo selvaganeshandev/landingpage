@@ -39,7 +39,10 @@ const SeoKeywordDetail = lazy(() => import("./pages/SeoKeywordDetail"));
 const SeoOpportunities = lazy(() => import("./pages/SeoOpportunities"));
 const SeoOpportunityDetail = lazy(() => import("./pages/SeoOpportunityDetail"));
 const SeoShareOfVoice = lazy(() => import("./pages/SeoShareOfVoice"));
+const SeoBacklinks = lazy(() => import("./pages/SeoBacklinks"));
 const SeoCompetitors = lazy(() => import("./pages/SeoCompetitors"));
+const SeoContentGaps = lazy(() => import("./pages/SeoContentGaps"));
+const SeoContentGapDetail = lazy(() => import("./pages/SeoContentGapDetail"));
 const SeoReports = lazy(() => import("./pages/SeoReports"));
 const ConfigureSeoReport = lazy(() => import("./pages/ConfigureSeoReport"));
 const AddSeoKeyword = lazy(() => import("./pages/AddSeoKeyword"));
@@ -276,6 +279,11 @@ const App = () => (
                   <SeoOpportunityDetail />
                 </ProtectedRoute>
               } />
+              <Route path="/seo-backlinks" element={
+                <ProtectedRoute requiredPermission={MODULES.BACKLINKS}>
+                  <SeoBacklinks />
+                </ProtectedRoute>
+              } />
               <Route path="/seo-share-of-voice" element={
                 <ProtectedRoute requiredPermission={MODULES.SEO_COMPETITORS}>
                   <SeoShareOfVoice />
@@ -284,6 +292,16 @@ const App = () => (
               <Route path="/seo-competitors" element={
                 <ProtectedRoute requiredPermission={MODULES.SEO_COMPETITORS}>
                   <SeoCompetitors />
+                </ProtectedRoute>
+              } />
+              <Route path="/seo-content-gaps" element={
+                <ProtectedRoute requiredPermission={MODULES.KEYWORD_RANKINGS}>
+                  <SeoContentGaps />
+                </ProtectedRoute>
+              } />
+              <Route path="/seo-content-gaps/:id" element={
+                <ProtectedRoute requiredPermission={MODULES.KEYWORD_RANKINGS}>
+                  <SeoContentGapDetail />
                 </ProtectedRoute>
               } />
               <Route path="/seo-reports" element={

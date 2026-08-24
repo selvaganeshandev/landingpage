@@ -35,6 +35,8 @@ interface BillingProject {
   currency: string;
   over_top_slab: boolean;
   organisation: string;
+  /** Present only in a region invoiced in another currency (see display_currency). */
+  price_display?: number;
 }
 
 interface BillingRegion {
@@ -45,6 +47,11 @@ interface BillingRegion {
   billable_projects: number;
   total_price: number;
   currency: string;
+  /** Currency this region is invoiced in. Equal to `currency` unless converted. */
+  display_currency: string;
+  total_price_display?: number;
+  fx_rate?: number;
+  fx_source?: string;
 }
 
 interface RatePlan {
@@ -71,6 +78,41 @@ interface BillingResponse {
 }
 
 const inr = (n: number) => n.toLocaleString("en-IN");
+
+const usd = (n: number) =>
+  n.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+
+/**
+ * An amount in the currency its region is invoiced in.
+ *
+ * UAE clients are billed in USD while the rate card is INR, so those rows lead
+ * with USD and keep the rupee figure beside it — the charge is still an INR
+ * amount underneath, and hiding that makes the number impossible to reconcile
+ * against the rate card or the invoice. Regions billed in INR render unchanged.
+ */
+const Money = ({
+  region, inrAmount, displayAmount, large,
+}: {
+  region: BillingRegion; inrAmount: number; displayAmount?: number; large?: boolean;
+}) => {
+  if (region.display_currency === region.currency || displayAmount == null) {
+    return (
+      <>
+        {inr(inrAmount)} <span className={large ? "text-sm" : "font-bold"}>{region.currency}</span>
+      </>
+    );
+  }
+  return (
+    <span className="inline-flex flex-col items-end leading-tight">
+      <span>
+        {usd(displayAmount)} <span className={large ? "text-sm" : "font-bold"}>{region.display_currency}</span>
+      </span>
+      <span className={cn("text-muted-foreground font-normal", large ? "text-xs" : "text-[10px]")}>
+        ({inr(inrAmount)} {region.currency})
+      </span>
+    </span>
+  );
+};
 
 /** "2026-07" -> "July 2026". Parsed as a plain Y/M so the label cannot shift a
  *  month across a timezone boundary the way new Date("2026-07") can. */
@@ -101,6 +143,11 @@ const RATE_ROWS: { label: string; render: (t: RatePlan) => React.ReactNode }[] =
 ];
 
 function RegionTable({ region, showOrg }: { region: BillingRegion; showOrg: boolean }) {
+  // Only projects that actually track keywords get a row — a list of dozens of
+  // 0-keyword projects buries the handful that are charged. The header counts
+  // above still report every project in the region, billable or not.
+  const rows = region.projects.filter((p) => p.used_keywords > 0);
+
   return (
     <Card className="border border-border overflow-hidden">
       {/* The header renders even when the region is empty, so an unused region
@@ -121,7 +168,8 @@ function RegionTable({ region, showOrg }: { region: BillingRegion; showOrg: bool
         <div className="text-right">
           <p className="text-xs text-muted-foreground">Total Price (all rows)</p>
           <p className="text-lg font-bold text-primary">
-            {inr(region.total_price)} <span className="text-sm">{region.currency}</span>
+            <Money region={region} inrAmount={region.total_price}
+                   displayAmount={region.total_price_display} large />
           </p>
         </div>
       </div>
@@ -130,7 +178,7 @@ function RegionTable({ region, showOrg }: { region: BillingRegion; showOrg: bool
           make the card metres tall and push the second region table far below
           the fold. Roughly six rows visible, then scroll. */}
       <CardContent className="p-0 max-h-[320px] overflow-auto">
-        {region.projects.length === 0 ? (
+        {rows.length === 0 ? (
           <div className="py-16 text-center text-sm text-muted-foreground">
             No billable projects in this region
           </div>
@@ -144,15 +192,15 @@ function RegionTable({ region, showOrg }: { region: BillingRegion; showOrg: bool
                 <TableHead className="text-xs font-semibold py-2">PROJECT</TableHead>
                 <TableHead className="text-center text-xs font-semibold py-2 w-28 whitespace-nowrap">USED KEYWORD</TableHead>
                 <TableHead className="text-center text-xs font-semibold py-2 w-28 whitespace-nowrap">KEYWORD LIMIT</TableHead>
-                <TableHead className="text-center text-xs font-semibold py-2 w-28 whitespace-nowrap">PRICE</TableHead>
+                <TableHead className="text-right text-xs font-semibold py-2 w-32 whitespace-nowrap">PRICE</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
-              {region.projects.map((p, i) => (
+              {rows.map((p, i) => (
                 <TableRow
                   key={p.domain_id}
-                  // Muted: no keywords tracked, so nothing is charged. Shown
-                  // rather than hidden so the project is visibly present.
+                  // Muted: keywords are tracked but the slab prices them at
+                  // zero, so the row is present but not a charge.
                   className={cn("hover:bg-muted/30", p.price === 0 && "text-muted-foreground")}
                 >
                   <TableCell className="text-center py-2 text-sm text-muted-foreground">{i + 1}</TableCell>
@@ -188,8 +236,8 @@ function RegionTable({ region, showOrg }: { region: BillingRegion; showOrg: bool
                   <TableCell className="text-center py-2 text-sm">
                     {p.keyword_limit > 0 ? inr(p.keyword_limit) : "—"}
                   </TableCell>
-                  <TableCell className="text-center py-2 text-sm">
-                    {inr(p.price)} <span className="font-bold">{p.currency}</span>
+                  <TableCell className="text-right py-2 text-sm">
+                    <Money region={region} inrAmount={p.price} displayAmount={p.price_display} />
                   </TableCell>
                 </TableRow>
               ))}
@@ -350,7 +398,7 @@ export default function Billing() {
         <div>
           <p className="text-sm text-muted-foreground">
             Charged per project on the keyword slab it falls into. Projects tracking
-            no keywords are listed but not charged.
+            no keywords are counted in the totals but omitted from the tables.
           </p>
           <p className="text-sm mt-1">
             <span className="text-muted-foreground">Grand total: </span>

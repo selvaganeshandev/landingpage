@@ -4,6 +4,7 @@ from rest_framework import status
 from rest_framework.permissions import AllowAny, IsAuthenticated
 from rest_framework_simplejwt.tokens import RefreshToken
 from django.contrib.auth import authenticate
+from django.contrib.auth.models import update_last_login
 from django.shortcuts import get_object_or_404
 from llm_monitor.email_utils import send_mail
 from django.utils import timezone
@@ -187,6 +188,17 @@ def login(request):
     # account_status must be active: a suspended account can have is_active=True
     # but must not be allowed to start a new session.
     if user and user.is_active and getattr(user, 'account_status', 'active') == 'active':
+        # This API is stateless, so it never calls django.contrib.auth.login()
+        # and the user_logged_in signal that normally maintains last_login never
+        # fires. Without this the column stays NULL for everyone, which makes
+        # "never signed in" indistinguishable from "signs in daily" — the figure
+        # is used to judge who is dormant and whether invited users onboarded.
+        #
+        # Only a password login counts. Token refreshes are deliberately not
+        # recorded: a browser quietly renewing a token would otherwise keep a
+        # dormant account looking active.
+        update_last_login(None, user)
+
         refresh = RefreshToken.for_user(user)
         access_token = refresh.access_token
         access_token['email'] = user.email
@@ -1436,3 +1448,194 @@ def check_permissions(request):
 # domain_access endpoints (surfaced in the UI as "Manage Project Access").
 
 
+
+
+# ---------------------------------------------------------------------------
+# DataForSEO credentials — Super Admin only.
+#
+# Used by SEO backlinks and keyword search volume. Deliberately NOT part of the
+# LLM provider list: it is not a chat model, is never quota-probed as one, and
+# authenticates with HTTP Basic (login + password) rather than a bearer token.
+# ---------------------------------------------------------------------------
+
+@api_view(['GET', 'PUT', 'DELETE'])
+@permission_classes([IsAuthenticated])
+def dataforseo_credentials(request):
+    """Read, save or clear this organisation's DataForSEO credentials.
+
+    GET returns the masked state plus the live balance — the balance endpoint
+    is free, so showing it costs nothing and answers the question anyone
+    opening this screen actually has.
+
+    DELETE clears the pair, which falls the organisation back to the system
+    account rather than switching the integration off.
+    """
+    from seo_rankings.services import dataforseo_credentials as creds
+
+    if request.user.role != 'super_admin':
+        return Response(
+            {'error': 'Only super administrators can manage DataForSEO credentials'},
+            status=status.HTTP_403_FORBIDDEN,
+        )
+
+    org = request.user.organisation
+
+    if request.method == 'PUT':
+        login = (request.data.get('login') or '').strip()
+        password = (request.data.get('password') or '').strip()
+        if not login or not password:
+            return Response(
+                {'error': 'Both login and password are required.'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        # Validate before storing: the probe is free, and a stored-but-broken
+        # credential would only surface later as a failed backlink fetch that
+        # has already spent nothing but looks like an outage.
+        result = creds.probe(login, password)
+        if not result['valid']:
+            return Response({'error': result['error']}, status=status.HTTP_400_BAD_REQUEST)
+
+        org.dataforseo_login = login
+        org.dataforseo_password = password
+        org.save(update_fields=['dataforseo_login', 'dataforseo_password_enc'])
+        logger.info("DataForSEO credentials updated for organisation %s", org.id)
+
+    elif request.method == 'DELETE':
+        org.dataforseo_login = ''
+        org.dataforseo_password = None
+        org.save(update_fields=['dataforseo_login', 'dataforseo_password_enc'])
+        logger.info("DataForSEO credentials cleared for organisation %s", org.id)
+
+    login, password, source = creds.credentials_for(org)
+    probe = creds.probe(login, password) if login and password else {
+        'valid': False, 'balance': None, 'error': 'No credentials configured.',
+    }
+
+    payload = {
+        'configured': bool((org.dataforseo_login or '').strip() and org.dataforseo_password),
+        'source': source,
+        'login': login,
+        'login_preview': _mask_key(login) if login else None,
+        'password_preview': _mask_key(password) if password else None,
+        'status': 'CONNECTED' if probe['valid'] else 'INVALID_KEY',
+        'balance': probe.get('balance'),
+        'error': probe.get('error') or '',
+    }
+    response = Response(payload)
+    response['Cache-Control'] = 'no-store'
+    return response
+
+
+@api_view(['GET'])
+@permission_classes([IsAuthenticated])
+def reveal_dataforseo_password(request):
+    """Return the decrypted DataForSEO password on demand. Super Admin only.
+
+    Only ever reveals the ORGANISATION's own password. The system-level pair in
+    .env is deliberately not exposed through the API — an org admin has no
+    business reading the shared account's credentials.
+    """
+    if request.user.role != 'super_admin':
+        return Response(
+            {'error': 'Only super administrators can reveal API keys'},
+            status=status.HTTP_403_FORBIDDEN,
+        )
+
+    org = request.user.organisation
+    raw = org.dataforseo_password
+    if not raw:
+        return Response(
+            {'error': 'No DataForSEO password configured for this organisation'},
+            status=status.HTTP_404_NOT_FOUND,
+        )
+
+    response = Response({'login': org.dataforseo_login, 'password': raw})
+    response['Cache-Control'] = 'no-store'
+    response['Pragma'] = 'no-cache'
+    return response
+
+
+# ---------------------------------------------------------------------------
+# OpenRouter balance
+# ---------------------------------------------------------------------------
+# Every tracked prompt for ChatGPT, Claude and Perplexity bills to this one
+# account, so "how much is left" is the question anyone opening the API Keys
+# screen actually has. OpenRouter answers it for free — no tokens, no model
+# call — which is the same reason the DataForSEO balance is shown there.
+
+@api_view(['GET'])
+@permission_classes([IsAuthenticated])
+def openrouter_balance(request):
+    """Live credit balance for the OpenRouter account in use.
+
+    Read-only and free. Cached briefly so opening the settings page repeatedly
+    does not hammer the endpoint, but short enough that a top-up shows up
+    without waiting.
+    """
+    import requests
+
+    if request.user.role != 'super_admin':
+        return Response(
+            {'error': 'Only super administrators can view the balance'},
+            status=status.HTTP_403_FORBIDDEN,
+        )
+
+    org = request.user.organisation
+    cache_key = f'org_{org.id}_openrouter_balance'
+    cached = cache.get(cache_key)
+    if cached:
+        return Response(cached)
+
+    # Same resolution order the engine uses: this organisation's own key if it
+    # has one, otherwise the system key.
+    key = None
+    encrypted = getattr(org, 'openrouter_api_key', None)
+    if encrypted:
+        try:
+            key = decrypt_value(encrypted)
+        except Exception:
+            key = None
+    if not key:
+        key = getattr(settings, 'OPENROUTER_API_KEY', '') or ''
+
+    if not key:
+        payload = {'configured': False, 'balance': None,
+                   'error': 'No OpenRouter key configured.'}
+        response = Response(payload)
+        response['Cache-Control'] = 'no-store'
+        return response
+
+    try:
+        r = requests.get(
+            'https://openrouter.ai/api/v1/credits',
+            headers={'Authorization': f'Bearer {key}'},
+            timeout=10,
+        )
+        if r.status_code == 401:
+            payload = {'configured': True, 'balance': None,
+                       'error': 'The key was rejected.'}
+        else:
+            r.raise_for_status()
+            data = r.json().get('data') or {}
+            credits = float(data.get('total_credits') or 0)
+            used = float(data.get('total_usage') or 0)
+            payload = {
+                'configured': True,
+                # What is actually left to spend. OpenRouter reports the two
+                # halves separately and never the difference, which is the one
+                # number worth showing.
+                'balance': round(credits - used, 2),
+                'total_credits': round(credits, 2),
+                'total_usage': round(used, 2),
+                'error': '',
+            }
+            cache.set(cache_key, payload, 120)
+    except Exception as exc:
+        logger.warning("OpenRouter balance lookup failed: %s", exc)
+        payload = {'configured': True, 'balance': None,
+                   'error': 'Could not reach OpenRouter.'}
+
+    response = Response(payload)
+    response['Cache-Control'] = 'no-store'
+    return response

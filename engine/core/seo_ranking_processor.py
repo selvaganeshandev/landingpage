@@ -360,7 +360,7 @@ class SeoRankingProcessor:
         logger.info(f"Ranked keyword '{keyword_text}' -> position {live_rank} (ID: {seo_kw.id})")
         return True
 
-    def process_domain_rankings(self, domain_id, batch_size=500):
+    def process_domain_rankings(self, domain_id, batch_size=500, only_ids=None):
         """Process all keywords for a domain in batches via async pipelined
         fetch + DB writes (rankmax pattern).
 
@@ -375,21 +375,27 @@ class SeoRankingProcessor:
         Returns a dict including `remaining` so the caller can reschedule for
         any leftover 'avail' rows. Failed rows are NOT retried in the same run
         (preserves the existing daily-scheduler retry semantics).
+
+        `only_ids` narrows the run to a specific set of SeoKeywordRank rows —
+        that is what the instant just-added path passes, so a fresh import
+        scrapes exactly the keywords the user typed and does not sweep up the
+        nightly backlog sitting at 'avail' on the same domain. `remaining` is
+        then also scoped to that set, so the caller chains batches over its own
+        keywords only.
         """
         from shared_models.seo_models import SeoKeywordRank, SeoDomainDailyMetrics
         from shared_models.models import Domain
 
-        keyword_ids = list(
-            SeoKeywordRank.objects.filter(
-                domain_id=domain_id,
-                auto_call_status='avail'
-            ).values_list('id', flat=True)[:batch_size]
-        )
-
-        total_pending = SeoKeywordRank.objects.filter(
+        pending_qs = SeoKeywordRank.objects.filter(
             domain_id=domain_id,
-            auto_call_status='avail'
-        ).count()
+            auto_call_status='avail',
+        )
+        if only_ids is not None:
+            pending_qs = pending_qs.filter(id__in=list(only_ids))
+
+        keyword_ids = list(pending_qs.values_list('id', flat=True)[:batch_size])
+
+        total_pending = pending_qs.count()
 
         total = len(keyword_ids)
         if total == 0:
@@ -524,10 +530,7 @@ class SeoRankingProcessor:
             logger.error(f"[SEO] Error calculating metrics for domain {domain_id}: {e}", exc_info=True)
 
         # Count how many unprocessed keywords remain (only 'avail', not 'fail')
-        remaining = SeoKeywordRank.objects.filter(
-            domain_id=domain_id,
-            auto_call_status='avail'
-        ).count()
+        remaining = pending_qs.count()
 
         processed_count = success_count + fail_count
         logger.info(

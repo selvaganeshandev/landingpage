@@ -28,6 +28,7 @@ import { useToast } from "@/hooks/use-toast";
 import { apiClient } from "@/services/api";
 import { useDomainStore } from "@/stores/domainStore";
 import { useSidebar } from "@/contexts/SidebarContext";
+import { useAuth } from "@/contexts/AuthContext";
 
 const regionToIsocode = (region: string): string => {
   const regionMap: Record<string, string> = {
@@ -126,7 +127,18 @@ const AddSeoKeyword = () => {
   const { toast } = useToast();
   const { selectedDomain } = useDomainStore();
   const { isOpen: sidebarOpen } = useSidebar();
+  const { checkPermission } = useAuth();
   const activeDomainId = selectedDomain?.id?.toString() || "";
+
+  // The button into this page is hidden without the right, but the route is
+  // still typeable — bounce back rather than let them fill in a form the API
+  // will reject on submit.
+  const canAddKeywords = checkPermission('keywords_add');
+  useEffect(() => {
+    if (!canAddKeywords) {
+      navigate('/seo-rankings', { replace: true });
+    }
+  }, [canAddKeywords, navigate]);
 
   const [loading, setLoading] = useState(false);
   const [keywordText, setKeywordText] = useState("");

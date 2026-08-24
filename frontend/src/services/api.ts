@@ -2448,6 +2448,93 @@ export const apiClient = {
   getSeoOpportunityDetail: (seoKwId: string | number) =>
     apiRequest(`/seo/opportunities/${seoKwId}/`),
 
+  // ----- SEO content gaps (organic search, not the GEO content-gaps page) -----
+  getSeoContentGaps: (params: {
+    domain_id: string; platform?: string; bucket?: string; intent?: string;
+    content_type?: string; action?: string; search?: string; page?: number;
+  }) => {
+    const sp = new URLSearchParams({ domain_id: params.domain_id });
+    (['platform', 'bucket', 'intent', 'content_type', 'action', 'search'] as const)
+      .forEach((k) => { if (params[k]) sp.append(k, String(params[k])); });
+    if (params.page) sp.append('page', String(params.page));
+    return apiRequest(`/seo/content-gaps/?${sp.toString()}`);
+  },
+
+  getSeoContentGapDetail: (seoKwId: string | number) =>
+    apiRequest(`/seo/content-gaps/${seoKwId}/`),
+
+  exportSeoContentGaps: (params: { domain_id: string; platform?: string; filename?: string }) => {
+    const sp = new URLSearchParams({ domain_id: params.domain_id });
+    if (params.platform) sp.append('platform', params.platform);
+    return downloadFile(`/seo/content-gaps/export/?${sp.toString()}`,
+      `${params.filename || 'seo-content-gaps'}.xlsx`);
+  },
+
+  // ----- DataForSEO credentials (Organization Settings -> API Keys) -----
+  // Free to read — no tokens, no model call. Every tracked prompt for ChatGPT,
+  // Claude and Perplexity bills to this one account.
+  getOpenRouterBalance: () => apiRequest('/auth/organization/openrouter/balance/'),
+
+  getDataForSeoCredentials: () => apiRequest('/auth/organization/dataforseo/'),
+
+  saveDataForSeoCredentials: (data: { login: string; password: string }) =>
+    apiRequest('/auth/organization/dataforseo/', {
+      method: 'PUT',
+      body: JSON.stringify(data),
+    }),
+
+  clearDataForSeoCredentials: () =>
+    apiRequest('/auth/organization/dataforseo/', { method: 'DELETE' }),
+
+  revealDataForSeoPassword: () => apiRequest('/auth/organization/dataforseo/reveal/'),
+
+  // ----- Backlinks (DataForSEO) -----
+  // Fetching is manual and rate-limited to once a month per project; the
+  // backend returns 429 with `next_refresh_allowed_at` when it is too soon.
+  getSeoBacklinks: (domainId: string | number) =>
+    apiRequest(`/seo/backlinks/?domain_id=${domainId}`),
+
+  getSeoBacklinkList: (params: {
+    domain_id: string | number;
+    page?: number;
+    search?: string;
+    link_type?: string;
+    is_new?: boolean;
+    is_lost?: boolean;
+    is_broken?: boolean;
+    sort?: string;
+    direction?: string;
+  }) => {
+    const sp = new URLSearchParams({ domain_id: String(params.domain_id) });
+    if (params.page) sp.append('page', String(params.page));
+    if (params.search) sp.append('search', params.search);
+    if (params.link_type && params.link_type !== 'all') sp.append('link_type', params.link_type);
+    if (params.is_new) sp.append('is_new', 'true');
+    if (params.is_lost) sp.append('is_lost', 'true');
+    if (params.is_broken) sp.append('is_broken', 'true');
+    if (params.sort) sp.append('sort', params.sort);
+    if (params.direction) sp.append('direction', params.direction);
+    return apiRequest(`/seo/backlinks/list/?${sp.toString()}`);
+  },
+
+  fetchSeoBacklinks: (domainId: string | number) =>
+    apiRequest('/seo/backlinks/fetch/', {
+      method: 'POST',
+      body: JSON.stringify({ domain_id: domainId }),
+    }),
+
+  exportSeoBacklinksXlsx: async (domainId: string | number): Promise<Blob> => {
+    const token = getAuthToken();
+    const headers: HeadersInit = {};
+    if (token) headers['Authorization'] = `Bearer ${token}`;
+    const response = await fetch(
+      `${API_BASE_URL}/seo/backlinks/export/?domain_id=${domainId}`,
+      { method: 'GET', headers }
+    );
+    if (!response.ok) throw new Error('Export failed');
+    return response.blob();
+  },
+
   exportSeoOpportunitiesXlsx: async (domainId: string): Promise<Blob> => {
     const token = getAuthToken();
     const headers: HeadersInit = {};

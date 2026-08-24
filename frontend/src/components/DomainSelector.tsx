@@ -233,6 +233,14 @@ export const DomainSelector = () => {
 
   const selectedFaviconUrl = selectedDomain ? getFaviconUrl(selectedDomain.url, 32) : null;
 
+  // Footer counts. Processing and failed are surfaced only when non-zero, so a
+  // healthy account shows a plain project count rather than two zeroes.
+  const processingCount = domains.filter(
+    (d) => d.processing_status && ['INIT', 'SCHD', 'PROC'].includes(d.processing_status),
+  ).length;
+  const failedCount = domains.filter((d) => d.processing_status === 'FAIL').length;
+  const isSearching = query.trim().length > 0;
+
   const filtered = domains.filter((d) => {
     const q = query.trim().toLowerCase();
     if (!q) return true;
@@ -290,7 +298,7 @@ export const DomainSelector = () => {
             ) : (
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
                 {filtered.map((domain) => {
-                  const faviconUrl = getFaviconUrl(domain.url, 32);
+                  const faviconUrl = getFaviconUrl(domain.url, 64);
                   const isProcessing = domain.processing_status
                     && ['INIT', 'SCHD', 'PROC'].includes(domain.processing_status);
                   const isFailed = domain.processing_status === 'FAIL';
@@ -316,13 +324,17 @@ export const DomainSelector = () => {
                         isDisabled && "opacity-60 cursor-not-allowed hover:border-border hover:bg-transparent",
                       )}
                     >
+                      {/* The icon fills the tile edge to edge — a 24px glyph
+                          floating in a 40px box was hard to pick out when
+                          scanning fifty projects by logo. Favicons are square,
+                          so object-cover fills without cropping. */}
                       <div className="h-10 w-10 flex-shrink-0 rounded-md border border-border bg-muted flex items-center justify-center overflow-hidden">
                         {faviconUrl ? (
                           <img
                             src={faviconUrl}
                             alt=""
-                            className="h-6 w-6 object-contain"
-                            onError={(e) => handleFaviconError(e, domain.url, domain.name, 32)}
+                            className="h-full w-full object-cover"
+                            onError={(e) => handleFaviconError(e, domain.url, domain.name, 64)}
                           />
                         ) : (
                           <Globe className="h-5 w-5 text-muted-foreground" />
@@ -359,9 +371,40 @@ export const DomainSelector = () => {
             )}
           </div>
 
-          {canAddDomain && (
-            <div className="flex justify-end pt-2">
+          {/* Footer. Flush to the dialog edges: -mx-6 -mb-6 cancels
+              DialogContent's p-6, and -mt-4 cancels its grid `gap-4` — without
+              that the border floated below a band of empty dialog background
+              rather than sitting on the list's bottom edge. rounded-b-lg keeps
+              the tinted bar inside the dialog's own corner radius.
+
+              Renders even when the user cannot add a domain, because the counts
+              are the point: with fifty-odd projects, "how many are there" and
+              "how many did my search match" are not answerable by eye. */}
+          <div className="-mx-6 -mb-6 -mt-4 flex flex-wrap items-center justify-between gap-3 rounded-b-lg border-t border-border bg-muted/30 px-6 py-3">
+            <p className="text-xs text-muted-foreground">
+              {isSearching ? (
+                <>
+                  <span className="font-medium text-foreground">{filtered.length}</span>
+                  {" of "}
+                  <span className="font-medium text-foreground">{domains.length}</span>
+                  {" projects match"}
+                </>
+              ) : (
+                <>
+                  <span className="font-medium text-foreground">{domains.length}</span>
+                  {domains.length === 1 ? " project" : " projects"}
+                </>
+              )}
+              {processingCount > 0 && (
+                <span className="text-orange-500"> · {processingCount} processing</span>
+              )}
+              {failedCount > 0 && (
+                <span className="text-destructive"> · {failedCount} failed</span>
+              )}
+            </p>
+            {canAddDomain && (
               <Button
+                size="sm"
                 onClick={() => {
                   setOpen(false);
                   setAddDomainOpen(true);
@@ -370,8 +413,8 @@ export const DomainSelector = () => {
                 <Plus className="h-4 w-4 mr-2" />
                 Add Domain
               </Button>
-            </div>
-          )}
+            )}
+          </div>
         </DialogContent>
       </Dialog>
 

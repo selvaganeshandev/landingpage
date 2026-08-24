@@ -1,5 +1,5 @@
 from django.urls import path
-from . import views, views_billing, views_invoice_settings, views_insights
+from . import views, views_billing, views_invoice_settings, views_insights, views_backlinks, views_content_gap
 
 urlpatterns = [
     # Keyword rankings
@@ -25,6 +25,18 @@ urlpatterns = [
     path('share-of-voice/', views_insights.seo_share_of_voice, name='seo-share-of-voice'),
     path('opportunities/export/', views_insights.seo_opportunities_export, name='seo-opportunities-export'),
     path('opportunities/<int:seo_kw_id>/', views_insights.seo_opportunity_detail, name='seo-opportunity-detail'),
+
+    # Backlinks (DataForSEO) — manual fetch, monthly refresh
+    path('backlinks/', views_backlinks.backlinks_overview, name='seo-backlinks-overview'),
+    path('backlinks/list/', views_backlinks.backlinks_list, name='seo-backlinks-list'),
+    path('backlinks/fetch/', views_backlinks.backlinks_fetch, name='seo-backlinks-fetch'),
+    path('backlinks/export/', views_backlinks.backlinks_export, name='seo-backlinks-export'),
+
+    # Content gaps (organic search) — distinct from competitors/content-gaps/,
+    # which is the GEO/LLM version.
+    path('content-gaps/', views_content_gap.seo_content_gaps, name='seo-content-gaps'),
+    path('content-gaps/export/', views_content_gap.seo_content_gaps_export, name='seo-content-gaps-export'),
+    path('content-gaps/<int:seo_kw_id>/', views_content_gap.seo_content_gap_detail, name='seo-content-gap-detail'),
 
     # Bulk operations
     path('keywords/bulk-delete/', views.seo_keyword_bulk_delete, name='seo-keyword-bulk-delete'),

@@ -71,7 +71,10 @@ const Prompts = () => {
     discard: discardRun,
     refresh: refreshRun,
   } = useGenerationRun(selectedDomain?.id);
-  const { user } = useAuth();
+  const { user, checkPermission } = useAuth();
+  const canAddPrompts = checkPermission('prompts_add');
+  const canEditPrompts = checkPermission('prompts_edit');
+  const canDeletePrompts = checkPermission('prompts_delete');
 
   useEffect(() => {
     setPromptGroups([]);
@@ -273,7 +276,7 @@ const Prompts = () => {
               only renders in the empty state — so this is the way back into it.
               With no groups the chooser is already on screen, and the button
               stays the direct manual route rather than pointing at itself. */}
-          {promptGroups.length > 0 ? (
+          {!canAddPrompts ? null : promptGroups.length > 0 ? (
             <Button
               onClick={() => {
                 setBuildStep("choose");
@@ -393,23 +396,29 @@ const Prompts = () => {
                   <Eye className="h-4 w-4 mr-1" />
                   View Details
                 </Button>
-                <Button variant="outline" size="sm" onClick={() => handleEditGroup(group)} className="border border-border">
-                  <Edit className="h-4 w-4 mr-1" />
-                  Edit Group
-                </Button>
-                <Button variant="outline" size="sm" onClick={() => handleGenerateVariants(group)} className="border border-border">
-                  <Sparkles className="h-4 w-4 mr-1" />
-                  Generate Variants
-                </Button>
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={() => handleDeleteGroup(group)}
-                  className="border border-destructive/30 text-destructive hover:bg-destructive/10 hover:text-destructive ml-auto"
-                >
-                  <Trash2 className="h-4 w-4 mr-1" />
-                  Delete
-                </Button>
+                {canEditPrompts && (
+                  <Button variant="outline" size="sm" onClick={() => handleEditGroup(group)} className="border border-border">
+                    <Edit className="h-4 w-4 mr-1" />
+                    Edit Group
+                  </Button>
+                )}
+                {canAddPrompts && (
+                  <Button variant="outline" size="sm" onClick={() => handleGenerateVariants(group)} className="border border-border">
+                    <Sparkles className="h-4 w-4 mr-1" />
+                    Generate Variants
+                  </Button>
+                )}
+                {canDeletePrompts && (
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => handleDeleteGroup(group)}
+                    className="border border-destructive/30 text-destructive hover:bg-destructive/10 hover:text-destructive ml-auto"
+                  >
+                    <Trash2 className="h-4 w-4 mr-1" />
+                    Delete
+                  </Button>
+                )}
               </div>
             </div>
           </Card>
@@ -422,6 +431,17 @@ const Prompts = () => {
           </div>
         )}
         </>
+        ) : !canAddPrompts ? (
+          // The empty state is the prompt-builder itself, so without the add
+          // right there is nothing here to offer — say so instead of showing a
+          // wizard whose every path ends in a 403.
+          <Card className="p-8 md:p-10 text-center">
+            <h3 className="text-lg font-semibold">No prompts yet</h3>
+            <p className="text-sm text-muted-foreground mt-2">
+              You do not have permission to add prompts. Ask an administrator to
+              add them, or to grant you the "Add Prompts" permission.
+            </p>
+          </Card>
         ) : (
           <Card className="p-8 md:p-10">
             {/* Reached from the header button, so it needs a way back — without

@@ -10,8 +10,15 @@ from rest_framework.response import Response
 from rest_framework import status
 from rest_framework.permissions import IsAuthenticated
 from django.db import transaction
+from django.db.models import Case, IntegerField, Value, When
 from django.conf import settings
 
+from core.permissions import (
+    MODULE_KEYWORDS_ADD,
+    MODULE_KEYWORDS_DELETE,
+    MODULE_KEYWORDS_EDIT,
+    user_has_module_permission,
+)
 from domains.models import Domain
 from .models import (
     SeoKeywordRank, SeoRankHistory, SeoSerpFeatureHistory, SeoDomainDailyMetrics,
@@ -102,40 +109,69 @@ def seo_keyword_list(request):
     if search:
         qs = qs.filter(keyword__keyword__icontains=search)
 
-    qs = qs.order_by('-rank_now')
+    # Best rank first. rank_now = 0 means "not ranked", not position zero, so a
+    # plain ascending sort would lead with every keyword that ranks nowhere and
+    # bury the ones that rank #1. The annotation pushes those to the end while
+    # keeping 1, 2, 3 ... in order ahead of them.
+    qs = qs.annotate(
+        _unranked=Case(When(rank_now=0, then=Value(1)), default=Value(0),
+                       output_field=IntegerField()),
+    ).order_by('_unranked', 'rank_now')
     # List serializer: omits the SERP blobs this page never reads. See
     # SeoKeywordRankListSerializer — they were 70% of the response.
     serializer = SeoKeywordRankListSerializer(qs, many=True)
     return Response(serializer.data)
 
 
-def _kickoff_new_keywords(domain_id, created_count):
+def _kickoff_new_keywords(domain_id, created_ids):
     """Start ranking and volume for keywords that were just added.
 
     Without this a newly imported brand shows nothing until the 02:00 rank cron
     and the :20 volume sweep — which reads as a broken page to whoever just
     added the keywords.
 
+    Ranking goes to `seo/process-new-keywords/`, not `seo/process-domain/`: it
+    carries the ids of the rows we just created so the engine can put them on
+    the dedicated `seo_instant` queue and scrape exactly those. The domain
+    endpoint would have queued behind the nightly sweep — hours, in practice —
+    and would have swept up every other 'avail' row on the domain with it.
+
     Both calls are fire-and-forget against the engine, which owns Celery. They
     are wrapped so a failure here can never fail the import itself: the crons
     remain the safety net, so the worst case is the old behaviour of waiting.
+    A non-2xx reply is logged too — silently treating a 500 as success is what
+    made the previous breakage invisible.
 
     Volume is a per-domain batch, not per keyword — DataForSEO bills per
     request, so 500 new keywords cost one call.
     """
-    if not created_count:
+    created_ids = list(created_ids or [])
+    if not created_ids:
         return
     import requests as http_requests
     engine_url = getattr(settings, 'ENGINE_API_URL', 'http://localhost:8001')
-    for path in ('seo/process-domain/', 'seo/sync-volume/'):
+    calls = (
+        ('seo/process-new-keywords/', {
+            'domain_id': int(domain_id),
+            'seo_keyword_rank_ids': created_ids,
+        }),
+        ('seo/sync-volume/', {'domain_id': int(domain_id)}),
+    )
+    for path, payload in calls:
         try:
-            http_requests.post(
-                f'{engine_url}/api/{path}',
-                json={'domain_id': int(domain_id)},
-                timeout=5,
-            )
+            resp = http_requests.post(f'{engine_url}/api/{path}', json=payload, timeout=5)
+            if resp.status_code >= 300:
+                logger.error(
+                    "[SEO] Engine rejected %s for domain %s: HTTP %s %s",
+                    path, domain_id, resp.status_code, resp.text[:300],
+                )
+            else:
+                logger.info(
+                    "[SEO] Auto-started %s for domain %s (%d keywords)",
+                    path, domain_id, len(created_ids),
+                )
         except http_requests.RequestException as e:
-            logger.warning(
+            logger.error(
                 "[SEO] Could not auto-start %s for domain %s: %s — "
                 "the scheduled sweep will pick it up", path, domain_id, e,
             )
@@ -148,8 +184,11 @@ def seo_keyword_add(request):
     Add a keyword to SEO rank tracking.
     Body: { keyword, domain, platform, target_url, region, isocode, language_code, ... }
     """
-    if request.user.role not in ['admin', 'super_admin']:
-        return Response({'error': 'Only admins can add SEO keywords'}, status=status.HTTP_403_FORBIDDEN)
+    if not user_has_module_permission(request.user, MODULE_KEYWORDS_ADD):
+        return Response(
+            {'error': 'You do not have permission to add keywords'},
+            status=status.HTTP_403_FORBIDDEN,
+        )
 
     serializer = SeoKeywordRankCreateSerializer(data=request.data)
     if not serializer.is_valid():
@@ -162,7 +201,7 @@ def seo_keyword_add(request):
     try:
         with transaction.atomic():
             seo_kw = serializer.save(auto_call_status='avail')
-        _kickoff_new_keywords(seo_kw.domain_id, 1)
+        _kickoff_new_keywords(seo_kw.domain_id, [seo_kw.id])
         return Response(
             SeoKeywordRankSerializer(seo_kw).data,
             status=status.HTTP_201_CREATED,
@@ -178,8 +217,11 @@ def seo_keyword_bulk_add(request):
     Bulk-add keywords to SEO tracking.
     Body: { domain_id, keywords: [{ keyword_id, platform, target_url, region, isocode, language_code }] }
     """
-    if request.user.role not in ['admin', 'super_admin']:
-        return Response({'error': 'Only admins can add SEO keywords'}, status=status.HTTP_403_FORBIDDEN)
+    if not user_has_module_permission(request.user, MODULE_KEYWORDS_ADD):
+        return Response(
+            {'error': 'You do not have permission to add keywords'},
+            status=status.HTTP_403_FORBIDDEN,
+        )
 
     domain_id = request.data.get('domain_id')
     keywords_data = request.data.get('keywords', [])
@@ -193,6 +235,7 @@ def seo_keyword_bulk_add(request):
         return Response({'error': 'Domain not found'}, status=status.HTTP_404_NOT_FOUND)
 
     created = []
+    created_ids = []
     skipped = []
 
     with transaction.atomic():
@@ -219,10 +262,11 @@ def seo_keyword_bulk_add(request):
             )
             if was_created:
                 created.append(SeoKeywordRankSerializer(obj).data)
+                created_ids.append(obj.id)
             else:
                 skipped.append({'keyword_id': keyword_id, 'reason': 'already exists'})
 
-    _kickoff_new_keywords(domain.id, len(created))
+    _kickoff_new_keywords(domain.id, created_ids)
 
     return Response({
         'created_count': len(created),
@@ -266,8 +310,11 @@ def seo_keyword_import(request):
 
     Returns: { created_count, skipped_count, seo_created_count, seo_skipped_count, details }
     """
-    if request.user.role not in ['admin', 'super_admin']:
-        return Response({'error': 'Only admins can import keywords'}, status=status.HTTP_403_FORBIDDEN)
+    if not user_has_module_permission(request.user, MODULE_KEYWORDS_ADD):
+        return Response(
+            {'error': 'You do not have permission to add keywords'},
+            status=status.HTTP_403_FORBIDDEN,
+        )
 
     domain_id = request.data.get('domain_id')
     if not domain_id:
@@ -363,6 +410,7 @@ def seo_keyword_import(request):
     kw_skipped = 0
     seo_created = 0
     seo_skipped = 0
+    seo_created_ids = []
     details = []
 
     with transaction.atomic():
@@ -402,12 +450,13 @@ def seo_keyword_import(request):
             )
             if seo_was_new:
                 seo_created += 1
+                seo_created_ids.append(seo_obj.id)
                 details.append({'keyword': kw_text, 'status': 'created'})
             else:
                 seo_skipped += 1
                 details.append({'keyword': kw_text, 'status': 'already_tracked'})
 
-    _kickoff_new_keywords(domain.id, seo_created)
+    _kickoff_new_keywords(domain.id, seo_created_ids)
 
     return Response({
         'success': True,
@@ -435,8 +484,11 @@ def seo_keyword_detail(request, pk):
         return Response(SeoKeywordRankSerializer(seo_kw).data)
 
     if request.method == 'DELETE':
-        if request.user.role not in ['admin', 'super_admin']:
-            return Response({'error': 'Only admins can delete'}, status=status.HTTP_403_FORBIDDEN)
+        if not user_has_module_permission(request.user, MODULE_KEYWORDS_DELETE):
+            return Response(
+                {'error': 'You do not have permission to delete keywords'},
+                status=status.HTTP_403_FORBIDDEN,
+            )
         seo_kw.delete()
         return Response(status=status.HTTP_204_NO_CONTENT)
 
@@ -920,8 +972,11 @@ def seo_keyword_bulk_delete(request):
     Delete multiple SEO keywords and their related history.
     Body: { ids: [1, 2, 3] }
     """
-    if request.user.role not in ['admin', 'super_admin']:
-        return Response({'error': 'Only admins can delete keywords'}, status=status.HTTP_403_FORBIDDEN)
+    if not user_has_module_permission(request.user, MODULE_KEYWORDS_DELETE):
+        return Response(
+            {'error': 'You do not have permission to delete keywords'},
+            status=status.HTTP_403_FORBIDDEN,
+        )
 
     ids = request.data.get('ids', [])
     if not ids:
@@ -963,6 +1018,12 @@ def seo_keyword_update_tags(request):
     mode=replace: replaces all tags.
     Max 20 tags per keyword.
     """
+    if not user_has_module_permission(request.user, MODULE_KEYWORDS_EDIT):
+        return Response(
+            {'error': 'You do not have permission to edit keywords'},
+            status=status.HTTP_403_FORBIDDEN,
+        )
+
     ids = request.data.get('ids', [])
     new_tags = request.data.get('tags', [])
     mode = request.data.get('mode', 'merge')
@@ -1000,6 +1061,12 @@ def seo_keyword_remove_tag(request):
     Remove a specific tag from all keywords in a domain.
     Body: { domain_id: 50, tag: "tagname" }
     """
+    if not user_has_module_permission(request.user, MODULE_KEYWORDS_EDIT):
+        return Response(
+            {'error': 'You do not have permission to edit keywords'},
+            status=status.HTTP_403_FORBIDDEN,
+        )
+
     domain_id = request.data.get('domain_id')
     tag_name = request.data.get('tag', '').strip().lower()
 
@@ -4405,7 +4472,7 @@ def _fetch_keyword_ranking_overview(domain_id, sheet):
             'total_rows': 1,
         }
 
-    from django.db.models import Q, Count
+    from django.db.models import Case, Count, IntegerField, Q, Value, When
 
     buckets = [
         ('Top 1', Q(rank_now=1)),

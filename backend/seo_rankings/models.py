@@ -123,7 +123,12 @@ class SeoKeywordRank(models.Model):
         db_table = 'seo_keyword_ranks'
         verbose_name = 'SEO Keyword Rank'
         verbose_name_plural = 'SEO Keyword Ranks'
-        unique_together = ['keyword', 'domain', 'platform']
+        # Rankmax tracks a keyword by text + search region + language + device,
+        # and treats each combination as its own tracked item — the Arabic and
+        # English variants of one term on google.com.sa are two rows with two
+        # rank histories. Keying on platform alone collapsed them into one and
+        # silently dropped the second's history on import.
+        unique_together = ['keyword', 'domain', 'platform', 'language_code', 'region']
         indexes = [
             models.Index(fields=['domain', 'platform', '-rank_now']),
             models.Index(fields=['domain', 'auto_call_status']),
@@ -611,3 +616,13 @@ class SeoKeywordVolume(models.Model):
 
 # Invoice letterhead / GST settings, kept in their own module for clarity.
 from .models_invoice import InvoiceSettings, FxRate  # noqa: E402,F401
+
+# Backlink profiles (DataForSEO Backlinks API) — manual, monthly, snapshot-based.
+from .models_backlinks import (  # noqa: E402,F401
+    SeoBacklinkSnapshot,
+    SeoBacklinkItem,
+    SeoBacklinkReferringDomain,
+    SeoBacklinkAnchor,
+    SeoBacklinkPage,
+    SeoBacklinkHistoryPoint,
+)

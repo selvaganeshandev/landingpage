@@ -49,6 +49,63 @@ class CanExecuteScans(_RequiresCapability):
     message = "You do not have permission to run scans."
 
 
+# ---------------------------------------------------------------------------
+# Fine-grained action permissions
+# ---------------------------------------------------------------------------
+# The capability layer above answers "may this role do this kind of thing at
+# all". These answer the narrower question "has this specific member been
+# granted this specific action", and are backed by the UserPermission grid that
+# admins edit on the team-member permissions page.
+
+MODULE_PROMPTS_ADD = "prompts_add"
+MODULE_PROMPTS_EDIT = "prompts_edit"
+MODULE_PROMPTS_DELETE = "prompts_delete"
+MODULE_KEYWORDS_ADD = "keywords_add"
+MODULE_KEYWORDS_EDIT = "keywords_edit"
+MODULE_KEYWORDS_DELETE = "keywords_delete"
+
+
+def user_has_module_permission(user, module: str) -> bool:
+    """True when ``user`` may perform the action named by ``module``.
+
+    Admins and super admins bypass the grid entirely — they could already do
+    every one of these actions, and making them grant themselves rights they
+    hold by role would be a regression. Clients are always denied: every unsafe
+    method is rejected for them at the middleware anyway, and answering True
+    here would imply otherwise. Everyone else needs an explicit grant.
+
+    The active/status gates mirror ``user_has_capability`` so a suspended
+    account holding a still-valid JWT is denied at this layer too.
+    """
+    if user is None or not getattr(user, "is_authenticated", False):
+        return False
+    if not getattr(user, "is_active", False):
+        return False
+    if getattr(user, "account_status", "active") != "active":
+        return False
+
+    role = getattr(user, "role", "")
+    if role in ("admin", "super_admin"):
+        return True
+    if role == "client":
+        return False
+
+    # Imported lazily: core.permissions is imported during app loading, before
+    # the authentication app's models are ready.
+    from authentication.models import UserPermission
+
+    return UserPermission.objects.filter(user=user, module=module).exists()
+
+
+class _RequiresModulePermission(BasePermission):
+    """Base for DRF-class use: subclass and set ``module``."""
+
+    module: str = ""
+
+    def has_permission(self, request, view) -> bool:
+        return user_has_module_permission(request.user, self.module)
+
+
 # Client read-only is NOT enforced here. Because almost every write endpoint sets
 # its own ``permission_classes = [IsAuthenticated]`` (which would override any
 # read-only class we attached individually, and can't be applied to 40+ views

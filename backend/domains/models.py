@@ -161,7 +161,14 @@ class Domain(models.Model):
         verbose_name = 'Domain'
         verbose_name_plural = 'Domains'
         ordering = ['-created_at']  # Most recently added first
-        unique_together = ['url', 'organisation']
+        # No unique_together on (url, organisation): Rankmax tracks some sites
+        # as two projects on one domain — Kotak811 and Shriram Wealth each have
+        # a pair — and PromptMaxx has to be able to hold them the same way.
+        #
+        # Nothing else may create a duplicate by accident. The add-domain views
+        # used to rely on the IntegrityError this constraint raised; they now
+        # call domains.views.domain_already_tracked() before creating, which
+        # compares on the bare host so www/scheme variants still collide.
         indexes = [
             models.Index(fields=['organisation', 'processing_status']),
             models.Index(fields=['organisation', '-visibility_score']),

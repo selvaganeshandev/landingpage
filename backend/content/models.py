@@ -19,7 +19,11 @@ class GeneratedContent(models.Model):
 
     SOURCE_TYPE_CHOICES = [
         ('topic', 'Topic Module'),
-        ('content_gap', 'Content Gap Module'),
+        # Two content-gap disciplines now feed this. The original value is kept
+        # as 'content_gap' rather than renamed to 'geo_content_gap' because
+        # existing rows carry it; only the label distinguishes them.
+        ('content_gap', 'GEO Content Gap'),
+        ('seo_content_gap', 'SEO Content Gap'),
         ('answer_gap', 'Answer Gap Module'),
         ('manual', 'Manual Creation'),
     ]

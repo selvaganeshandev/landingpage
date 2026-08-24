@@ -127,16 +127,36 @@ def summarise(rows: List[BillingRow]) -> dict:
 
 # Region buckets. UAE is billed separately; everything else shares a table.
 # Driven by data rather than an if/else so a third region is a list entry.
-UAE_COUNTRIES = {"united arab emirates", "uae", "u.a.e."}
+# The split is really "invoiced in USD" rather than "in the UAE" — the Gulf
+# clients are billed together. Crocs alone runs seven projects across the GCC;
+# keying on the UAE literally put six of them in the India table in rupees while
+# their UAE sibling showed dollars, which is the same client on two tables in
+# two currencies.
+#
+# US and UK projects are deliberately NOT here: nothing has established which
+# currency those are invoiced in, and moving them would change real invoices on
+# an assumption. Add them when that is known.
+GULF_COUNTRIES = {
+    "united arab emirates", "uae", "u.a.e.",
+    "saudi arabia", "ksa",
+    "qatar", "oman", "bahrain", "kuwait",
+}
+
+# Kept as the old name so any external reference still resolves.
+UAE_COUNTRIES = GULF_COUNTRIES
 
 
 def region_key_for(country: Optional[str]) -> str:
-    return "uae" if (country or "").strip().lower() in UAE_COUNTRIES else "row"
+    return "uae" if (country or "").strip().lower() in GULF_COUNTRIES else "row"
 
 
+# `display_currency` is presentation only — the rate card, the stored price and
+# every calculation stay in INR. UAE clients are invoiced in USD, so the screen
+# leads with USD and keeps the INR figure alongside it; converting for display
+# rather than storing a second price keeps one source of truth for money.
 REGIONS = [
-    {"key": "row", "label": "India & Other Regions"},
-    {"key": "uae", "label": "UAE"},
+    {"key": "row", "label": "India & Other Regions", "display_currency": CURRENCY},
+    {"key": "uae", "label": "UAE & Gulf", "display_currency": "USD"},
 ]
 
 

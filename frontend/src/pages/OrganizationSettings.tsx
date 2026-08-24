@@ -6,6 +6,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { Label } from "@/components/ui/label";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { DataForSeoCredentialsCard } from "@/components/DataForSeoCredentialsCard";
 import Clients from "@/pages/Clients";
 import InvoiceDetailsTab from "@/components/InvoiceDetailsTab";
 import { Badge } from "@/components/ui/badge";
@@ -14,7 +15,7 @@ import { useToast } from "@/hooks/use-toast";
 import { useAuth } from "@/contexts/AuthContext";
 import { MODULES } from "@/types/auth";
 import { apiClient } from "@/services/api";
-import { Plus, Trash2, Globe, Mail, Shield, ShieldCheck, User, Crown, Settings, Link2, CheckCircle2, AlertCircle, Loader2, X, Check, ChevronDown, Upload, Sparkles, ChevronRight, ChevronLeft, Search, Activity, Key, Eye, EyeOff, Pencil, Copy, RefreshCw } from "lucide-react";
+import { Plus, Trash2, Globe, Mail, Shield, ShieldCheck, User, Crown, Settings, Link2, CheckCircle2, AlertCircle, Loader2, X, Check, ChevronDown, Upload, Sparkles, ChevronRight, ChevronLeft, Search, Activity, Key, Eye, EyeOff, Pencil, Copy, RefreshCw, Wallet } from "lucide-react";
 import {
   Select,
   SelectContent,
@@ -220,6 +221,17 @@ export default function OrganizationSettings() {
   ] as const;
 
   type ProviderId = typeof PROVIDERS[number]['id'];
+
+  // OpenRouter credit balance, shown against the AI Platforms card. Kept
+  // separate from apiKeys because it comes from a different endpoint and its
+  // absence must not make the card look broken.
+  const [openRouterBalance, setOpenRouterBalance] = useState<{
+    configured: boolean;
+    balance: number | null;
+    total_credits?: number;
+    total_usage?: number;
+    error?: string;
+  } | null>(null);
 
   const [apiKeys, setApiKeys] = useState<Record<ProviderId, {
     configured: boolean;
@@ -603,6 +615,14 @@ export default function OrganizationSettings() {
       if (data.api_keys) setApiKeys(data.api_keys);
     } catch (error) {
       console.error("Error loading API keys:", error);
+    }
+    // Fetched separately and never allowed to fail the keys load — the card
+    // must still render its status if the balance lookup is unreachable.
+    try {
+      setOpenRouterBalance(await apiClient.getOpenRouterBalance() as any);
+    } catch (error) {
+      console.error("Error loading OpenRouter balance:", error);
+      setOpenRouterBalance(null);
     }
   };
 
@@ -1956,6 +1976,30 @@ export default function OrganizationSettings() {
                         </CardHeader>
 
                         <CardContent className="space-y-3">
+                          {/* Free to read, and the number that decides whether a
+                              prompt run can go ahead at all. Only OpenRouter
+                              exposes one — the other providers here bill through
+                              it or are disabled. */}
+                          {provider.id === 'openrouter' && openRouterBalance?.balance != null && (
+                            <div className="flex items-center gap-2 text-sm">
+                              <Wallet className="h-3.5 w-3.5 text-muted-foreground" />
+                              <span className="text-muted-foreground">Balance</span>
+                              <span className="font-semibold">
+                                ${openRouterBalance.balance.toFixed(2)}
+                              </span>
+                              {openRouterBalance.total_usage != null && (
+                                <span className="text-xs text-muted-foreground">
+                                  · ${openRouterBalance.total_usage.toFixed(2)} used of $
+                                  {openRouterBalance.total_credits?.toFixed(2)}
+                                </span>
+                              )}
+                            </div>
+                          )}
+                          {provider.id === 'openrouter' && openRouterBalance?.error && (
+                            <p className="text-xs text-muted-foreground">
+                              Balance unavailable: {openRouterBalance.error}
+                            </p>
+                          )}
 
                           {/* ── Key preview row (shown when configured and NOT editing) ── */}
                           {configured && !isEditing && (
@@ -2072,6 +2116,10 @@ export default function OrganizationSettings() {
                 </div>
               </CardContent>
             </Card>
+
+            {/* Not an LLM provider, so it sits in its own card rather than the
+                grid above — different auth shape, and a different bill. */}
+            <DataForSeoCredentialsCard />
           </TabsContent>
         )}
 

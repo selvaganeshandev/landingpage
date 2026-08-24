@@ -324,6 +324,17 @@ VERTEX_LOCATION = config('VERTEX_LOCATION', default='us-central1')
 # at pipeline volume is a large cost with no benefit for mention detection.
 # 0 disables thinking; a positive value caps it; -1 leaves the model default.
 VERTEX_THINKING_BUDGET = config('VERTEX_THINKING_BUDGET', default=0, cast=int)
+
+# Vertex answers a burst of concurrent calls with 429 RESOURCE_EXHAUSTED. That
+# is a rate limit, not an exhausted budget: the calls succeed again seconds
+# later. The prompt worker runs 12 prompts at once and only Gemini talks to
+# Google directly (the other three go through OpenRouter, which absorbs the
+# burst), so Gemini is the only platform that needs to back off.
+GEMINI_RATE_LIMIT_RETRIES = config('GEMINI_RATE_LIMIT_RETRIES', default=4, cast=int)
+GEMINI_RATE_LIMIT_BASE_DELAY = config('GEMINI_RATE_LIMIT_BASE_DELAY', default=2.0, cast=float)
+# Ceiling on one call's total waiting, so a sustained limit fails the call
+# rather than pinning a worker thread until the stale-group reaper fires.
+GEMINI_RATE_LIMIT_MAX_WAIT = config('GEMINI_RATE_LIMIT_MAX_WAIT', default=90.0, cast=float)
 # google-genai resolves credentials from the OS environment, but decouple only
 # exposes .env through config(), so a GOOGLE_APPLICATION_CREDENTIALS entry there
 # would never reach the SDK. Bridge it across without clobbering a real env var.
@@ -476,6 +487,16 @@ CELERY_TASK_ROUTES = {
     'core.processing_tasks.process_seo_domain_task': {'queue': 'seo'},
     'core.processing_tasks.process_seo_keyword_task': {'queue': 'seo'},
     'core.processing_tasks.seo_rankings_daily_scheduler': {'queue': 'seo'},
+    # Backlink pulls are user-triggered and long (10+ sequential DataForSEO
+    # requests), so they belong on the same dedicated worker rather than behind
+    # the prompt-analytics backlog.
+    'core.processing_tasks.fetch_backlinks_task': {'queue': 'seo'},
+    # Just-added keywords get their own queue and their own worker. The `seo`
+    # queue spends most of the night saturated by the 02:00 sweep chaining
+    # 500-keyword batches, so anything sharing it waits hours — which is not
+    # what "scrape the keywords I just added" means. Requires a worker running
+    # `-Q seo_instant` (engine-celery-seo-instant.service).
+    'core.processing_tasks.process_new_keywords_task': {'queue': 'seo_instant'},
 }
 
 # Prompt analytics fans one Celery task out per prompt, and each task is a long

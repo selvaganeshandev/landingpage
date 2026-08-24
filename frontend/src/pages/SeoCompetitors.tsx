@@ -424,25 +424,18 @@ const SeoCompetitors = () => {
   );
 
   /* ── Shared header (like RankMax competitor_header.js) ───────────────────── */
+  /* Matches every other SEO page: a text-4xl title over a muted line of
+     description, actions on the right. The favicon tile and the domain name
+     that used to sit here are already carried by the project switcher in the
+     sidebar, so repeating them made this the only page in the section with a
+     different masthead. */
   const Header = ({ title, subtitle, extra }: { title?: string; subtitle?: string; extra?: React.ReactNode }) => (
-    <div className="flex items-center justify-between flex-wrap gap-3">
-      <div className="flex items-center gap-3">
-        <div className="w-12 h-12 rounded-lg border border-border bg-muted flex items-center justify-center flex-shrink-0 overflow-hidden p-1">
-          {selectedDomain?.url ? (
-            <img src={favUrl(selectedDomain.url)} alt="" className="w-8 h-8 object-contain rounded"
-              onError={(e) => { (e.target as HTMLImageElement).style.display = "none"; }} />
-          ) : (
-            <span className="text-xs font-bold text-muted-foreground">
-              {selectedDomain?.name?.slice(0, 2).toUpperCase() ?? "—"}
-            </span>
-          )}
-        </div>
-        <div>
-          <h1 className="text-xl font-bold leading-tight">{title || "Competitors Analysis"}</h1>
-          <p className="text-sm text-muted-foreground mt-0.5 leading-snug">
-            {subtitle || selectedDomain?.name || ""}
-          </p>
-        </div>
+    <div className="flex items-start justify-between gap-4 flex-wrap">
+      <div>
+        <h1 className="text-4xl font-bold tracking-tight">{title || "Competitors"}</h1>
+        <p className="text-muted-foreground mt-2">
+          {subtitle || "Domains ranking alongside you for the keywords you track"}
+        </p>
       </div>
       {extra && <div className="flex items-center gap-2.5 flex-wrap">{extra}</div>}
     </div>
@@ -536,7 +529,7 @@ const SeoCompetitors = () => {
       : "Competitor AI scans the search results for the keywords you track and finds the domains ranking alongside you. Start the analysis to discover them for this domain.";
 
     return (
-      <div className="p-6 sm:p-8 space-y-5 bg-background animate-fade-in">
+      <div className="p-8 space-y-8 bg-background animate-fade-in">
         <Header />
 
         <Card className="p-6 border-dashed border-primary/40 bg-card/70">
@@ -618,7 +611,7 @@ const SeoCompetitors = () => {
   if (view === "selecting") {
     return (
       <div className="bg-background animate-fade-in">
-        <div className="p-6 sm:p-8 pb-32">
+        <div className="p-8 pb-32">
           <Header />
 
           {/* Subheader: All Competitors + Search */}
@@ -727,9 +720,10 @@ const SeoCompetitors = () => {
      ═══════════════════════════════════════════════════════════════════════════ */
   if (view === "direct") {
     return (
-      <div className="p-6 sm:p-8 space-y-5 bg-background animate-fade-in">
+      <div className="p-8 space-y-8 bg-background animate-fade-in">
         <Header
           title="Direct Competitors"
+          subtitle="Competitors confirmed for this project, and how many of your keywords each one also ranks for"
           extra={
             <>
               <Button variant="outline" size="sm" className="gap-1.5 text-xs"
@@ -858,18 +852,21 @@ const SeoCompetitors = () => {
     };
 
     return (
-      <div className="p-6 sm:p-8 space-y-5 bg-background animate-fade-in">
-        {/* Header — like RankMax: back arrow + "Competitors Analysis" + "Domain vs Competitor" */}
-        <div className="flex items-center justify-between flex-wrap gap-3">
-          <div className="flex items-center gap-3">
-            <Button variant="ghost" size="icon" className="h-9 w-9 rounded-full border border-border flex-shrink-0"
+      <div className="p-8 space-y-8 bg-background animate-fade-in">
+        {/* Detail-view header, same as SeoOpportunityDetail and SeoKeywordDetail:
+            icon-only back button inline to the left of the title, rule under the
+            row. This is a view within Competitors, not a top-level page, so it
+            deliberately does not use the text-4xl masthead. */}
+        <div className="flex items-center justify-between pb-4 border-b border-border/50 flex-wrap gap-3">
+          <div className="flex items-center gap-4 min-w-0">
+            <Button variant="outline" size="icon" className="border-border/50 flex-shrink-0"
               onClick={() => setView("direct")}>
               <ChevronLeft className="w-4 h-4" />
             </Button>
             {/* The matchup is what this view is about; "Competitors Analysis"
                 is the section it lives in, so it reads as the subtitle. */}
             <div>
-              <h1 className="text-xl font-bold leading-tight">
+              <h1 className="text-2xl font-bold tracking-tight">
                 {selectedDomain?.name || "Your site"} <span className="text-primary">vs</span> {projectName(selectedProject.competitor_domain)}
               </h1>
               {/* The actual hostnames, so it is unambiguous which properties

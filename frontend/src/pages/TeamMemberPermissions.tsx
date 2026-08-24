@@ -46,7 +46,17 @@ const featureCategories = [
   {
     name: "Tracking",
     features: [
-      { id: "prompts", name: "Prompts", icon: Search, description: "Create and manage prompt groups" },
+      {
+        id: "prompts",
+        name: "Prompts",
+        icon: Search,
+        description: "Create and manage prompt groups",
+        actions: [
+          { id: "prompts_add", name: "Add Prompts", description: "Create prompt groups and accept generated prompts" },
+          { id: "prompts_edit", name: "Edit Prompts", description: "Change prompt text, type and tracking status" },
+          { id: "prompts_delete", name: "Delete Prompts", description: "Delete prompts and prompt groups" },
+        ],
+      },
       { id: "mentions", name: "Mentions", icon: MessageSquare, description: "View and manage brand mentions" },
       { id: "citations", name: "Citations", icon: Link2, description: "View citation sources and references" },
       { id: "alerts", name: "Alerts", icon: Bell, description: "Configure and view alerts" },
@@ -79,9 +89,20 @@ const featureCategories = [
   {
     name: "SEO Monitoring",
     features: [
-      { id: "keyword_rankings", name: "Keyword Rankings", icon: SearchCheck, description: "View keyword ranking positions and trends" },
+      {
+        id: "keyword_rankings",
+        name: "Keyword Rankings",
+        icon: SearchCheck,
+        description: "View keyword ranking positions and trends",
+        actions: [
+          { id: "keywords_add", name: "Add Keywords", description: "Add, bulk-add and import tracked keywords" },
+          { id: "keywords_edit", name: "Edit Keywords", description: "Change keyword tags and settings" },
+          { id: "keywords_delete", name: "Delete Keywords", description: "Remove tracked keywords and their history" },
+        ],
+      },
       { id: "seo_competitors", name: "SEO Competitors", icon: Users, description: "Track and compare SEO competitors" },
       { id: "organic_reports", name: "Organic Reports", icon: FileText, description: "Generate and view organic search reports" },
+      { id: "backlinks", name: "Backlinks", icon: Link2, description: "View the backlink profile and pull fresh data" },
     ]
   },
   {
@@ -98,6 +119,11 @@ const featureCategories = [
     ]
   }
 ];
+
+// Every toggle on the page, parent modules and nested action rights alike.
+const allFeatureIds = featureCategories.flatMap(cat =>
+  cat.features.flatMap(f => [f.id, ...(("actions" in f ? f.actions : []) ?? []).map(a => a.id)])
+);
 
 
 export default function TeamMemberPermissions() {
@@ -173,10 +199,6 @@ export default function TeamMemberPermissions() {
   };
   
   const initializePermissions = (userPerms: any[]) => {
-    const allFeatureIds = featureCategories.flatMap(cat => 
-      cat.features.map(f => f.id)
-    );
-    
     const permissionsMap: Record<string, boolean> = {};
     
     allFeatureIds.forEach(featureId => {
@@ -205,10 +227,24 @@ export default function TeamMemberPermissions() {
   }
 
   const handleTogglePermission = (featureId: string) => {
-    setPermissions(prev => ({
-      ...prev,
-      [featureId]: !prev[featureId]
-    }));
+    setPermissions(prev => {
+      const next = { ...prev, [featureId]: !prev[featureId] };
+
+      // Turning a module off strips its action rights with it — leaving them
+      // set would show "Delete Keywords" enabled on a page the member can no
+      // longer open, and they would silently come back with the module.
+      if (!next[featureId]) {
+        const parent = featureCategories
+          .flatMap(cat => cat.features)
+          .find(f => f.id === featureId);
+        const actions = ("actions" in (parent ?? {}) ? (parent as any).actions : []) ?? [];
+        actions.forEach((action: { id: string }) => {
+          next[action.id] = false;
+        });
+      }
+
+      return next;
+    });
   };
 
   const handleSavePermissions = async () => {
@@ -275,10 +311,6 @@ export default function TeamMemberPermissions() {
     try {
       setIsSaving(true);
       
-      const allFeatureIds = featureCategories.flatMap(cat => 
-        cat.features.map(f => f.id)
-      );
-      
       await apiClient.grantAllPermissions(member.id);
       
       // Update local state
@@ -308,10 +340,6 @@ export default function TeamMemberPermissions() {
     
     try {
       setIsSaving(true);
-      
-      const allFeatureIds = featureCategories.flatMap(cat => 
-        cat.features.map(f => f.id)
-      );
       
       await apiClient.revokeAllPermissions(member.id);
       
@@ -429,32 +457,65 @@ export default function TeamMemberPermissions() {
                 <div className="space-y-3">
                   {category.features.map((feature) => {
                     const Icon = feature.icon;
+                    const actions = ("actions" in feature ? feature.actions : []) ?? [];
                     return (
-                      <div
-                        key={feature.id}
-                        className="flex items-center justify-between p-4 border rounded-lg hover:bg-accent/50 transition-colors"
-                      >
-                        <div className="flex items-center gap-3 flex-1">
-                          <div className="h-10 w-10 rounded-lg bg-primary/10 flex items-center justify-center">
-                            <Icon className="h-5 w-5 text-primary" />
+                      <div key={feature.id} className="border rounded-lg overflow-hidden">
+                        <div className="flex items-center justify-between p-4 hover:bg-accent/50 transition-colors">
+                          <div className="flex items-center gap-3 flex-1">
+                            <div className="h-10 w-10 rounded-lg bg-primary/10 flex items-center justify-center">
+                              <Icon className="h-5 w-5 text-primary" />
+                            </div>
+                            <div className="flex-1">
+                              <Label
+                                htmlFor={feature.id}
+                                className="text-base font-medium cursor-pointer"
+                              >
+                                {feature.name}
+                              </Label>
+                              <p className="text-sm text-muted-foreground">
+                                {feature.description}
+                              </p>
+                            </div>
                           </div>
-                          <div className="flex-1">
-                            <Label
-                              htmlFor={feature.id}
-                              className="text-base font-medium cursor-pointer"
-                            >
-                              {feature.name}
-                            </Label>
-                            <p className="text-sm text-muted-foreground">
-                              {feature.description}
-                            </p>
-                          </div>
+                          <Switch
+                            id={feature.id}
+                            checked={permissions[feature.id]}
+                            onCheckedChange={() => handleTogglePermission(feature.id)}
+                          />
                         </div>
-                        <Switch
-                          id={feature.id}
-                          checked={permissions[feature.id]}
-                          onCheckedChange={() => handleTogglePermission(feature.id)}
-                        />
+
+                        {actions.length > 0 && (
+                          <div className="border-t bg-muted/30 divide-y">
+                            {actions.map((action) => (
+                              <div
+                                key={action.id}
+                                className="flex items-center justify-between py-3 pl-16 pr-4"
+                              >
+                                <div className="flex-1">
+                                  <Label
+                                    htmlFor={action.id}
+                                    className={`text-sm font-medium ${
+                                      permissions[feature.id]
+                                        ? "cursor-pointer"
+                                        : "cursor-not-allowed text-muted-foreground"
+                                    }`}
+                                  >
+                                    {action.name}
+                                  </Label>
+                                  <p className="text-xs text-muted-foreground">
+                                    {action.description}
+                                  </p>
+                                </div>
+                                <Switch
+                                  id={action.id}
+                                  checked={permissions[action.id]}
+                                  disabled={!permissions[feature.id]}
+                                  onCheckedChange={() => handleTogglePermission(action.id)}
+                                />
+                              </div>
+                            ))}
+                          </div>
+                        )}
                       </div>
                     );
                   })}

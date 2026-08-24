@@ -66,6 +66,13 @@ class Organisation(models.Model):
     # Read-only mirror of the backend admin-usage key column (owned by backend).
     content_admin_api_key = models.TextField(blank=True, null=True, help_text="Encrypted Anthropic Admin API Key for live usage reporting")
 
+    # DataForSEO (backlinks + keyword search volume). Owned by the backend
+    # migration authentication.0016_*. The engine reads these because it is the
+    # side that actually spends: a fetch must bill the organisation's own
+    # account when it has one. Basic auth, so login (not secret) + password.
+    dataforseo_login = models.CharField(max_length=255, blank=True, default='', help_text="DataForSEO account login")
+    dataforseo_password_enc = models.TextField(blank=True, null=True, help_text="Encrypted DataForSEO API password")
+
     class Meta:
         app_label = 'shared_models'
         db_table = 'organisations'

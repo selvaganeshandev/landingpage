@@ -157,6 +157,16 @@ class Organisation(models.Model):
             "state_code": self.billing_state_code,
         }
     seo_keyword_limit = models.PositiveIntegerField(default=3000, help_text="Maximum number of SEO keywords allowed for this organisation")
+
+    # A flat monthly platform fee invoiced alongside per-project usage. Per
+    # organisation because it is negotiated per client, and 0 by default so no
+    # existing account starts being charged one. Always INR: it appears only on
+    # domestic invoices, and export invoices are raised outside India where this
+    # fee does not apply.
+    subscription_fee = models.DecimalField(
+        max_digits=12, decimal_places=2, default=0,
+        help_text="Flat monthly subscription added to Indian invoices. 0 = not charged.",
+    )
     created_at = models.DateTimeField(auto_now_add=True, help_text="Timestamp when the organisation was created")
     modified_at = models.DateTimeField(auto_now=True, help_text="Timestamp when the organisation was last modified")
     
@@ -270,6 +280,27 @@ class Organisation(models.Model):
     def content_admin_key(self, value):
         self.content_admin_api_key = encrypt_value(value) if value else None
 
+    # ----- DataForSEO (backlinks + keyword search volume) -----
+    # Not an LLM provider, so deliberately outside LLM_PROVIDERS / BYOK: it is
+    # never probed as a chat model and never appears in that list. It also
+    # authenticates with HTTP Basic rather than a bearer token, hence two
+    # fields — the login is an email address and is not a secret, so only the
+    # password is encrypted.
+    dataforseo_login = models.CharField(
+        max_length=255, blank=True, default='',
+        help_text="DataForSEO account login (an email address; not secret)",
+    )
+    dataforseo_password_enc = models.TextField(
+        blank=True, null=True, help_text="Encrypted DataForSEO API password",
+    )
+
+    @property
+    def dataforseo_password(self):
+        return decrypt_value(self.dataforseo_password_enc)
+
+    @dataforseo_password.setter
+    def dataforseo_password(self, value):
+        self.dataforseo_password_enc = encrypt_value(value) if value else None
 
     class Meta:
         db_table = 'organisations'
@@ -470,8 +501,13 @@ class UserPermission(models.Model):
         # Tracking
         ('mentions', 'Mentions'),
         ('prompts', 'Prompts'),
+        # Action rights nested under 'prompts'. Granting these alone does
+        # nothing — the module itself gates whether the page is reachable.
+        ('prompts_add', 'Add Prompts'),
+        ('prompts_edit', 'Edit Prompts'),
+        ('prompts_delete', 'Delete Prompts'),
         ('alerts', 'Alerts'),
-        
+
         # Analytics
         ('sentiment_analysis', 'Sentiment Analysis'),
         ('topics', 'Topics'),
@@ -493,8 +529,15 @@ class UserPermission(models.Model):
         
         # SEO Monitoring
         ('keyword_rankings', 'Keyword Rankings'),
+        # Action rights nested under 'keyword_rankings'. Before these existed
+        # keyword writes were hardcoded admin-only; a plain user needs the
+        # matching grant here to add/edit/delete.
+        ('keywords_add', 'Add Keywords'),
+        ('keywords_edit', 'Edit Keywords'),
+        ('keywords_delete', 'Delete Keywords'),
         ('seo_competitors', 'SEO Competitors'),
         ('organic_reports', 'Organic Reports'),
+        ('backlinks', 'Backlinks'),
 
         # Reporting
         ('reports', 'Reports'),

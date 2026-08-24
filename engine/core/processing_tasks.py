@@ -809,6 +809,113 @@ def process_seo_keyword_task(self, seo_keyword_rank_id: int):
     bind=True,
     ignore_result=True,
     max_retries=0,
+    soft_time_limit=3600,   # 1 hour soft limit
+    time_limit=3900,
+    acks_late=True,
+    reject_on_worker_lost=True,
+)
+def process_new_keywords_task(
+    self, domain_id: int, keyword_ids: list, batch_num: int = 1, retry_round: int = 0
+):
+    """
+    Scrape a specific set of just-added keywords, immediately.
+
+    This is the "someone just added keywords" path, and it is deliberately kept
+    apart from `process_seo_domain_task`:
+
+      * It runs on the `seo_instant` queue, which has its own worker. The `seo`
+        queue is routinely saturated for hours by the 02:00 sweep chaining
+        500-keyword batches, and a task queued behind that is not "instant" in
+        any sense the person who just clicked Add would recognise.
+      * It scrapes only `keyword_ids`. The domain task takes every 'avail' row
+        on the domain, so on a domain with a nightly backlog an import of 20
+        keywords would drag thousands of unrelated rows in with it.
+
+    The nightly scheduler and the domain task are untouched — they remain the
+    safety net for anything this path misses.
+    """
+    from shared_models.seo_models import SeoKeywordRank
+
+    keyword_ids = [int(k) for k in (keyword_ids or [])]
+    if not keyword_ids:
+        return {'processed': 0, 'success': 0, 'failed': 0}
+
+    result = None
+    try:
+        from core.seo_ranking_processor import SeoRankingProcessor
+        processor = SeoRankingProcessor()
+        result = processor.process_domain_rankings(
+            domain_id, batch_size=500, only_ids=keyword_ids
+        )
+        logger.info(
+            f"[SEO instant] Domain {domain_id} batch {batch_num} "
+            f"({len(keyword_ids)} new keywords) complete: {result}"
+        )
+    except Exception as e:
+        logger.error(
+            f"[SEO instant] Error processing new keywords for domain {domain_id}: {e}",
+            exc_info=True,
+        )
+    finally:
+        # Release rows this run left mid-flight (worker crash / time limit), so
+        # a follow-up batch or tonight's sweep can pick them up again.
+        try:
+            stuck = SeoKeywordRank.objects.filter(
+                id__in=keyword_ids, auto_call_status='busy'
+            ).update(auto_call_status='avail')
+            if stuck:
+                logger.warning(
+                    f"[SEO instant] Reset {stuck} stuck 'busy' keywords for domain {domain_id}"
+                )
+        except Exception:
+            pass
+
+        # Chain the next batch over OUR keywords only, then exactly one retry
+        # round for those that failed — same 2-attempt cap as the domain task.
+        remaining = failed_count = 0
+        try:
+            remaining = SeoKeywordRank.objects.filter(
+                id__in=keyword_ids, auto_call_status='avail'
+            ).count()
+            failed_count = SeoKeywordRank.objects.filter(
+                id__in=keyword_ids, auto_call_status='fail'
+            ).count()
+        except Exception:
+            pass
+
+        try:
+            if remaining > 0:
+                process_new_keywords_task.apply_async(
+                    args=[domain_id, keyword_ids],
+                    kwargs={'batch_num': batch_num + 1, 'retry_round': retry_round},
+                    queue='seo_instant',
+                    countdown=5,
+                )
+            elif retry_round < 1 and failed_count > 0:
+                reset = SeoKeywordRank.objects.filter(
+                    id__in=keyword_ids, auto_call_status='fail'
+                ).update(auto_call_status='avail')
+                logger.info(
+                    f"[SEO instant] Domain {domain_id}: retry round 1 — reset {reset} failed keywords"
+                )
+                process_new_keywords_task.apply_async(
+                    args=[domain_id, keyword_ids],
+                    kwargs={'batch_num': 1, 'retry_round': 1},
+                    queue='seo_instant',
+                    countdown=5,
+                )
+        except Exception as e:
+            logger.error(
+                f"[SEO instant] Failed to schedule follow-up for domain {domain_id}: {e}"
+            )
+
+    return result or {'processed': 0, 'success': 0, 'failed': 0}
+
+
+@shared_task(
+    bind=True,
+    ignore_result=True,
+    max_retries=0,
     soft_time_limit=7200,   # 2 hours soft limit (raises SoftTimeLimitExceeded)
     time_limit=7500,        # 2h 5min hard kill
     acks_late=True,         # Re-deliver task if worker crashes before completion
@@ -1143,3 +1250,24 @@ def prompt_generation_scheduler(self):
     except Exception as e:
         logger.error(f"[PromptGen] scheduler error: {e}", exc_info=True)
         raise self.retry(exc=e, countdown=60)
+
+
+@shared_task(bind=True, ignore_result=True, max_retries=0)
+def fetch_backlinks_task(self, snapshot_id: int):
+    """Fill in one backlink snapshot from DataForSEO.
+
+    max_retries=0 deliberately: every attempt spends real money against a
+    shared prepaid balance, so a failure must surface to the user rather than
+    silently bill three times. The snapshot row records the error and leaves
+    next_refresh_allowed_at null, so the user can simply press Fetch again.
+    """
+    from core.backlinks_processor import run_snapshot
+
+    try:
+        result = run_snapshot(int(snapshot_id))
+        logger.info(f"[BL] Snapshot {snapshot_id} finished: {result}")
+        return result
+    except Exception as e:
+        logger.error(f"[BL] Snapshot {snapshot_id} failed: {e}", exc_info=True)
+        # run_snapshot already marked the row FAIL and stored the message.
+        return {'snapshot_id': snapshot_id, 'status': 'FAIL', 'error': str(e)}
