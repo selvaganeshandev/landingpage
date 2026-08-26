@@ -15,6 +15,7 @@ import { useToast } from "@/hooks/use-toast";
 import { useAuth } from "@/contexts/AuthContext";
 import { MODULES } from "@/types/auth";
 import { apiClient } from "@/services/api";
+import ServiceApiKeysCard from "@/components/ServiceApiKeysCard";
 import { Plus, Trash2, Globe, Mail, Shield, ShieldCheck, User, Crown, Settings, Link2, CheckCircle2, AlertCircle, Loader2, X, Check, ChevronDown, Upload, Sparkles, ChevronRight, ChevronLeft, Search, Activity, Key, Eye, EyeOff, Pencil, Copy, RefreshCw, Wallet } from "lucide-react";
 import {
   Select,
@@ -1512,6 +1513,11 @@ export default function OrganizationSettings() {
                 <Key className="h-3.5 w-3.5 mr-1.5" />API Keys
               </TabsTrigger>
             )}
+            {(user?.role === 'super_admin' || user?.role === 'admin') && (
+              <TabsTrigger value="access-keys" className="data-[state=active]:gradient-primary data-[state=active]:shadow-md data-[state=active]:shadow-primary/20 data-[state=active]:text-white">
+                <Key className="h-3.5 w-3.5 mr-1.5" />Get your API key
+              </TabsTrigger>
+            )}
             {/* Hidden: neither key on this tab is used any more. Content
                 generation runs on the system OPENROUTER_API_KEY — a stored
                 sk-ant key is ignored by the sk-or- prefix check — and the
@@ -1909,6 +1915,13 @@ export default function OrganizationSettings() {
         {!isTeamMember && (
           <TabsContent value="invoice-details" className="space-y-6">
             <InvoiceDetailsTab />
+          </TabsContent>
+        )}
+
+        {/* ─────────── ACCESS KEYS TAB (service API keys) ─────────── */}
+        {(user?.role === 'super_admin' || user?.role === 'admin') && (
+          <TabsContent value="access-keys" className="space-y-6">
+            <ServiceApiKeysCard />
           </TabsContent>
         )}
 

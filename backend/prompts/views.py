@@ -103,7 +103,8 @@ def get_mentions(request):
     user = getattr(request, 'user', None)
     has_access = False
     if user and getattr(user, 'is_authenticated', False):
-        if getattr(user, 'role', '') == 'super_admin':
+        from core.authorization import has_global_domain_access
+        if getattr(user, 'role', '') == 'super_admin' or has_global_domain_access(user):
             has_access = True
         else:
             has_access = DomainAccess.objects.filter(user=user, domain_id=domain_id).exists()
@@ -1457,7 +1458,8 @@ def prompt_groups_list(request):
             user = getattr(request, 'user', None)
             has_access = False
             if user and getattr(user, 'is_authenticated', False):
-                if getattr(user, 'role', '') == 'super_admin':
+                from core.authorization import has_global_domain_access
+                if getattr(user, 'role', '') == 'super_admin' or has_global_domain_access(user):
                     has_access = True
                 else:
                     has_access = DomainAccess.objects.filter(user=user, domain_id=domain_id).exists()
@@ -2373,7 +2375,8 @@ def prompts_list(request):
             user = getattr(request, 'user', None)
             has_access = False
             if user and getattr(user, 'is_authenticated', False):
-                if getattr(user, 'role', '') == 'super_admin':
+                from core.authorization import has_global_domain_access
+                if getattr(user, 'role', '') == 'super_admin' or has_global_domain_access(user):
                     has_access = True
                 else:
                     has_access = DomainAccess.objects.filter(user=user, domain_id=domain_id).exists()

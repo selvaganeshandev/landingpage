@@ -323,6 +323,11 @@ class Account(AbstractUser):
         ('client', 'Client'),
     ]
 
+    # Hidden machine principal behind a service API key (Settings > API keys).
+    # Role stays 'client' (read-only in middleware); this flag widens read
+    # scope to the whole organisation — see core.authorization.
+    is_service_account = models.BooleanField(default=False)
+
     ACCOUNT_STATUS_CHOICES = [
         ('active', 'Active'),
         ('suspended', 'Suspended'),
@@ -697,3 +702,53 @@ class ClientActivityLog(models.Model):
 
     def __str__(self):
         return f"{self.user.email} - {self.action} @ {self.created_at:%Y-%m-%d %H:%M}"
+
+class ServiceApiKey(models.Model):
+    """A machine credential minted in the product (Settings > API keys).
+
+    The key authenticates as `service_account` — a hidden org member with
+    role 'client', so the existing middleware gives it org-wide READ-ONLY
+    access for free (clients may only issue safe methods). Only the SHA-256
+    hash is stored; the plaintext is shown once at mint.
+    """
+
+    organisation = models.ForeignKey(
+        Organisation, on_delete=models.CASCADE, related_name='service_api_keys')
+    service_account = models.ForeignKey(
+        'Account', on_delete=models.CASCADE, related_name='service_api_keys')
+    created_by = models.ForeignKey(
+        'Account', on_delete=models.SET_NULL, null=True,
+        related_name='created_service_api_keys')
+    name = models.CharField(max_length=100)
+    key_hash = models.CharField(max_length=64, unique=True, db_index=True)
+    key_prefix = models.CharField(max_length=16)  # display: pmxk_...last4
+    created_at = models.DateTimeField(auto_now_add=True)
+    expires_at = models.DateTimeField(null=True, blank=True)
+    revoked = models.BooleanField(default=False)
+    last_used_at = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        db_table = 'service_api_keys'
+        ordering = ['-created_at']
+
+    def __str__(self):
+        return f"{self.organisation_id}:{self.name} ({self.key_prefix})"
+
+    # Encrypted plaintext so an admin can copy the key again later (same
+    # at-rest encryption the BYOK provider keys use). The hash above remains
+    # what authentication verifies against.
+    encrypted_key = models.TextField(null=True, blank=True)
+
+
+class ServiceApiKeyUsage(models.Model):
+    """One row per authenticated request made with a service API key —
+    feeds the usage box in Settings > Get your API key."""
+
+    key = models.ForeignKey(ServiceApiKey, on_delete=models.CASCADE, related_name='usage')
+    path = models.CharField(max_length=255)
+    method = models.CharField(max_length=8)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        db_table = 'service_api_key_usage'
+        indexes = [models.Index(fields=['key', '-created_at'])]

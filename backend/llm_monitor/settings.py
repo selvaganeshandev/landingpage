@@ -195,6 +195,9 @@ AUTH_USER_MODEL = 'authentication.Account'
 # Django REST Framework configuration
 REST_FRAMEWORK = {
     'DEFAULT_AUTHENTICATION_CLASSES': [
+        # Service API keys (Authorization: Api-Key pmxk_...) resolve to a
+        # hidden org service account with role 'client' — org-wide read-only.
+        'authentication.api_key_auth.ApiKeyAuthentication',
         # Status-aware JWT: rejects tokens for suspended/disabled accounts on
         # every request (immediate lockout, not at token expiry).
         'authentication.jwt_auth.StatusCheckingJWTAuthentication',

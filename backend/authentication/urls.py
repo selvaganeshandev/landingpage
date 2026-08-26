@@ -18,7 +18,17 @@ from .auth_views import (
     reveal_admin_key
 )
 
+from .service_key_views import (
+    service_api_keys, revoke_service_api_key,
+    reveal_service_api_key, service_api_key_usage,
+)
+
 urlpatterns = [
+    # Service API keys (Settings > API keys) — machine credentials, org read-only
+    path('service-api-keys/', service_api_keys, name='service_api_keys'),
+    path('service-api-keys/<int:key_id>/revoke/', revoke_service_api_key, name='revoke_service_api_key'),
+    path('service-api-keys/<int:key_id>/reveal/', reveal_service_api_key, name='reveal_service_api_key'),
+    path('service-api-keys/<int:key_id>/usage/', service_api_key_usage, name='service_api_key_usage'),
     # Simplified Authentication APIs
     path('login/', login, name='login'),
     path('profile/', profile, name='profile'),

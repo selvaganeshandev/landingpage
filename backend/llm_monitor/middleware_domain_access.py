@@ -131,6 +131,17 @@ class DomainAccessMiddleware:
             return user
 
         auth_header = request.META.get("HTTP_AUTHORIZATION", "")
+
+        if auth_header.lower().startswith("api-key "):
+            # Service API key (Settings > API keys): resolve so the client
+            # write-block and the domain 404 backstop apply to keys too.
+            from authentication.api_key_auth import ApiKeyAuthentication
+            try:
+                result = ApiKeyAuthentication().authenticate(request)
+            except Exception:
+                return None  # invalid key: let DRF return the 401
+            return result[0] if result else None
+
         if not auth_header.startswith("Bearer "):
             return None
 

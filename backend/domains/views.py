@@ -268,7 +268,7 @@ def domain_list(request):
     """List all domains for the organization or create a new one"""
     if request.method == 'GET':
         # Filter domains by organization and user access
-        if request.user.role in ('super_admin', 'admin'):
+        if request.user.role in ('super_admin', 'admin') or getattr(request.user, 'is_service_account', False):
             # Super admins and admins see all org domains
             domains = Domain.objects.filter(organisation=request.user.organisation)
         else:
@@ -459,7 +459,7 @@ def domain_list(request):
 def domain_detail(request, pk):
     """Retrieve, update or delete a domain"""
     try:
-        if request.user.role in ('super_admin', 'admin'):
+        if request.user.role in ('super_admin', 'admin') or getattr(request.user, 'is_service_account', False):
             domain = Domain.objects.get(pk=pk, organisation=request.user.organisation)
         else:
             # Check if user has access to this domain
@@ -587,7 +587,7 @@ def domain_detail(request, pk):
 def domain_keywords(request, pk):
     """Get all keywords for a domain"""
     try:
-        if request.user.role in ('super_admin', 'admin'):
+        if request.user.role in ('super_admin', 'admin') or getattr(request.user, 'is_service_account', False):
             domain = Domain.objects.get(pk=pk, organisation=request.user.organisation)
         else:
             domain_access = DomainAccess.objects.get(

@@ -1,0 +1,153 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Promptmaxx MCP — Connection Guide</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,700;12..96,800&family=Public+Sans:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<style>
+:root{
+  --bg:#FAF9FC; --panel:#FFFFFF; --panel2:#F1EEF8; --ink:#201A2E; --dim:#6B6478;
+  --line:#E4DFEE; --acc:#5B2FD4; --accb:#EEE8FD; --okc:#177A46; --okb:#E3F2E8;
+  --warm:#B3372C; --warmb:#F9E7E4; --amb:#96620A; --ambb:#FBF0DB;
+  --codebg:#211D2E; --codeink:#E9E4F5;
+  --sh:0 1px 2px rgba(32,26,46,.05),0 10px 24px -18px rgba(32,26,46,.28);
+}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--ink);font-family:"Public Sans","Helvetica Neue",Arial,sans-serif;font-size:15.5px;line-height:1.65}
+.wrap{max-width:800px;margin:0 auto;padding:0 24px 90px}
+h1,h2{font-family:"Bricolage Grotesque",sans-serif}
+header{padding:52px 0 8px}
+.kicker{font-size:.76rem;font-weight:600;letter-spacing:.12em;text-transform:uppercase;color:var(--acc)}
+h1{font-size:clamp(1.9rem,5vw,2.7rem);font-weight:800;letter-spacing:-.02em;margin:.2em 0 .3em;line-height:1.08}
+.lede{font-size:1.05rem;color:var(--dim);max-width:58ch;margin:0}
+h2{font-size:1.3rem;font-weight:800;margin:44px 0 8px}
+h3{font-size:1rem;font-weight:700;margin:22px 0 6px}
+p{max-width:66ch;margin:0 0 13px}
+ul,ol{padding-left:20px;margin:0 0 13px}
+li{margin-bottom:6px;max-width:70ch}
+code{font-family:"IBM Plex Mono",monospace;font-size:.82em;background:var(--panel2);padding:.1em .4em;border-radius:4px}
+pre{font-family:"IBM Plex Mono",monospace;font-size:.78rem;line-height:1.6;background:var(--codebg);color:var(--codeink);
+    border-radius:9px;padding:14px 18px;overflow-x:auto;margin:8px 0 16px;box-shadow:var(--sh)}
+.step{background:var(--panel);border:1px solid var(--line);border-radius:9px;padding:15px 20px;margin:12px 0;box-shadow:var(--sh)}
+.step .n{display:inline-flex;align-items:center;justify-content:center;width:22px;height:22px;border-radius:50%;
+  background:var(--accb);color:var(--acc);font-weight:700;font-size:.8rem;margin-right:8px}
+.good{border-left:3px solid var(--okc);background:var(--okb);border-radius:0 7px 7px 0;padding:10px 14px;margin:12px 0;max-width:64ch;font-size:.9rem}
+.warn{border-left:3px solid var(--warm);background:var(--warmb);border-radius:0 7px 7px 0;padding:10px 14px;margin:12px 0;max-width:64ch;font-size:.9rem}
+.note{border-left:3px solid var(--amb);background:var(--ambb);border-radius:0 7px 7px 0;padding:10px 14px;margin:12px 0;max-width:64ch;font-size:.9rem}
+table{width:100%;border-collapse:collapse;font-size:.86rem}
+.tw{overflow-x:auto;margin:10px 0 16px}
+th{text-align:left;font-size:.66rem;text-transform:uppercase;letter-spacing:.08em;color:var(--dim);font-weight:700;padding:0 13px 6px 0;border-bottom:1px solid var(--line)}
+td{padding:8px 13px 8px 0;border-bottom:1px solid var(--line);vertical-align:top}
+tr:last-child td{border-bottom:none}
+.mono{font-family:"IBM Plex Mono",monospace;font-size:.8rem}
+.dim{color:var(--dim)}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<header>
+  <div class="kicker">Promptmaxx · integrations</div>
+  <h1>Connecting through MCP</h1>
+  <p class="lede">Give AI assistants and external tools read-only access to your Promptmaxx data —
+  mentions, rankings, gaps, content, backlinks — through one secure connection.</p>
+</header>
+
+<h2>What you're connecting to</h2>
+<p>The Promptmaxx MCP server exposes <b>28 read-only tools</b> over the
+<a href="https://modelcontextprotocol.io" target="_blank" rel="noopener">Model Context Protocol</a>.
+A connected assistant can answer questions like <i>"how is Zerodha's AI visibility trending?"</i>
+or <i>"which keywords are within striking distance?"</i> directly from live data.</p>
+<div class="good"><b>Safety model:</b> a service API key can read everything in your organisation
+and can never write — read-only is enforced server-side, per request. It cannot trigger runs,
+spend model budget, or see any other organisation's data.</div>
+
+<h2>Step 1 — Get your API key</h2>
+<div class="step"><span class="n">1</span><b>Organization Settings → Get your API key</b> —
+name the key after its consumer (e.g. <code>claude-desktop</code>, <code>enque-sync</code>) and click
+<b>Create key</b>.</div>
+<div class="step"><span class="n">2</span>Copy the <code>pmxk_…</code> key. It's stored encrypted, so
+you can copy it again later from the same page — and revoke it there with one click (takes effect
+immediately).</div>
+<div class="note">One key per consumer. The usage box on each key shows exactly what it's being
+used for — if a key ever surprises you, revoke it.</div>
+
+<h2>Step 2 — Connect your client</h2>
+
+<h3>Claude Code — same machine as Promptmaxx (stdio)</h3>
+<pre>claude mcp add promptmaxx -- &lt;path&gt;\mcp-server\.venv\Scripts\python.exe -m promptmaxx_mcp</pre>
+<p>Credentials come from <code>mcp-server\.env</code> — set your key there:</p>
+<pre>PROMPTMAXX_BASE_URL=http://localhost:8000
+PROMPTMAXX_API_KEY=pmxk_your_key_here
+#PROMPTMAXX_MCP_ALLOW_INSIGHTS=1   # opt-in: registers get_competitive_insights</pre>
+
+<h3>Over the network (Claude Code remote, custom agents, scripts)</h3>
+<p>The server also runs as an HTTP endpoint. On the Promptmaxx server:</p>
+<pre>python -m promptmaxx_mcp --http     # or: PROMPTMAXX_MCP_TRANSPORT=http
+# binding configurable: PROMPTMAXX_MCP_HTTP_HOST (default 127.0.0.1)
+#                       PROMPTMAXX_MCP_HTTP_PORT (default 8010)</pre>
+<p>Point any MCP client at the URL with your key as a bearer token
+(<code>Authorization: Api-Key pmxk_…</code> also accepted):</p>
+<pre>URL:            http://&lt;promptmaxx-server&gt;:8010/mcp
+Authorization:  Bearer pmxk_your_key_here</pre>
+<p>Claude Code from another machine:</p>
+<pre>claude mcp add --transport http promptmaxx http://&lt;server&gt;:8010/mcp \
+  --header "Authorization: Bearer pmxk_your_key_here"</pre>
+<p>Each request authenticates with the key it carries, so several consumers with different keys —
+even different organisations — can share one MCP endpoint safely.</p>
+<div class="note"><b>Enque:</b> Enque's tool system is manifest-based, not an MCP client — connect
+Enque by pointing its tool manifests (or its build-with-AI tool creator) at the Promptmaxx API
+directly with the same <code>Api-Key</code> header. The key and its permissions are identical
+either way. Claude <i>Desktop</i> similarly can't attach a raw bearer header to remote connectors —
+use Claude Code, or a local stdio bridge.</div>
+<div class="warn"><b>Hosting rules:</b> never expose port 8010 directly to the internet — keep it on
+localhost or a private network and terminate TLS at a reverse proxy (nginx/caddy) if clients
+connect from outside; a key on plain HTTP across the internet can be stolen in transit. Run the
+<code>--http</code> process under a service manager (Task Scheduler / NSSM / systemd) so it
+survives restarts.</div>
+
+<h2>Step 3 — Try it</h2>
+<p>Ask the connected assistant:</p>
+<ul>
+  <li><i>"What clients do I have in Promptmaxx?"</i> — calls <code>list_clients</code></li>
+  <li><i>"Show Zerodha's latest AI mentions"</i> — resolves the client, calls <code>list_mentions</code></li>
+  <li><i>"Which keywords rank today?"</i> — <code>list_seo_keywords</code></li>
+</ul>
+<p>Then open the key's <b>usage box</b> in Settings — you'll see those calls listed.</p>
+
+<h2>The 28 tools</h2>
+<div class="tw"><table>
+  <thead><tr><th>Area</th><th>Tools</th></tr></thead>
+  <tbody>
+    <tr><td>Clients</td><td class="mono">list_clients · get_client · get_site_health</td></tr>
+    <tr><td>AI visibility</td><td class="mono">list_mentions · get_mention · get_visibility_summary · get_share_of_voice · get_sentiment_summary · get_historical_trends</td></tr>
+    <tr><td>Competitors</td><td class="mono">list_content_gaps · get_answer_gap_analysis · list_competitors (+ get_competitive_insights, opt-in)</td></tr>
+    <tr><td>SEO</td><td class="mono">list_seo_keywords · get_keyword_history · get_keyword_serp_features · get_keyword_volume · get_seo_overview · get_seo_metrics · list_seo_opportunities</td></tr>
+    <tr><td>Content</td><td class="mono">list_content · get_content</td></tr>
+    <tr><td>Keyword universe</td><td class="mono">list_keyword_universe · get_active_generation_run · get_generation_run</td></tr>
+    <tr><td>Reports</td><td class="mono">list_report_sheets · get_report_sheet_data</td></tr>
+    <tr><td>Backlinks</td><td class="mono">get_backlinks_overview · list_backlinks</td></tr>
+  </tbody>
+</table></div>
+<p class="dim">Every tool takes a <code>domain_id</code> (from <code>list_clients</code>) — the client
+is chosen per call, and your key's organisation is the hard boundary: ids outside it return 404.</p>
+
+<h2>Troubleshooting</h2>
+<div class="tw"><table>
+  <thead><tr><th>Symptom</th><th>Cause &amp; fix</th></tr></thead>
+  <tbody>
+    <tr><td>401 on every call</td><td>Key missing, mistyped, revoked or expired — copy it again from Settings, or mint a new one.</td></tr>
+    <tr><td>404 for a domain</td><td>The id isn't in your organisation (this is deliberate — existence leaks nothing). Call <code>list_clients</code> for valid ids.</td></tr>
+    <tr><td>403 on an action</td><td>Service keys are read-only by design. Writes are impossible with a key.</td></tr>
+    <tr><td>Connection refused</td><td>The MCP HTTP process isn't running on the server, or you're using the wrong host/port.</td></tr>
+    <tr><td>Empty rank / report data</td><td>Not an auth issue — the instance hasn't run the relevant collector yet (nightly rank crawl, Google connection, first backlink fetch).</td></tr>
+  </tbody>
+</table></div>
+
+<p class="dim" style="margin-top:40px;border-top:1px solid var(--line);padding-top:16px">
+Promptmaxx MCP · read-only by design · keys managed in Organization Settings → Get your API key.</p>
+</div>
+</body>
+</html>

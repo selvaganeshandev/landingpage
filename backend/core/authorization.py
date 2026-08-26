@@ -69,5 +69,11 @@ def has_global_domain_access(user) -> bool:
 
     The one predicate all domain scoping is expressed in — no scoping code checks
     ``role == 'super_admin'`` directly.
+
+    Service accounts (minted with API keys in Settings) read org-wide despite
+    holding role 'client': the client role is what keeps them read-only in the
+    middleware, while this flag widens their read scope to the whole org.
     """
+    if getattr(user, "is_service_account", False) and user_has_capability(user, CAP_VIEW_REPORTS):
+        return True
     return user_has_capability(user, CAP_GLOBAL_DOMAIN_ACCESS)
