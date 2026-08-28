@@ -76,25 +76,24 @@ used for — if a key ever surprises you, revoke it.</div>
 
 <h2>Step 2 — Connect your client</h2>
 
-<h3>Claude Code — same machine as Promptmaxx (stdio)</h3>
-<pre>claude mcp add promptmaxx -- &lt;path&gt;\mcp-server\.venv\Scripts\python.exe -m promptmaxx_mcp</pre>
-<p>Credentials come from <code>mcp-server\.env</code> — set your key there:</p>
-<pre>PROMPTMAXX_BASE_URL=http://localhost:8000
-PROMPTMAXX_API_KEY=pmxk_your_key_here
-#PROMPTMAXX_MCP_ALLOW_INSIGHTS=1   # opt-in: registers get_competitive_insights</pre>
-
-<h3>Over the network (Claude Code remote, custom agents, scripts)</h3>
-<p>The server also runs as an HTTP endpoint. On the Promptmaxx server:</p>
-<pre>python -m promptmaxx_mcp --http     # or: PROMPTMAXX_MCP_TRANSPORT=http
-# binding configurable: PROMPTMAXX_MCP_HTTP_HOST (default 127.0.0.1)
-#                       PROMPTMAXX_MCP_HTTP_PORT (default 8010)</pre>
-<p>Point any MCP client at the URL with your key as a bearer token
-(<code>Authorization: Api-Key pmxk_…</code> also accepted):</p>
-<pre>URL:            http://&lt;promptmaxx-server&gt;:8010/mcp
-Authorization:  Bearer pmxk_your_key_here</pre>
-<p>Claude Code from another machine:</p>
-<pre>claude mcp add --transport http promptmaxx http://&lt;server&gt;:8010/mcp \
+<p>The MCP server runs <b>on the Promptmaxx server</b> — you don't install anything locally.
+You connect to one URL with your API key:</p>
+<pre>URL:            https://app.promptmaxx.co/mcp
+Authorization:  Bearer pmxk_your_key_here      <span style="color:#8F87A6"># Api-Key pmxk_… also accepted</span></pre>
+<pre>Enque / Claude / your agent (anywhere)
+      │  https://app.promptmaxx.co/mcp  + the key
+      ▼
+Promptmaxx server:  nginx (TLS) ──► MCP service ──► Promptmaxx backend</pre>
+<p>Claude Code, from any machine:</p>
+<pre>claude mcp add --transport http promptmaxx https://app.promptmaxx.co/mcp \
   --header "Authorization: Bearer pmxk_your_key_here"</pre>
+
+<h3>For the server administrator (one-time)</h3>
+<pre># on the Promptmaxx server, from mcp-server/:
+python -m promptmaxx_mcp --http          # serves 127.0.0.1:8010 internally
+# run it under a service manager (systemd / NSSM) so it survives restarts,
+# and proxy https://app.promptmaxx.co/mcp → 127.0.0.1:8010 in nginx with TLS.
+# mcp-server/.env: PROMPTMAXX_BASE_URL=http://localhost:8000  (backend on the same machine)</pre>
 <p>Each request authenticates with the key it carries, so several consumers with different keys —
 even different organisations — can share one MCP endpoint safely.</p>
 <div class="note"><b>Enque:</b> Enque's tool system is manifest-based, not an MCP client — connect
