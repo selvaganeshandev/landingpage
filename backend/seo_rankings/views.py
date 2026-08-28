@@ -43,7 +43,9 @@ logger = logging.getLogger(__name__)
 
 def _get_user_domain_ids(user):
     """Get domain IDs the user has access to (org-scoped)."""
-    if user.role == 'super_admin':
+    # Service accounts (API keys) are org-wide read principals: they hold no
+    # DomainAccess rows, so without this they would see an empty allowlist.
+    if user.role == 'super_admin' or getattr(user, 'is_service_account', False):
         return Domain.objects.filter(
             organisation=user.organisation
         ).values_list('id', flat=True)

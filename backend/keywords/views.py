@@ -24,7 +24,9 @@ def keyword_list(request):
     """List all keywords or create a new one"""
     if request.method == 'GET':
         # Filter keywords by user's organization
-        if request.user.role == 'super_admin':
+        # Service accounts (API keys) read org-wide: no DomainAccess rows exist
+        # for them, so the per-user branch would return an empty set.
+        if request.user.role == 'super_admin' or getattr(request.user, 'is_service_account', False):
             keywords = Keyword.objects.filter(domain__organisation=request.user.organisation)
         else:
             # Users can only see keywords for domains they have access to
