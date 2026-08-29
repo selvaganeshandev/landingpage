@@ -36,7 +36,17 @@ def keyword_list(request):
                 domain__organisation=request.user.organisation
             ).values_list('domain_id', flat=True)
             keywords = Keyword.objects.filter(domain_id__in=domain_ids)
-        
+
+        # Optional server-side domain filter: org-wide responses grew large
+        # enough to time out API consumers that only want one client's rows.
+        domain_id = request.query_params.get('domain_id')
+        if domain_id:
+            try:
+                keywords = keywords.filter(domain_id=int(domain_id))
+            except (TypeError, ValueError):
+                return Response({'error': 'domain_id must be an integer'},
+                                status=status.HTTP_400_BAD_REQUEST)
+
         serializer = KeywordSerializer(keywords, many=True)
         return Response(serializer.data)
     

@@ -17,12 +17,13 @@ from __future__ import annotations
 
 from typing import Any
 
-from ..client import PromptmaxxClient
+from ..client import PromptmaxxClient, guard_tool_errors
 from ..normalize import normalize_mention, scrub_analytics
 
 
 def register(mcp: Any, client: PromptmaxxClient) -> None:
     @mcp.tool()
+    @guard_tool_errors
     def list_mentions(
         domain_id: int,
         search: str = "",
@@ -67,6 +68,7 @@ def register(mcp: Any, client: PromptmaxxClient) -> None:
         return result
 
     @mcp.tool()
+    @guard_tool_errors
     def get_mention(mention_id: int) -> dict:
         """Get one mention by id, with full citation objects and the complete
         answer description. Sentiment score is on the -1..1 scale.
@@ -81,6 +83,7 @@ def register(mcp: Any, client: PromptmaxxClient) -> None:
         return result
 
     @mcp.tool()
+    @guard_tool_errors
     def get_visibility_summary(domain_id: int, days: int | None = None) -> dict:
         """The AI-visibility dashboard for a client: headline metrics
         (visibility score, mentions, citations), platform and country
@@ -101,6 +104,7 @@ def register(mcp: Any, client: PromptmaxxClient) -> None:
         return result
 
     @mcp.tool()
+    @guard_tool_errors
     def get_share_of_voice(domain_id: int, days: int = 30) -> dict:
         """Share of voice for a client vs detected competitors over the last
         `days` days (default 30).
@@ -130,6 +134,7 @@ def register(mcp: Any, client: PromptmaxxClient) -> None:
         return result
 
     @mcp.tool()
+    @guard_tool_errors
     def get_sentiment_summary(domain_id: int, days: int = 30) -> dict:
         """Sentiment analytics summary for a client over the last `days` days
         (default 30), with previous-period comparison.
@@ -142,6 +147,7 @@ def register(mcp: Any, client: PromptmaxxClient) -> None:
         return result
 
     @mcp.tool()
+    @guard_tool_errors
     def get_historical_trends(
         domain_id: int,
         months: int = 12,

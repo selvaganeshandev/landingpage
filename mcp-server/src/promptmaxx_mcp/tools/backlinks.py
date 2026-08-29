@@ -10,11 +10,12 @@ from __future__ import annotations
 
 from typing import Any
 
-from ..client import PromptmaxxClient
+from ..client import PromptmaxxClient, guard_tool_errors
 
 
 def register(mcp: Any, client: PromptmaxxClient) -> None:
     @mcp.tool()
+    @guard_tool_errors
     def get_backlinks_overview(domain_id: int) -> dict:
         """Backlink profile overview for a client: current snapshot totals,
         history points, top anchors, top referring domains, top pages, and
@@ -25,6 +26,7 @@ def register(mcp: Any, client: PromptmaxxClient) -> None:
         return client.get("/seo/backlinks/", params={"domain_id": domain_id})
 
     @mcp.tool()
+    @guard_tool_errors
     def list_backlinks(
         domain_id: int,
         page: int = 1,

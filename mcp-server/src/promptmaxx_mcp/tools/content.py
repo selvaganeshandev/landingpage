@@ -11,11 +11,12 @@ from __future__ import annotations
 
 from typing import Any
 
-from ..client import PromptmaxxClient
+from ..client import PromptmaxxClient, guard_tool_errors
 
 
 def register(mcp: Any, client: PromptmaxxClient) -> None:
     @mcp.tool()
+    @guard_tool_errors
     def list_content(
         domain_id: int,
         status: str = "",
@@ -40,6 +41,7 @@ def register(mcp: Any, client: PromptmaxxClient) -> None:
         return client.get("/content/", params=params)
 
     @mcp.tool()
+    @guard_tool_errors
     def get_content(content_id: int) -> dict:
         """One generated-content artifact by id, with full content_html,
         outline, AI-detection fields, and humanise state.

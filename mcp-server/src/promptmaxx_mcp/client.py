@@ -11,6 +11,7 @@ invalidate ours. A fresh login has no such race for a single process.
 
 from __future__ import annotations
 
+import functools
 import time
 from contextvars import ContextVar
 from typing import Any
@@ -32,6 +33,23 @@ _RETRY_DELAY_SECONDS = 2.0
 
 class PromptmaxxError(RuntimeError):
     """Readable API failure, safe to surface as a tool error."""
+
+
+def guard_tool_errors(fn):
+    """Turn a PromptmaxxError raised inside a tool into a structured result.
+
+    The MCP SDK wraps raised exceptions opaquely ("Error executing tool X"),
+    which leaves consumers unable to tell a permissions problem from a
+    backend 500 or an unconfigured module. Returning the failure as data
+    keeps the reason readable. Apply between @mcp.tool() and the function.
+    """
+    @functools.wraps(fn)
+    def wrapper(*args, **kwargs):
+        try:
+            return fn(*args, **kwargs)
+        except PromptmaxxError as exc:
+            return {"success": False, "error": str(exc)}
+    return wrapper
 
 
 class PromptmaxxClient:

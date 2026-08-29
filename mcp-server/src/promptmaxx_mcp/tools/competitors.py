@@ -21,7 +21,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from ..client import PromptmaxxClient
+from ..client import PromptmaxxClient, guard_tool_errors
 from ..config import Config
 from ..normalize import scrub_analytics, snake_keys
 
@@ -44,6 +44,7 @@ def _clean(result: dict[str, Any]) -> dict[str, Any]:
 
 def register(mcp: Any, client: PromptmaxxClient, config: Config) -> None:
     @mcp.tool()
+    @guard_tool_errors
     def list_content_gaps(
         domain_id: int,
         platform: str = "",
@@ -85,6 +86,7 @@ def register(mcp: Any, client: PromptmaxxClient, config: Config) -> None:
         return combined
 
     @mcp.tool()
+    @guard_tool_errors
     def get_answer_gap_analysis(
         domain_id: int,
         competitor_id: int | None = None,
@@ -104,6 +106,7 @@ def register(mcp: Any, client: PromptmaxxClient, config: Config) -> None:
         return _clean(client.get("/competitors/answer-gap-analysis/", params=params))
 
     @mcp.tool()
+    @guard_tool_errors
     def list_competitors(domain_id: int, platform: str = "") -> dict:
         """The detected competitor list for a client, with share-of-voice
         percentages, ordered by share.
@@ -121,6 +124,7 @@ def register(mcp: Any, client: PromptmaxxClient, config: Config) -> None:
 
     if config.allow_insights:
         @mcp.tool()
+        @guard_tool_errors
         def get_competitive_insights(domain_id: int, platform: str = "") -> dict:
             """Auto-generated competitive narrative for a client
             (opt-in via PROMPTMAXX_MCP_ALLOW_INSIGHTS=1).

@@ -15,11 +15,12 @@ from __future__ import annotations
 
 from typing import Any
 
-from ..client import PromptmaxxClient
+from ..client import PromptmaxxClient, guard_tool_errors
 
 
 def register(mcp: Any, client: PromptmaxxClient) -> None:
     @mcp.tool()
+    @guard_tool_errors
     def list_report_sheets(domain_id: int) -> dict:
         """Configured organic report sheets for a client (GSC/GA sheet
         definitions). Empty unless the instance has Google Search Console /
@@ -28,6 +29,7 @@ def register(mcp: Any, client: PromptmaxxClient) -> None:
         return client.get("/seo/report-sheets/", params={"domain_id": domain_id})
 
     @mcp.tool()
+    @guard_tool_errors
     def get_report_sheet_data(domain_id: int) -> dict:
         """Live data for every configured organic report sheet of a client
         (GSC/GA metrics). Returns `reports: 0`-style emptiness when no

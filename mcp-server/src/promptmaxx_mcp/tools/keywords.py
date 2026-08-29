@@ -17,23 +17,25 @@ from __future__ import annotations
 
 from typing import Any
 
-from ..client import PromptmaxxClient
+from ..client import PromptmaxxClient, guard_tool_errors
 
 
 def register(mcp: Any, client: PromptmaxxClient) -> None:
     @mcp.tool()
+    @guard_tool_errors
     def list_keyword_universe(domain_id: int) -> dict:
         """The AI-generated keyword universe for a client (Keyword table):
         keyword text, intent, volume level, entity, topic, cluster, source
         (e.g. ai-generated), and modified_at.
 
-        The API endpoint has no domain filter, so rows are filtered to the
-        requested domain_id here, client-side. Enrichment fields (intent,
+        Filtered server-side by domain_id. Enrichment fields (intent,
         volume) are null until the corresponding pipelines have run.
         """
-        result = client.get("/keywords/")
+        result = client.get("/keywords/", params={"domain_id": domain_id})
         data = result["data"]
         rows = data if isinstance(data, list) else data.get("keywords", [])
+        # Belt and braces: re-filter locally so an older backend without the
+        # server-side domain filter still returns correct (if slower) data.
         filtered = [
             row for row in rows
             if isinstance(row, dict) and row.get("domain") == domain_id
@@ -41,11 +43,11 @@ def register(mcp: Any, client: PromptmaxxClient) -> None:
         result["data"] = {
             "keywords": filtered,
             "total_count": len(filtered),
-            "note": "Filtered client-side; the API endpoint has no domain filter.",
         }
         return result
 
     @mcp.tool()
+    @guard_tool_errors
     def get_active_generation_run(domain_id: int) -> dict:
         """The currently active prompt generation run for a client, if any —
         a stored draft-review lifecycle whose candidates await accept or
@@ -56,6 +58,7 @@ def register(mcp: Any, client: PromptmaxxClient) -> None:
         )
 
     @mcp.tool()
+    @guard_tool_errors
     def get_generation_run(run_id: int) -> dict:
         """One prompt generation run by id, with its stored candidates —
         e.g. raw search queries rewritten into question-style prompt

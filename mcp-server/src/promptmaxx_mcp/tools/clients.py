@@ -4,11 +4,12 @@ from __future__ import annotations
 
 from typing import Any
 
-from ..client import PromptmaxxClient
+from ..client import PromptmaxxClient, guard_tool_errors
 
 
 def register(mcp: Any, client: PromptmaxxClient) -> None:
     @mcp.tool()
+    @guard_tool_errors
     def list_clients() -> dict:
         """List every client (domain) visible to this credential.
 
@@ -18,6 +19,7 @@ def register(mcp: Any, client: PromptmaxxClient) -> None:
         return client.get("/domains/")
 
     @mcp.tool()
+    @guard_tool_errors
     def get_client(domain_id: int) -> dict:
         """Get one client (domain) record by id.
 
@@ -29,6 +31,7 @@ def register(mcp: Any, client: PromptmaxxClient) -> None:
         return client.get(f"/domains/{domain_id}/")
 
     @mcp.tool()
+    @guard_tool_errors
     def get_site_health(domain_id: int) -> dict:
         """Run the site-health audit for a client's website.
 
