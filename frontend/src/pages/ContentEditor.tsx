@@ -946,11 +946,8 @@ const ContentEditor = () => {
   // Links the current caret or selection touches, inside the editor only.
   // A collapsed caret resolves to the one link it sits in; a wider selection
   // resolves to every link it crosses, so removing works the way Bold does.
-  const findLinksInSelection = (): HTMLAnchorElement[] => {
-    const selection = window.getSelection();
-    if (!selection || selection.rangeCount === 0 || !editorRef.current) return [];
-
-    const range = selection.getRangeAt(0);
+  const findLinksInRange = (range: Range | null): HTMLAnchorElement[] => {
+    if (!range || !editorRef.current) return [];
     if (!editorRef.current.contains(range.commonAncestorContainer)) return [];
 
     const container = range.commonAncestorContainer;
@@ -967,12 +964,22 @@ const ContentEditor = () => {
       .filter(anchor => range.intersectsNode(anchor));
   };
 
+  const findLinksInSelection = (): HTMLAnchorElement[] => {
+    const selection = window.getSelection();
+    if (!selection || selection.rangeCount === 0) return [];
+    return findLinksInRange(selection.getRangeAt(0));
+  };
+
   // Unwrap the anchors, keeping their children exactly where they are. The
   // words stay, only the hyperlink goes.
-  const handleRemoveLink = () => {
+  //
+  // `range` is passed when removing from inside the Optimize dialog: opening it
+  // moves focus, so the live selection is gone by then and only the range
+  // captured when the dialog opened still points at the right words.
+  const handleRemoveLink = (range?: Range | null) => {
     if (!editorRef.current) return;
 
-    const links = findLinksInSelection();
+    const links = range ? findLinksInRange(range) : findLinksInSelection();
     if (links.length === 0) return;
 
     links.forEach(link => {
@@ -1027,6 +1034,9 @@ const ContentEditor = () => {
 
     document.addEventListener('selectionchange', handleSelectionChange);
     return () => document.removeEventListener('selectionchange', handleSelectionChange);
+    // findLinksInSelection reads only editorRef and the live DOM, so it never
+    // goes stale and re-subscribing on every render would be churn.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [rewriteDialogOpen]);
 
   // Update content metrics
@@ -2983,18 +2993,6 @@ const ContentEditor = () => {
                 <RefreshCw className="h-4 w-4" />
                 Optimize with custom prompt
               </Button>
-              {/* Remove link — enabled whenever the caret or selection is on a link */}
-              <Button
-                variant="ghost"
-                size="sm"
-                onClick={handleRemoveLink}
-                disabled={!selectionHasLink}
-                title="Remove the hyperlink and keep the text"
-                className={`gap-1 ${selectionHasLink ? '' : 'opacity-50'}`}
-              >
-                <Unlink className="h-4 w-4" />
-                Remove link
-              </Button>
               <Separator orientation="vertical" className="h-6 mx-1" />
               {/* Meta Details */}
               <Button
@@ -3135,6 +3133,10 @@ const ContentEditor = () => {
                 .content-editor a {
                   color: hsl(var(--primary));
                   text-decoration: underline;
+                  cursor: pointer;
+                }
+                .content-editor a:hover {
+                  text-decoration-thickness: 2px;
                 }
                 .content-editor blockquote {
                   border-left: 4px solid hsl(var(--primary));
@@ -3209,6 +3211,27 @@ const ContentEditor = () => {
                 contentEditable
                 onInput={handleContentChange}
                 onMouseUp={handleTextSelection}
+                onClick={(e) => {
+                  // A contentEditable swallows link navigation and just drops a
+                  // caret, so open it ourselves. Alt+click keeps the old
+                  // behaviour for editing the anchor text in place.
+                  if (e.altKey || e.shiftKey) return;
+
+                  // A drag that selected the link text also fires click. Only a
+                  // plain click, which leaves a collapsed caret, should navigate
+                  // — otherwise selecting a link to Optimize it opens a tab.
+                  const selection = window.getSelection();
+                  if (selection && !selection.isCollapsed) return;
+
+                  const anchor = (e.target as HTMLElement)?.closest?.('a[href]') as HTMLAnchorElement | null;
+                  if (!anchor || !editorRef.current?.contains(anchor)) return;
+
+                  const href = anchor.getAttribute('href')?.trim();
+                  if (!href || href.startsWith('javascript:')) return;
+
+                  e.preventDefault();
+                  window.open(href, '_blank', 'noopener,noreferrer');
+                }}
                 onKeyDown={(e) => {
                   // Handle Ctrl+Z for undo
                   if ((e.ctrlKey || e.metaKey) && e.key === 'z' && !e.shiftKey) {
@@ -4147,6 +4170,23 @@ const ContentEditor = () => {
             </div>
           </div>
           <DialogFooter>
+            {/* Remove link — only when the selected text actually holds one. */}
+            {selectionHasLink && (
+              <Button
+                variant="outline"
+                className="mr-auto text-destructive hover:text-destructive"
+                onClick={() => {
+                  handleRemoveLink(selectedRangeRef.current);
+                  setRewriteDialogOpen(false);
+                  setRewritePrompt("");
+                }}
+                disabled={isRewriting}
+                title="Remove the hyperlink and keep the text"
+              >
+                <Unlink className="h-4 w-4 mr-2" />
+                Remove link
+              </Button>
+            )}
             <Button
               variant="outline"
               onClick={() => {
