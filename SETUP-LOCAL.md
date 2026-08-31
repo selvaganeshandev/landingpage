@@ -1,15 +1,18 @@
 # Promptmaxx — Local Setup Guide
 
-Everything needed to run the full stack on a fresh machine. Written for Windows
-(Linux/macOS differences noted inline), and **verified against a working install**
-— every version, command and environment key below was read off a machine where
-the stack is running, not copied from memory.
+How to bring the full stack up on a second machine so it behaves **identically**
+to the reference machine. Written for Windows; Linux/macOS differences are noted
+inline.
+
+Everything below was read off a running install on 2026-08-31 — versions, env
+keys, commands and the admin account were verified against the live database and
+the actual source, not copied from memory.
 
 ---
 
 ## 0. What you are installing
 
-Five processes plus two data stores. All of it runs on one machine.
+Five processes plus two data stores, all on one machine. No Docker.
 
 ```
 llm-monitor/
@@ -20,41 +23,75 @@ llm-monitor/
 └── mcp-server/  MCP server for Claude     :8010   (optional)
 ```
 
-Backend and engine **share one PostgreSQL database**. The backend queues work;
-the engine's Celery workers execute it. If the workers are not running, the UI
-looks alive but nothing ever finishes.
+Backend and engine **share one PostgreSQL database**. The backend records work
+into that database; the engine's Celery **beat** picks it up and the **workers**
+execute it. If the workers or beat are not running, the UI looks completely alive
+but nothing ever finishes.
+
+> The backend has **no Celery app of its own** — there is no
+> `backend/llm_monitor/celery.py`, and its `settings.py` reads no `CELERY_*` keys.
+> All background execution lives in the engine.
 
 ---
 
 ## 1. Prerequisites
 
-Verified versions on the reference machine. Anything at or above these works.
+Verified on the reference machine. Anything at or above these works.
 
 | Requirement | Verified version | Check |
 |---|---|---|
-| Python | **3.12** (see note) | `python --version` |
+| Python (for the venv) | **3.12.14** | `py -3.12 --version` |
+| Python (system, incidental) | 3.14.5 | `python --version` |
 | uv | 0.12.5 | `uv --version` |
 | Node.js | 26.2.0 | `node --version` |
 | npm | 11.13.0 | `npm --version` |
-| PostgreSQL | 17.2 | `psql --version` |
-| Redis (Windows: **Memurai**) | Memurai 4.1.2 | `memurai-cli --version` |
-| Git | any | `git --version` |
+| PostgreSQL | 17.x | `psql --version` |
+| Redis — on Windows, **Memurai** | Memurai 4.1.2 | `memurai-cli --version` |
+| Git | 2.55.0 | `git --version` |
 
-> **Python version matters.** The venv on the reference machine is **3.12.14**,
-> even though the system Python is 3.14. Some pinned dependencies do not yet
-> build on 3.13+. Create the venv with 3.12 explicitly.
->
-> The reference machine uses [uv](https://docs.astral.sh/uv/) to supply that
-> interpreter. `uv python install 3.12` gets it without touching your system
-> Python. Plain `python3.12 -m venv` works just as well if you already have it.
+> **Use Python 3.12, not 3.13+.** The venv here is 3.12.14 even though the system
+> Python is 3.14.5, because some pinned wheels do not build on 3.13+.
+> `uv python install 3.12` supplies the interpreter without touching your system
+> Python; `py -3.12 -m venv` works too if you already have it.
 
-**Windows Redis:** use [Memurai](https://www.memurai.com/) (a native Redis
-build, installs as a Windows service). Redis-on-WSL also works. Celery needs a
-broker on `localhost:6379`; the app uses **database 5**.
+**Windows Redis:** use [Memurai](https://www.memurai.com/) — a native Redis build
+that installs as a Windows service, so it is running before you start anything.
+Redis under WSL also works. Celery needs a broker on `localhost:6379`; the app
+uses **database 5**.
+
+**Windows console encoding:** several management commands print emoji. On a
+default `cp1252` console they crash with
+`UnicodeEncodeError: 'charmap' codec can't encode character '\U0001f4ca'`.
+Set `PYTHONIOENCODING=utf-8` for every Python process — permanently:
+
+```powershell
+setx PYTHONIOENCODING utf-8      # affects new shells only; reopen the shell
+```
 
 ---
 
-## 2. Clone and create the database
+## 2. Carry these across from the working machine
+
+A `git clone` gives you all the code, both `requirements.txt` files and the
+`package-lock.json` files. It **cannot** give you the following — every item is
+gitignored. Copy them over a secure channel; never commit them.
+
+| Item | Why you need it |
+|---|---|
+| `backend/.env` | 28 keys: DB password, OpenRouter / Gemini / DataForSEO / PageSpeed keys |
+| `engine/.env` | 25 keys — the workers read this file, **not** the backend's |
+| `frontend/.env` | 2 keys (`frontend/.env.example` is tracked, so this one is reproducible) |
+| `landing/.env.local` | 2 keys — only if you run the landing site |
+| `mcp-server/.env` | 3 keys — only if you use the MCP server |
+| `pg_dump` of `llm_monitor` | **optional.** Without it you get a working but empty app: no brands, prompts, keywords or rank history |
+| `backend/media/` | **optional.** Generated images from the content editor |
+
+§5 lists the full key set for every one of those files, so you can rebuild them
+by hand if you only carry the secret *values* across.
+
+---
+
+## 3. Clone and create the database
 
 ```bash
 git clone https://github.com/arun-andiselvam/llm-monitor.git
@@ -65,15 +102,21 @@ cd llm-monitor
 psql -U postgres -c "CREATE DATABASE llm_monitor;"
 ```
 
+**If you are restoring a dump, restore it now**, before migrating:
+
+```bash
+psql -U postgres -d llm_monitor -f llm_monitor.dump
+```
+
 ---
 
-## 3. Python environment
+## 4. Python environment — one shared venv
 
-**The reference machine uses a single shared venv at `backend/.venv` for the
-backend, the engine and all three Celery processes.** `backend/requirements.txt`
-(341 packages) is a superset of `engine/requirements.txt` (70), so one
-environment covers both. This is simpler to maintain and is what the run
-commands in §7 assume.
+The reference machine uses a **single venv at `backend/.venv`** for the backend,
+the engine and all three Celery processes. `backend/requirements.txt` (341
+packages) is a superset of `engine/requirements.txt` (45), so one environment
+covers both. There is **no `engine/.venv`** — the run commands in §7 depend on
+that.
 
 ```powershell
 cd backend
@@ -83,27 +126,27 @@ uv venv --python 3.12 .venv          # or: py -3.12 -m venv .venv
 .\.venv\Scripts\pip install trafilatura
 ```
 
-`trafilatura` (2.0.0) is **not** in either requirements file but is required by
-the onboarding site-crawl. Without it, "Add Brand" fails with "couldn't read the
-site".
+`trafilatura` (2.0.0) is in **neither** requirements file but is required by the
+onboarding site-crawl. Without it, "Add Brand" fails with "couldn't read the site".
 
-> Prefer isolation? Create `engine/.venv` separately from
-> `engine/requirements.txt` and point the engine commands at it. Both layouts
-> work; only the paths in §7 change.
-
-Verify:
+Verify — these are the reference versions:
 
 ```powershell
-.\.venv\Scripts\python.exe -c "import django, celery, redis, trafilatura; print(django.get_version())"
-# expect: 5.2   (celery 5.3.6, redis 5.0.8)
+.\.venv\Scripts\python.exe -c "import importlib.metadata as m; print(m.version('Django'), m.version('celery'), m.version('redis'), m.version('trafilatura'))"
+# expect: 5.2 5.3.6 5.0.8 2.0.0
 ```
+
+> Prefer isolated venvs? Create `engine/.venv` from `engine/requirements.txt` and
+> point the engine commands at it instead. Both layouts work; only the
+> interpreter paths in §7 change.
 
 ---
 
-## 4. `backend/.env`
+## 5. Environment files
 
-Gitignored — create it by hand. This is the **complete key set** from the
-reference machine. Values shown are placeholders.
+Five files. None are in git. Values below are placeholders — bring the real ones.
+
+### 5.1 `backend/.env` — 28 keys
 
 ```ini
 # --- core ---
@@ -119,14 +162,15 @@ ENGINE_API_URL=http://localhost:8001
 DB_NAME=llm_monitor
 DB_USER=postgres
 DB_PASSWORD=your-db-password
-DB_HOST=localhost
+DB_HOST=127.0.0.1
 DB_PORT=5432
 
-# --- celery broker (Redis db 5) ---
+# --- inert here, but present on the reference machine ---
+# The backend has no Celery app; nothing reads this key. Harmless.
 CELERY_BROKER_URL=redis://localhost:6379/5
 
-# --- LLM transport ---
-# Nearly everything routes through OpenRouter. Model slugs need the vendor prefix.
+# --- LLM transport (nearly everything routes through OpenRouter) ---
+# OpenRouter slugs need the vendor prefix.
 OPENROUTER_API_KEY=sk-or-v1-...
 OPENROUTER_INTERNAL_MODEL=openai/gpt-5-mini
 OPENROUTER_GEMINI_MODEL=google/gemini-2.5-flash
@@ -134,19 +178,19 @@ OPENAI_CHATGPT_MODEL=gpt-4o
 ANTHROPIC_MODEL=claude-sonnet-4-5
 PERPLEXITY_MODEL=sonar
 
-# --- Google Gemini (used directly for some analysis paths) ---
+# --- Google Gemini (direct, for some analysis paths) ---
 GOOGLE_GEMINI_API_KEY=AIza...
 GEMINI_MODEL=gemini-2.5-flash
-GEMINI_BACKEND=api            # 'api' or 'vertex'
+GEMINI_BACKEND=api
 
 # --- image generation (content editor) ---
-# Stage 1 writes the prompt with a text model; unset falls back to
+# Stage 1 writes the prompt with a text model; empty falls back to
 # OPENROUTER_INTERNAL_MODEL. Stage 2 renders pixels — OpenRouter has NO free
 # image models, so this stage always costs money.
 IMAGE_PROMPT_TEXT_MODEL=
 IMAGE_RENDER_MODEL=google/gemini-2.5-flash-image
 
-# --- SEO data (needed for rankings, volume, backlinks) ---
+# --- SEO data (rankings, volume, backlinks) ---
 DATAFORSEO_LOGIN=you@example.com
 DATAFORSEO_PASSWORD=...
 DATAFORSEO_USE_SANDBOX=False
@@ -155,23 +199,20 @@ DATAFORSEO_USE_SANDBOX=False
 GOOGLE_PAGESPEED_API_KEY=AIza...
 ```
 
-Also read by `settings.py` but **not set on the reference machine** — add only
-if you need that path: `OPENAI_API_KEY`, `OPENROUTER_BASE_URL` (defaults
-correctly; see pitfall 3), `DATABLUE_API_KEY` (alternative SERP provider).
+> `GEMINI_BACKEND` — only the literal value `vertex` changes behaviour (it routes
+> Gemini through Vertex AI and then also needs `VERTEX_PROJECT` and
+> `GOOGLE_APPLICATION_CREDENTIALS`). Every other value, including the `api` used
+> here and the code default `aistudio`, takes the plain API-key path.
 
-Create the media directory that generated images are written to. It is
-gitignored, so it does not arrive with a clone:
+`settings.py` reads many more keys than this — `OPENAI_API_KEY`,
+`OPENROUTER_BASE_URL`, `DATABLUE_API_KEY`, `MAILGUN_*`, `MOZ_*`,
+`SCRAPINGDOG_API_KEY`, `VERTEX_*` — but **none of them are set on the reference
+machine**, and each has a working default. Add one only when you need that path.
 
-```powershell
-mkdir media          # inside backend/ ; MEDIA_ROOT = BASE_DIR / 'media'
-```
+### 5.2 `engine/.env` — 25 keys
 
----
-
-## 5. `engine/.env`
-
-The workers read **the engine's own `.env`**, not the backend's. Keys that
-matter for background jobs must appear in both files.
+The workers read the **engine's own** `.env`. Keys that matter to background jobs
+must appear in both files.
 
 ```ini
 DEBUG=True
@@ -180,17 +221,19 @@ ALLOWED_HOSTS=localhost,127.0.0.1
 FRONTEND_URL=http://localhost:8080
 BACKEND_API_URL=http://localhost:8000
 
-# same database as the backend
+# Same database as the backend — you MUST set these.
+# The engine's built-in defaults are DB_USER=arun / DB_PASSWORD=admin,
+# which will not exist on your machine.
 DB_NAME=llm_monitor
 DB_USER=postgres
 DB_PASSWORD=your-db-password
-DB_HOST=localhost
+DB_HOST=127.0.0.1
 DB_PORT=5432
 
 CELERY_BROKER_URL=redis://localhost:6379/5
 CELERY_RESULT_BACKEND=redis://localhost:6379/5
 
-# which measurement platforms the sweeps run
+# Which measurement platforms the sweeps run.
 ENABLED_PLATFORMS=chatgpt          # add gemini,perplexity,claude as keys allow
 
 OPENROUTER_API_KEY=sk-or-v1-...
@@ -200,7 +243,7 @@ OPENAI_CHATGPT_MODEL=gpt-4o
 ANTHROPIC_MODEL=claude-sonnet-4-5
 PERPLEXITY_MODEL=sonar
 
-GEMINI_API_KEY=AIza...             # note: GEMINI_API_KEY here, not GOOGLE_GEMINI_API_KEY
+GEMINI_API_KEY=AIza...             # note: GEMINI_API_KEY here, NOT GOOGLE_GEMINI_API_KEY
 GEMINI_MODEL=gemini-2.5-flash
 GEMINI_BACKEND=api
 
@@ -209,40 +252,104 @@ DATAFORSEO_PASSWORD=...
 DATAFORSEO_USE_SANDBOX=False
 ```
 
-Optional: `WEEKLY_SWEEP_BEAT_ENABLED=True` registers the weekly sweep (off by
-default, and additionally guarded by a 6-day cooldown).
+Optional: `WEEKLY_SWEEP_BEAT_ENABLED=True` registers the weekly sweep. It is off
+by default and further guarded by a 6-day cooldown and a preflight check.
 
----
+### 5.3 `frontend/.env`
 
-## 6. `frontend/.env`
-
-Vite inlines these at **build** time — restart `npm run dev` after editing.
-Never put a secret here; everything in this file ships to the browser.
+Vite inlines these at **build** time — restart `npm run dev` after editing. Never
+put a secret here; everything in this file ships to the browser.
+`frontend/.env.example` is tracked and documents the optional overrides.
 
 ```ini
 VITE_API_BASE_URL=http://localhost:8000
 VITE_ENGINE_URL=http://localhost:8001
 ```
 
-Then:
-
 ```powershell
 cd frontend
 npm install
 ```
 
+Port 8080 is hardcoded in `frontend/vite.config.ts`; no flag is needed.
+
+### 5.4 `landing/.env.local` — only if you run the landing site
+
+```ini
+NEXT_PUBLIC_API_URL=http://localhost:8000
+NEXT_PUBLIC_APP_URL=http://localhost:8080
+```
+
+### 5.5 `mcp-server/.env` — only if you use the MCP server
+
+```ini
+PROMPTMAXX_BASE_URL=http://localhost:8000
+PROMPTMAXX_EMAIL=admin@local.test
+PROMPTMAXX_PASSWORD=your-admin-password
+```
+
+### 5.6 The media directory
+
+Generated images are written to `MEDIA_ROOT = backend/media`. It is gitignored,
+so it does not arrive with a clone:
+
+```powershell
+mkdir backend\media
+```
+
 ---
 
-## 7. Migrate, create a login, and run
+## 6. Migrate and create the admin account
 
 ```powershell
 cd backend
 .\.venv\Scripts\python.exe manage.py migrate
-.\.venv\Scripts\python.exe manage.py createsuperuser    # login is by email
 ```
 
-Run all five processes. The three Celery commands run **from `engine/`** using
-the backend venv's interpreter:
+The reference machine has **115 migrations applied and 0 pending**.
+
+### Do NOT use `createsuperuser`
+
+The user model is `authentication.Account` (`USERNAME_FIELD = 'email'`,
+`REQUIRED_FIELDS = ['username']`). Its `organisation` field is **`null=False,
+blank=False`**, and there is no custom `create_superuser` manager — so Django's
+built-in `createsuperuser` never sets an organisation and fails on a NOT NULL
+violation. It is also interactive, which is useless in an automated setup.
+
+### Use `seed_admin` instead
+
+`backend/authentication/management/commands/seed_admin.py` creates the
+Organisation, the Account (`role='super_admin'`, staff, superuser, active) and
+all 30 module permissions in one transaction:
+
+```powershell
+.\.venv\Scripts\python.exe manage.py seed_admin --email "admin@local.test" --password "your-password" --organisation-name "Local Dev Org"
+```
+
+Pass all three flags explicitly — the defaults are `admin@pivotroots.com` /
+`admin123` / organisation `PivotRoots Updated`.
+
+> **`seed_admin` DELETES any existing account with that email** (and its
+> permission rows) before recreating it. That is fine on a fresh database. If you
+> restored a dump in §3 and want to keep that account's data, change the password
+> in place instead:
+>
+> ```powershell
+> .\.venv\Scripts\python.exe manage.py shell -c "from authentication.models import Account; u=Account.objects.get(email='admin@local.test'); u.set_password('your-password'); u.save()"
+> ```
+
+Reference account, for comparison: `admin@local.test`, username `admin`, role
+`super_admin`, organisation `Local Dev Org`, `pbkdf2_sha256` hash. (`seed_admin`
+sets `username` to the email rather than `admin`, and creates 30 permission rows
+where the reference account has 0. Neither difference affects login or behaviour
+— login is by email, and `role='super_admin'` governs access.)
+
+---
+
+## 7. Run all five processes — without opening extra terminals
+
+The three Celery commands run **from `engine/`** using the **backend venv's**
+interpreter.
 
 ```powershell
 # 1. backend API                          (from backend/)
@@ -264,40 +371,56 @@ the backend venv's interpreter:
 npm run dev
 ```
 
-Two things that bite:
+Three things that bite:
 
-- **`--noreload` is deliberate.** `.env` is read once at startup. After changing
-  a key, restart the process.
-- **`--pool=solo` is a Windows requirement.** On Linux/macOS drop it and call
-  `celery` directly: `celery -A llm_monitor_engine worker -Q celery ...`.
-- **The SEO worker must listen on both `seo` and `seo_instant`.** Miss
-  `seo_instant` and newly added keywords never get their first rank.
+- **`--noreload` is deliberate.** `.env` is read once at startup. After changing a
+  key, restart the process.
+- **`--pool=solo` is a Windows requirement.** The default prefork pool does not
+  work on Windows — the worker starts and then silently idles. On Linux/macOS drop
+  it and call `celery` directly.
+- **The SEO worker must listen on both `seo` and `seo_instant`.**
+  `CELERY_TASK_ROUTES` sends rank crawls and backlink fetches to `seo`, and newly
+  added keywords to `seo_instant`. Miss `seo_instant` and new keywords never get a
+  first rank.
 
-### One-click start (PowerShell)
+### Running them headless (no extra windows)
 
-Save beside the repo, adjust `$root`, run it. Each service gets its own titled
-window.
+To keep everything in one session with logs on disk, start each as a hidden
+process writing to `logs/`:
 
 ```powershell
 $root = "D:\Promptmaxx\llm-monitor"
 $py   = "$root\backend\.venv\Scripts\python.exe"
-function S($t,$d,$c){ Start-Process powershell -ArgumentList @("-NoExit","-Command",
-  "`$host.UI.RawUI.WindowTitle='$t'; Set-Location '$d'; $c") }
+New-Item -ItemType Directory -Force "$root\logs" | Out-Null
+$env:PYTHONIOENCODING = "utf-8"
 
-S "PMX backend :8000"  "$root\backend"  "$py manage.py runserver 8000 --noreload"
-S "PMX engine :8001"   "$root\engine"   "$py manage.py runserver 8001 --noreload"
-S "PMX worker"         "$root\engine"   "$py -m celery -A llm_monitor_engine worker --pool=solo -n default@%h -Q celery --loglevel=info"
-S "PMX worker seo"     "$root\engine"   "$py -m celery -A llm_monitor_engine worker --pool=solo -n seo@%h -Q seo,seo_instant --loglevel=info"
-S "PMX beat"           "$root\engine"   "$py -m celery -A llm_monitor_engine beat --loglevel=info"
-S "PMX frontend :8080" "$root\frontend" "npm run dev"
+function Svc($name, $dir, $exe, $argline) {
+  Start-Process -FilePath $exe -ArgumentList $argline -WorkingDirectory $dir `
+    -WindowStyle Hidden `
+    -RedirectStandardOutput "$root\logs\$name.log" `
+    -RedirectStandardError  "$root\logs\$name.err.log"
+}
+
+Svc backend  "$root\backend"  $py "manage.py runserver 8000 --noreload"
+Svc engine   "$root\engine"   $py "manage.py runserver 8001 --noreload"
+Svc worker   "$root\engine"   $py "-m celery -A llm_monitor_engine worker --pool=solo -n default@%h -Q celery --loglevel=info"
+Svc seo      "$root\engine"   $py "-m celery -A llm_monitor_engine worker --pool=solo -n seo@%h -Q seo,seo_instant --loglevel=info"
+Svc beat     "$root\engine"   $py "-m celery -A llm_monitor_engine beat --loglevel=info"
+Svc frontend "$root\frontend" "npm.cmd" "run dev"
 ```
+
+Read `logs/*.err.log` after starting — a process that dies on a bad `.env` key
+exits immediately and leaves the reason there.
+
+To stop everything: `Get-Process python,node | Stop-Process`.
 
 ---
 
 ## 8. Optional: the landing site (`:3000`)
 
-A separate Next.js 16 / React 19 marketing site. Nothing in the app depends on
-it — skip it unless you are working on marketing pages.
+A separate Next.js 16 / React 19 marketing site. Nothing in the app depends on it
+— skip it unless you are working on marketing pages. Needs `landing/.env.local`
+from §5.4.
 
 ```powershell
 cd landing
@@ -309,16 +432,17 @@ npm run dev          # http://localhost:3000
 
 ## 9. Optional: the MCP server (`:8010`)
 
+This one **does** get its own venv.
+
 ```powershell
 cd mcp-server
 uv venv --python 3.12 .venv
 .\.venv\Scripts\pip install -e .
-copy .env.example .env
 ```
 
-In `mcp-server/.env` set `PROMPTMAXX_BASE_URL=http://localhost:8000` plus either
-a service API key (`PROMPTMAXX_API_KEY=pmxk_...`, minted in the UI under
-Organization Settings → **Get your API key**) or email/password.
+Create `mcp-server/.env` per §5.5 — either the email/password pair used on the
+reference machine, or a service API key (`PROMPTMAXX_API_KEY=pmxk_...`, minted in
+the UI under Organization Settings → **Get your API key**).
 
 Register with Claude Code:
 
@@ -338,17 +462,25 @@ callers send `Authorization: Bearer pmxk_...`). Full guide:
 |---|---|
 | `http://localhost:8000/` | JSON 401 — the auth wall means the backend is alive |
 | `http://localhost:8080/` | login page |
-| Log in with the superuser | dashboard loads |
+| Log in as `admin@local.test` | dashboard loads |
 | Organization Settings → Add Brand | site analyzed, keywords seeded (proves `trafilatura`) |
 | Prompts → Generate | reaches 100% in ~1–2 min (proves worker + beat + OpenRouter) |
 | SEO → Keywords → add one | rank appears within minutes (proves the `seo_instant` queue + DataForSEO) |
 | Content Editor → generate an image | image saved under `backend/media/` (proves `IMAGE_RENDER_MODEL`) |
 | Organization Settings → API Keys | Token Consumption panel shows calls and cost |
 
-Quick port check:
+Port check — all five should be listening:
 
 ```powershell
 netstat -ano | findstr "LISTENING" | findstr ":8000 :8001 :8080 :6379 :5432"
+```
+
+Celery check — both workers should answer, and between them cover `celery`,
+`seo` and `seo_instant`:
+
+```powershell
+cd engine
+..\backend\.venv\Scripts\python.exe -m celery -A llm_monitor_engine inspect active_queues
 ```
 
 ---
@@ -367,50 +499,74 @@ netstat -ano | findstr "LISTENING" | findstr ":8000 :8001 :8080 :6379 :5432"
 
 ---
 
-## 12. Common pitfalls
+## 12. Things NOT to do
 
-1. **Generation stuck at 0%** → a Celery worker or beat is not running. The
-   backend only queues; the engine executes.
-2. **Rank refresh does nothing** → the SEO worker must listen on **both** `seo`
-   and `seo_instant`, and the DataForSEO credentials must be in the **engine's**
-   `.env`, not just the backend's.
-3. **401 "Incorrect API key" from OpenAI during generation** → `OPENROUTER_BASE_URL`
-   is pointing at `api.openai.com` while the key is an OpenRouter `sk-or-` key.
-   Leave it unset (it defaults correctly) or set
-   `https://openrouter.ai/api/v1`, and use vendor-prefixed slugs like
-   `openai/gpt-5-mini`.
-4. **"Couldn't read the site" on Add Brand** → `trafilatura` is missing from the
-   venv (§3).
-5. **Changed a key, nothing happened** → `--noreload` reads `.env` at startup
-   only. Restart the process.
-6. **Image generation fails or returns nothing** → `IMAGE_RENDER_MODEL` must be
-   an image-output model. OpenRouter has no free ones; every image costs.
-7. **`pip install` fails compiling a wheel** → you are on Python 3.13+. Rebuild
-   the venv on 3.12 (§1).
-8. **Celery starts then immediately idles on Windows** → `--pool=solo` is
-   missing. The default prefork pool does not work on Windows.
-9. **Non-US client measured with US context** → the onboarding country map covers
-   24 of 116 countries; unsupported picks silently fall back to United States.
-   Known issue.
-10. **Weekly sweep never runs** → it is only registered when
-    `WEEKLY_SWEEP_BEAT_ENABLED=True` in the engine `.env`, and is further guarded
-    by a 6-day cooldown and a kill switch.
+- **Do not run `manage.py create_partitions`.** The command exists and looks like
+  setup, but the reference machine's five analytics tables (`prompt_analytics`,
+  `competitor_analytics`, `topic_analytics`, `sentiment_analytics`,
+  `share_of_voice_analytics`) are **not partitioned** — `check_partition_status`
+  reports "Table is NOT partitioned" for all five. Running it would give you a
+  different database shape, not a matching one.
+- **Do not run `manage.py createsuperuser`** — see §6.
+- **Do not create `engine/.venv`** unless you also change every path in §7.
+- **Do not commit any `.env` file.**
 
 ---
 
-## 13. Moving to a second machine — checklist
+## 13. Common pitfalls
 
-- [ ] PostgreSQL 17 installed, `llm_monitor` database created
+1. **`createsuperuser` fails with a NOT NULL error on `organisation_id`** → use
+   `seed_admin` (§6).
+2. **`UnicodeEncodeError: 'charmap' codec can't encode character`** → Windows
+   console encoding. Set `PYTHONIOENCODING=utf-8` (§1).
+3. **Generation stuck at 0%** → a Celery worker or beat is not running. The
+   backend only records the request; the engine executes it.
+4. **Rank refresh does nothing** → the SEO worker must listen on **both** `seo`
+   and `seo_instant`, and the DataForSEO credentials must be in the **engine's**
+   `.env`, not just the backend's.
+5. **Engine cannot connect to the database** → `engine/.env` is missing its `DB_*`
+   block. The engine's built-in defaults are `arun` / `admin`, not `postgres`.
+6. **401 "Incorrect API key" from OpenAI during generation** →
+   `OPENROUTER_BASE_URL` is pointing at `api.openai.com` while the key is an
+   OpenRouter `sk-or-` key. Leave it unset — it already defaults to
+   `https://openrouter.ai/api/v1` — and use vendor-prefixed slugs like
+   `openai/gpt-5-mini`.
+7. **"Couldn't read the site" on Add Brand** → `trafilatura` is missing from the
+   venv (§4).
+8. **Changed a key, nothing happened** → `--noreload` reads `.env` at startup
+   only. Restart the process.
+9. **Image generation fails or returns nothing** → `IMAGE_RENDER_MODEL` must be an
+   image-output model. OpenRouter has no free ones; every image costs.
+10. **`pip install` fails compiling a wheel** → you are on Python 3.13+. Rebuild
+    the venv on 3.12 (§1).
+11. **Celery starts then immediately idles on Windows** → `--pool=solo` is missing.
+12. **Non-US client measured with US context** → the onboarding country map covers
+    24 of 116 countries; unsupported picks silently fall back to United States.
+    Known issue.
+13. **Weekly sweep never runs** → only registered when
+    `WEEKLY_SWEEP_BEAT_ENABLED=True` in the engine `.env`, and further guarded by
+    a 6-day cooldown and a preflight check.
+
+---
+
+## 14. Second-machine checklist
+
+- [ ] PostgreSQL installed, `llm_monitor` database created
 - [ ] Memurai (or Redis) running on 6379
 - [ ] Python 3.12 available (`uv python install 3.12`)
 - [ ] Node 18+ (26.x verified)
+- [ ] `PYTHONIOENCODING=utf-8` set
 - [ ] Repo cloned
-- [ ] `backend/.venv` created from **both** requirements files, plus `trafilatura`
+- [ ] Dump restored, if you want the existing data — **before** `migrate`
+- [ ] `backend/.venv` built from **both** requirements files, plus `trafilatura`
 - [ ] `backend/.env`, `engine/.env`, `frontend/.env` written — **none are in git**
-- [ ] `backend/media/` created
-- [ ] `manage.py migrate` run, superuser created
-- [ ] All five processes started (§7)
+- [ ] `landing/.env.local`, `mcp-server/.env` — only if using those
+- [ ] `backend/media/` created (and copied over, if you want the old images)
+- [ ] `manage.py migrate` clean — 115 applied, 0 pending
+- [ ] `seed_admin` run with explicit `--email --password --organisation-name`
+- [ ] `npm install` in `frontend/`
+- [ ] All five processes started (§7), `logs/*.err.log` clean
 - [ ] §10 verification table walked end to end
 
-The three `.env` files are the only thing a clone cannot give you. Copy them
-from a working machine over a secure channel — never commit them.
+The `.env` files are the only thing a clone cannot give you. Copy them from a
+working machine over a secure channel — never commit them.
