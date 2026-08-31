@@ -1706,7 +1706,46 @@ const ContentEditor = () => {
     }
   };
 
-  // Find link opportunities in content
+  // --- Internal link placement -------------------------------------------
+  //
+  // Links are placed in BODY PARAGRAPHS ONLY, and everything below works on
+  // DOM text nodes rather than on the HTML string. A string replace matched
+  // inside attributes too, so a keyword sitting in `<img alt="running shoes">`
+  // produced broken markup, and the old "not already inside an anchor" regex
+  // guard could not see past a nested tag such as
+  // `<a href="/x">buy <strong>shoes</strong></a>`.
+
+  // A <p> inside one of these is not body copy — never link its text.
+  const LINK_SKIP_SELECTOR = 'a, h1, h2, h3, h4, h5, h6, code, pre, figcaption, blockquote, table';
+
+  const normalizeLinkUrl = (url: string) => url.trim().toLowerCase().replace(/\/+$/, '');
+
+  const buildKeywordRegex = (keyword: string, flags: string) =>
+    new RegExp(`\\b${keyword.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\b`, flags);
+
+  // Every text node inside a <p> and outside the skip list. This is the only
+  // place a link is allowed to land.
+  const collectLinkableTextNodes = (root: HTMLElement): Text[] => {
+    const nodes: Text[] = [];
+    const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
+    let node = walker.nextNode() as Text | null;
+
+    while (node) {
+      const parent = node.parentElement;
+      if (
+        parent &&
+        node.data.trim().length > 0 &&
+        parent.closest('p') &&
+        !parent.closest(LINK_SKIP_SELECTOR)
+      ) {
+        nodes.push(node);
+      }
+      node = walker.nextNode() as Text | null;
+    }
+
+    return nodes;
+  };
+
   const findLinkOpportunities = (htmlContent: string, links: typeof internalLinks) => {
     if (!links || links.length === 0) {
       setLinkOpportunities([]);
@@ -1715,54 +1754,50 @@ const ContentEditor = () => {
       return;
     }
 
-    // Get plain text from content
     const tempDiv = document.createElement('div');
     tempDiv.innerHTML = htmlContent;
-    const plainText = tempDiv.textContent?.toLowerCase() || '';
 
-    // Extract all text content from anchor tags to check what's already linked
-    const anchorTexts: string[] = [];
-    const anchors = tempDiv.querySelectorAll('a');
-    anchors.forEach(anchor => {
-      const text = anchor.textContent?.toLowerCase() || '';
-      if (text) anchorTexts.push(text);
-    });
+    // Only paragraph text counts. A keyword that appears solely in a heading
+    // or a table is not an opportunity, because it can never be linked.
+    const linkableText = collectLinkableTextNodes(tempDiv)
+      .map(node => node.data)
+      .join(' ')
+      .toLowerCase();
 
-    // Find which keywords appear in the content (excluding already linked text)
+    // URLs already linked anywhere in the article. A second link to the same
+    // page is a duplicate, not an opportunity — repeated identical links hurt
+    // rankings, which is what the backend's post-generation dedupe guards.
+    const linkedUrls = new Set(
+      Array.from(tempDiv.querySelectorAll('a[href]'))
+        .map(anchor => normalizeLinkUrl(anchor.getAttribute('href') || ''))
+    );
+
     const opportunities: typeof linkOpportunities = [];
     let appliedKeywordsCount = 0;
     let totalKeywordsFound = 0;
 
     links.forEach(link => {
-      // Split keywords by comma and check each one
       const keywordList = link.keywords.split(',').map(k => k.trim().toLowerCase()).filter(k => k.length > 0);
 
       keywordList.forEach(keyword => {
         if (keyword.length < 2) return; // Skip very short keywords
 
-        // Count occurrences of keyword in plain text
-        const regex = new RegExp(`\\b${keyword.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\b`, 'gi');
-        const matches = plainText.match(regex);
+        const matches = linkableText.match(buildKeywordRegex(keyword, 'gi'));
         const count = matches ? matches.length : 0;
+        if (count === 0) return;
 
-        if (count > 0) {
-          totalKeywordsFound++;
+        totalKeywordsFound++;
 
-          // Check if this keyword is already inside any anchor tag
-          const keywordRegex = new RegExp(`\\b${keyword.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\b`, 'i');
-          const alreadyLinked = anchorTexts.some(anchorText => keywordRegex.test(anchorText));
-
-          if (alreadyLinked) {
-            appliedKeywordsCount++;
-          } else {
-            opportunities.push({
-              linkId: link.id,
-              topic: link.topic,
-              keyword: keyword,
-              url: link.url,
-              count: count
-            });
-          }
+        if (linkedUrls.has(normalizeLinkUrl(link.url))) {
+          appliedKeywordsCount++;
+        } else {
+          opportunities.push({
+            linkId: link.id,
+            topic: link.topic,
+            keyword: keyword,
+            url: link.url,
+            count: count
+          });
         }
       });
     });
@@ -1779,6 +1814,22 @@ const ContentEditor = () => {
     return `${opportunity.linkId}-${opportunity.keyword}`;
   };
 
+  // Wrap the first match of `keyword` inside `node` in an anchor. Splitting the
+  // text node keeps every surrounding tag and attribute untouched.
+  const linkTextNode = (node: Text, keyword: string, url: string) => {
+    const match = buildKeywordRegex(keyword, 'i').exec(node.data);
+    if (!match || !node.parentNode) return false;
+
+    const keywordNode = node.splitText(match.index);
+    keywordNode.splitText(match[0].length); // keywordNode now holds exactly the keyword
+
+    const anchor = document.createElement('a');
+    anchor.setAttribute('href', url);
+    anchor.textContent = keywordNode.data; // original casing preserved
+    keywordNode.parentNode?.replaceChild(anchor, keywordNode);
+    return true;
+  };
+
   // Apply selected internal links to content
   const handleApplySelectedLinks = () => {
     if (!editorRef.current || selectedLinkOpportunities.size === 0) return;
@@ -1786,42 +1837,57 @@ const ContentEditor = () => {
     setIsApplyingLinks(true);
 
     try {
-      let html = editorRef.current.innerHTML;
+      const root = editorRef.current;
       let appliedCount = 0;
 
-      // Apply only selected link opportunities
+      // One link per URL, and at most one new link per paragraph, so links
+      // spread down the article instead of stacking in the first paragraph.
+      const linkedUrls = new Set(
+        Array.from(root.querySelectorAll('a[href]'))
+          .map(anchor => normalizeLinkUrl(anchor.getAttribute('href') || ''))
+      );
+      const usedParagraphs = new Set<HTMLElement>();
+
       linkOpportunities.forEach(opportunity => {
-        const key = getLinkOpportunityKey(opportunity);
-        if (!selectedLinkOpportunities.has(key)) return;
+        if (!selectedLinkOpportunities.has(getLinkOpportunityKey(opportunity))) return;
+        if (linkedUrls.has(normalizeLinkUrl(opportunity.url))) return;
 
-        // Create a regex that matches the keyword but not if it's already in a link
-        const keywordRegex = new RegExp(
-          `(?<!<a[^>]*>)\\b(${opportunity.keyword.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')})\\b(?![^<]*</a>)`,
-          'i'
-        );
+        // Re-walked per link: the previous insertion invalidated the old list.
+        const candidates = collectLinkableTextNodes(root)
+          .filter(node => buildKeywordRegex(opportunity.keyword, 'i').test(node.data));
+        if (candidates.length === 0) return;
 
-        // Replace only the first occurrence
-        const newHtml = html.replace(keywordRegex, `<a href="${opportunity.url}" target="_blank" rel="noopener noreferrer">$1</a>`);
-        if (newHtml !== html) {
+        // Prefer a paragraph nothing has been added to yet. Falling back to the
+        // first candidate means a link the user ticked is never silently dropped.
+        const target = candidates.find(node => {
+          const paragraph = node.parentElement?.closest('p');
+          return paragraph ? !usedParagraphs.has(paragraph as HTMLElement) : false;
+        }) || candidates[0];
+
+        const paragraph = target.parentElement?.closest('p') as HTMLElement | null;
+
+        if (linkTextNode(target, opportunity.keyword, opportunity.url)) {
           appliedCount++;
-          html = newHtml;
+          linkedUrls.add(normalizeLinkUrl(opportunity.url));
+          if (paragraph) usedParagraphs.add(paragraph);
         }
       });
 
-      // Update the editor
-      editorRef.current.innerHTML = html;
-      handleContentChange();
+      // Merge the text nodes left over from splitting.
+      root.normalize();
 
-      // Recalculate opportunities
-      findLinkOpportunities(html, internalLinks);
+      // Rewrites content state, history and the opportunity list.
+      handleContentChange();
 
       // Close modal and reset selection
       setLinkOpportunitiesModalOpen(false);
       setSelectedLinkOpportunities(new Set());
 
       toast({
-        title: "Links Applied",
-        description: `Applied ${appliedCount} internal link(s) to your content.`,
+        title: appliedCount > 0 ? "Links Applied" : "No Links Applied",
+        description: appliedCount > 0
+          ? `Applied ${appliedCount} internal link(s) inside body paragraphs.`
+          : "Those keywords appear only in headings, tables or text that is already linked.",
       });
     } catch (error) {
       console.error("Error applying internal links:", error);
