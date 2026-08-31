@@ -234,7 +234,57 @@ class _MessagesAPI:
         return _to_message(response, resolved_model)
 
 
-def get_internal_client(timeout: int = 60) -> Any:
+def resolve_openrouter_key(org=None) -> Optional[str]:
+    """The OpenRouter key to use: this organisation's own, else the system key.
+
+    A customer only ever sees the frontend — they cannot edit ``.env`` — so the
+    key they paste into Settings > Organization > API Keys has to be the one
+    that actually authenticates their work, and their usage has to bill to their
+    account rather than the operator's.
+
+    Resolution order matches ``engine.core.services.api_key_service.get_api_key``
+    and the proven Gemini path in ``domains.views.get_google_genai_client``:
+
+        1. Organisation.openrouter_api_key   (BYOK, encrypted in the database)
+        2. settings.OPENROUTER_API_KEY       (system key — development, and a
+                                              fallback for background jobs)
+
+    ``org`` may be passed explicitly. When it is not, the current request's
+    organisation is resolved from thread-local state, which is populated by
+    ``ThreadLocalRequestMiddleware``. Outside a request — Celery tasks,
+    management commands — that returns None and the system key is used, which is
+    the correct behaviour for work that belongs to no particular user.
+
+    Every failure here degrades to the system key rather than raising: a broken
+    cache or an unreadable ciphertext must not take LLM features offline.
+    """
+    from django.conf import settings
+
+    if org is None:
+        try:
+            from llm_monitor.middleware import get_current_org_id
+            from engine.core.services.api_key_service import get_org_settings
+
+            org_id = get_current_org_id()
+            if org_id:
+                org = get_org_settings(org_id)
+        except Exception as exc:  # noqa: BLE001
+            logger.warning('Could not resolve organisation for BYOK key: %s', exc)
+            org = None
+
+    if org is not None:
+        try:
+            from engine.core.services.api_key_service import get_api_key
+            key = get_api_key(org, 'openrouter')
+            if key:
+                return key
+        except Exception as exc:  # noqa: BLE001
+            logger.warning('BYOK OpenRouter lookup failed, using system key: %s', exc)
+
+    return getattr(settings, 'OPENROUTER_API_KEY', None)
+
+
+def get_internal_client(timeout: int = 60, org=None) -> Any:
     """Plain OpenAI-compatible client pointed at OpenRouter, for INTERNAL work.
 
     Used by the backend's non-measured LLM calls (chat, domain helpers, insight
@@ -243,14 +293,22 @@ def get_internal_client(timeout: int = 60) -> Any:
     the flagship ``OPENAI_CHATGPT_MODEL`` so it still measures what a real
     ChatGPT user is told, rather than the cheap internal slug below.
 
+    Authenticates with the CALLER'S organisation key when there is one, so a
+    customer who pastes their key in Settings pays for their own usage. Pass
+    ``org`` explicitly from background work, where there is no request to infer
+    it from.
+
     Pair with ``settings.OPENROUTER_INTERNAL_MODEL`` for the model slug.
     """
     from django.conf import settings
     from openai import OpenAI
 
-    api_key = getattr(settings, 'OPENROUTER_API_KEY', None)
+    api_key = resolve_openrouter_key(org)
     if not api_key:
-        raise ValueError('OPENROUTER_API_KEY is not configured')
+        raise ValueError(
+            'No OpenRouter API key available. Add one in Settings > '
+            'Organization > API Keys, or set OPENROUTER_API_KEY.'
+        )
     return OpenAI(
         api_key=api_key,
         base_url=getattr(settings, 'OPENROUTER_BASE_URL', OPENROUTER_BASE_URL),

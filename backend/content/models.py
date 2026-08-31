@@ -329,6 +329,50 @@ class ContentGenerationUsage(models.Model):
         null=True,
         help_text="Error message if the generation failed"
     )
+    # --- token-consumption monitoring -------------------------------------
+    #
+    # Added so the API Keys screen can report consumption per LLM. All three are
+    # ADDITIVE and nullable/defaulted: no existing column is altered, because the
+    # varchar(50) defect on this same table came from an AlterField whose SQL
+    # never reached the database.
+    #
+    # NOTE: the engine mirrors this table (engine/shared_models/models.py) with
+    # managed=True. These fields are deliberately NOT added there — Django only
+    # selects columns it declares, the engine never writes here, and duplicating
+    # them would recreate the migration collision between the two projects.
+    PROVIDER_CHOICES = [
+        ('openrouter', 'OpenRouter'),
+        ('gemini', 'Google Gemini'),
+        ('other', 'Other'),
+    ]
+    provider = models.CharField(
+        max_length=20,
+        choices=PROVIDER_CHOICES,
+        default='openrouter',
+        help_text="Which credential paid for the call. Kept separate from "
+                  "model_name because OpenRouter bills in dollars while Gemini "
+                  "bills against a request quota."
+    )
+    cost = models.DecimalField(
+        max_digits=12,
+        decimal_places=8,
+        null=True,
+        blank=True,
+        help_text="Actual USD cost reported by the provider. NULL when the "
+                  "provider does not report one (Google returns token counts "
+                  "but no price), so a null is 'unknown', never 'free'."
+    )
+    is_byok = models.BooleanField(
+        default=False,
+        help_text="True when the organisation's own key paid, False when the "
+                  "system key did. Comes straight from OpenRouter's usage block."
+    )
+    cached_tokens = models.IntegerField(
+        default=0,
+        help_text="Prompt tokens served from cache. Billed differently, so they "
+                  "are tracked separately rather than folded into input_tokens."
+    )
+
     created_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:
@@ -339,6 +383,10 @@ class ContentGenerationUsage(models.Model):
         indexes = [
             models.Index(fields=['organisation', '-created_at']),
             models.Index(fields=['organisation', 'status', '-created_at']),
+            # The monitoring screen groups by model and by provider over a date
+            # window; without these it table-scans once the log grows.
+            models.Index(fields=['organisation', 'model_name', '-created_at']),
+            models.Index(fields=['organisation', 'provider', '-created_at']),
         ]
 
     def __str__(self):

@@ -1,5 +1,7 @@
 from django.urls import path
 from . import views
+from . import image_views
+from . import token_usage_views
 
 app_name = 'content'
 
@@ -62,6 +64,14 @@ urlpatterns = [
 
     # Issue 12: File text extraction for references
     path('extract-file-text/', views.extract_file_text, name='extract_file_text'),
+
+    # Image generation (two stages, both over OpenRouter)
+    path('image-styles/', image_views.image_styles, name='image_styles'),
+    path('image-prompt/', image_views.image_prompt, name='image_prompt'),
+    path('generate-image/', image_views.generate_image, name='generate_image'),
+
+    # Token consumption monitoring (Settings > Organization > API Keys)
+    path('token-usage/', token_usage_views.token_usage, name='token_usage'),
 ]
 
 

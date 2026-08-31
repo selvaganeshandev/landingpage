@@ -228,6 +228,9 @@ const SeoRankings = () => {
   const [selectedKeywords, setSelectedKeywords] = useState<number[]>([]);
   const [loading, setLoading] = useState(true);
   const [exporting, setExporting] = useState(false);
+  // Manual keyword reset — the on-demand twin of the 2 AM nightly run.
+  const [resetting, setResetting] = useState(false);
+  const [resetConfirmOpen, setResetConfirmOpen] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
   const [refreshProgress, setRefreshProgress] = useState(0);
   const [refreshCompleted, setRefreshCompleted] = useState(0);
@@ -876,6 +879,39 @@ const SeoRankings = () => {
       setSelectedKeywords((prev) => prev.filter((id) => !selectableIds.includes(id)));
     } else {
       setSelectedKeywords((prev) => [...new Set([...prev, ...selectableIds])]);
+    }
+  };
+
+  // ---------- Manual keyword reset ----------
+  // Does exactly what the nightly 2 AM job does, for this domain, now: flips
+  // keywords back to 'avail' so the SEO worker re-ranks them. The nightly
+  // schedule is unchanged — this just means the user need not wait for it.
+  const handleResetKeywords = async () => {
+    if (!activeDomainId) return;
+    setResetConfirmOpen(false);
+    setResetting(true);
+    try {
+      const res = (await apiClient.resetSeoKeywords({
+        domain_id: Number(activeDomainId),
+        // Only the keywords ticked on the page, when any are — cheaper than the
+        // whole domain, since each keyword costs a DataForSEO call.
+        keyword_ids: selectedKeywords.length > 0 ? selectedKeywords.map(Number) : undefined,
+      })) as { status?: string; message?: string; reset?: number };
+
+      toast({
+        title: res?.status === "noop" ? "Nothing to run" : "Keyword run started",
+        description: res?.message || "Keywords queued for ranking.",
+      });
+      await fetchSeoData();
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : "Could not start the keyword run.";
+      toast({
+        title: message.includes("already in progress") ? "Run already in progress" : "Reset failed",
+        description: message,
+        variant: "destructive",
+      });
+    } finally {
+      setResetting(false);
     }
   };
 
@@ -1658,6 +1694,24 @@ const SeoRankings = () => {
                   </DropdownMenuItem>
                 </DropdownMenuContent>
               </DropdownMenu>
+
+              {/* Reset keywords — the on-demand twin of the 2 AM nightly run.
+                  The schedule is unchanged; this just means not waiting for it. */}
+              {canEditKeywords && (
+                <Button
+                  variant="outline"
+                  className="gap-2"
+                  disabled={resetting || refreshing || !activeDomainId}
+                  onClick={() => setResetConfirmOpen(true)}
+                >
+                  {resetting ? (
+                    <Loader2 className="h-4 w-4 animate-spin" />
+                  ) : (
+                    <RefreshCw className="h-4 w-4" />
+                  )}
+                  {resetting ? "Resetting..." : "Reset keywords"}
+                </Button>
+              )}
 
               {/* Import Button - hidden, use Add Keyword page instead */}
             </div>
@@ -2515,6 +2569,46 @@ const SeoRankings = () => {
       )}
 
       {/* Delete Confirmation Dialog */}
+      {/* Confirm before resetting — each keyword costs a DataForSEO call, so
+          this should never fire from a stray click. */}
+      <AlertDialog open={resetConfirmOpen} onOpenChange={setResetConfirmOpen}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Reset keywords?</AlertDialogTitle>
+            <AlertDialogDescription>
+              {selectedKeywords.length > 0 ? (
+                <>
+                  This queues the <strong>{selectedKeywords.length} selected keyword
+                  {selectedKeywords.length === 1 ? "" : "s"}</strong> to be ranked again now,
+                  instead of waiting for the nightly run.
+                </>
+              ) : (
+                <>
+                  This queues <strong>all {seoKeywords.length} keywords</strong> for this domain
+                  to be ranked again now, instead of waiting for the nightly run. Select
+                  specific keywords first if you only need some of them.
+                </>
+              )}
+              {" "}Keywords already ranked today are skipped. Each keyword ranked uses one
+              DataForSEO call.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={resetting}>Cancel</AlertDialogCancel>
+            <AlertDialogAction onClick={handleResetKeywords} disabled={resetting}>
+              {resetting ? (
+                <>
+                  <RefreshCw className="h-4 w-4 animate-spin mr-2" />
+                  Starting...
+                </>
+              ) : (
+                "Reset keywords"
+              )}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
       <AlertDialog open={deleteDialogOpen} onOpenChange={setDeleteDialogOpen}>
         <AlertDialogContent>
           <AlertDialogHeader>

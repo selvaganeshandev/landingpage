@@ -125,3 +125,6 @@ engine/celerybeat-schedule.*
 # Rankmaxx migration credentials — private key and plaintext host passwords.
 # Untracked, and must stay that way.
 rankmaxx/
+
+# Generated images written by the content editor
+backend/media/

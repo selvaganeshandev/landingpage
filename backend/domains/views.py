@@ -215,6 +215,21 @@ def generate_gemini_text(prompt: str, timeout: int = 60, max_tokens: int = 4096)
     genai = get_google_genai_client()
     model = genai.GenerativeModel(settings.GEMINI_MODEL)
     response = model.generate_content(prompt, request_options={'timeout': timeout})
+
+    # Token consumption for the API Keys monitoring screen. Google reports token
+    # counts but no price, so this row lands with cost=NULL — "not priced",
+    # never "free". Gemini bills against a request quota instead, which is the
+    # tighter constraint and the reason it must appear in the report at all.
+    try:
+        from content.token_usage import record_gemini_call
+        from llm_monitor.middleware import get_current_org_id
+        record_gemini_call(
+            get_current_org_id(), None, 'gemini_helper', response,
+            model_name=getattr(settings, 'GEMINI_MODEL', 'gemini'),
+        )
+    except Exception:  # noqa: BLE001
+        pass
+
     return (response.text or '').strip()
 
 

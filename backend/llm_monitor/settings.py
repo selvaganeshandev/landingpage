@@ -299,6 +299,18 @@ OPENAI_CHATGPT_WEB_SEARCH = config('OPENAI_CHATGPT_WEB_SEARCH', default=True, ca
 # through OpenRouter on this one slug.
 OPENROUTER_INTERNAL_MODEL = config('OPENROUTER_INTERNAL_MODEL', default='openai/gpt-5-mini')
 
+# ============== IMAGE GENERATION (content editor) ==============
+# Two stages, both over OpenRouter (see content/image_generation.py).
+#
+# Stage 1 writes the prompt with a TEXT model — free models work fine here and
+# it defaults to whatever OPENROUTER_INTERNAL_MODEL is set to.
+#
+# Stage 2 renders pixels with an IMAGE model. NOTE: OpenRouter has NO free
+# image-output models — every one of them is paid — so this stage always costs
+# something. The default is the cheapest available.
+IMAGE_PROMPT_TEXT_MODEL = config('IMAGE_PROMPT_TEXT_MODEL', default=None)
+IMAGE_RENDER_MODEL = config('IMAGE_RENDER_MODEL', default='google/gemini-2.5-flash-image')
+
 # Google Gemini API Configuration (for AI-powered features)
 GOOGLE_GEMINI_API_KEY = config('GOOGLE_GEMINI_API_KEY', default=None)
 # Gemini model name — single source of truth so a model retirement (Google returns

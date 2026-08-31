@@ -29,6 +29,8 @@ import {
   ArrowLeft,
   Plus,
   Loader2,
+  Sparkles,
+  Download,
   X,
   Upload,
   FileText,
@@ -120,6 +122,12 @@ export default function DomainSettings() {
   const [brandValues, setBrandValues] = useState("");
   const [keyCompetitors, setKeyCompetitors] = useState("");
   const [isSavingBrandIdentity, setIsSavingBrandIdentity] = useState(false);
+
+  // AI auto-fill for the two guideline tabs. Each button fills only the fields
+  // its own tab owns, and only the ones that are still empty — a click must
+  // never overwrite something the user has written.
+  const [isFillingGuidelines, setIsFillingGuidelines] = useState(false);
+  const [isFillingBrandIdentity, setIsFillingBrandIdentity] = useState(false);
 
   // Integrations state
   const [integrations, setIntegrations] = useState<any[]>([]);
@@ -967,6 +975,212 @@ export default function DomainSettings() {
     );
   };
 
+  /**
+   * Ask the LLM for a brand profile and fill ONLY the blank fields of one tab.
+   *
+   * Never overwrites anything the user has already written — a field with any
+   * content is left exactly as it is. The result is put into form state, not
+   * saved: the model is instructed to "make reasonable inferences", so the user
+   * reviews it and presses Save themselves.
+   */
+  const autoFillFields = async (
+    which: "guidelines" | "brand-identity",
+  ): Promise<void> => {
+    if (!domain) return;
+    const setBusy = which === "guidelines" ? setIsFillingGuidelines : setIsFillingBrandIdentity;
+    setBusy(true);
+    try {
+      const res = (await apiClient.fetchBrandInfo(
+        domain.name || "",
+        domain.url || "",
+      )) as { success?: boolean; data?: Record<string, string>; brand_info?: Record<string, string>; message?: string };
+
+      const info = res?.data || res?.brand_info || (res as Record<string, string>) || {};
+
+      // [state value, setter, key on the response, hard cap]
+      //
+      // tone and content style are capped at 50 characters: `domains` stores
+      // them as TEXT, but `generated_contents` copies them into varchar(50)
+      // columns, so a longer value saves happily here and then breaks content
+      // generation later with a raw DataError.
+      const guidelineFields: Array<[string, (v: string) => void, string, number]> = [
+        [toneOfVoice, setToneOfVoice, "tone_of_voice", 50],
+        [contentStyle, setContentStyle, "content_style", 50],
+        [keyMessages, setKeyMessages, "key_messages", 0],
+        [topicsToAvoid, setTopicsToAvoid, "topics_to_avoid", 0],
+      ];
+      const brandFields: Array<[string, (v: string) => void, string, number]> = [
+        [targetAudience, setTargetAudience, "target_audience", 0],
+        [brandValues, setBrandValues, "brand_values", 0],
+        [keyCompetitors, setKeyCompetitors, "key_competitors", 0],
+      ];
+
+      const targets = which === "guidelines" ? guidelineFields : brandFields;
+      let filled = 0;
+      let skipped = 0;
+
+      targets.forEach(([current, setter, key, cap]) => {
+        if (current && current.trim()) {
+          skipped += 1;   // already written by the user — leave it alone
+          return;
+        }
+        let value = (info?.[key] || "").trim();
+        if (!value) return;
+        if (cap > 0 && value.length > cap) {
+          // Trim on a word boundary so the result still reads as a phrase.
+          value = value.slice(0, cap);
+          const lastSpace = value.lastIndexOf(" ");
+          if (lastSpace > cap * 0.6) value = value.slice(0, lastSpace);
+          value = value.replace(/[,;:\-\s]+$/, "");
+        }
+        setter(value);
+        filled += 1;
+      });
+
+      if (filled === 0) {
+        toast({
+          title: skipped > 0 ? "Nothing to fill" : "No suggestions returned",
+          description:
+            skipped > 0
+              ? "Every field already has content. Clear a field to have it filled."
+              : "The model did not return anything for these fields. Try again.",
+        });
+      } else {
+        toast({
+          title: `Filled ${filled} field${filled === 1 ? "" : "s"}`,
+          description:
+            (skipped > 0 ? `${skipped} left untouched because they already had content. ` : "") +
+            "Review the suggestions, then press Save.",
+        });
+      }
+    } catch (err: unknown) {
+      toast({
+        title: "Could not generate suggestions",
+        description:
+          err instanceof Error && err.message
+            ? err.message
+            : "The request failed. Please try again.",
+        variant: "destructive",
+      });
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  /**
+   * Export the health-check result to a .csv on the user's computer.
+   *
+   * Pure client-side: `healthData` is already in state after a check runs, so
+   * there is no request, no cost and nothing to wait for.
+   */
+  // CRLF is what Excel expects; the BOM makes it read the file as UTF-8 so
+  // accented characters and en-dashes survive rather than becoming mojibake.
+  const CSV_NEWLINE = String.fromCharCode(13, 10);
+  const CSV_BOM = String.fromCharCode(0xfeff);
+
+  const escapeCsv = (value: unknown): string => {
+    const text = value === null || value === undefined ? "" : String(value);
+    // Check messages are free text — "Found 3 blocks (Schema.org), 2 valid" —
+    // so commas, quotes and newlines all appear. Quote everything and double
+    // any inner quote, which is what Excel and Sheets expect.
+    return `"${text.replace(/"/g, '""')}"`;
+  };
+
+  const handleExportHealthCsv = () => {
+    if (!healthData) return;
+
+    const rows: string[][] = [];
+    rows.push([
+      "Category", "Check", "Status", "Score", "Max Score", "Importance", "Message",
+    ]);
+
+    // Prefer the grouped shape; fall back to the flat list the API returns for
+    // older results, so an export never silently produces a header-only file.
+    const categories = healthData.categories as
+      | Array<{ name?: string; status?: string; checks?: Array<Record<string, unknown>> }>
+      | undefined;
+
+    if (Array.isArray(categories) && categories.length > 0) {
+      categories.forEach((category) => {
+        const checks = Array.isArray(category?.checks) ? category.checks : [];
+        if (checks.length === 0) {
+          // Categories awaiting an API key carry no checks. Say so in the file
+          // rather than dropping the row, so the reader knows it was not run.
+          rows.push([
+            category?.name ?? "",
+            "(no checks run)",
+            category?.status === "coming_soon" ? "not configured" : "no data",
+            "", "", "", "",
+          ]);
+          return;
+        }
+        checks.forEach((check) => {
+          rows.push([
+            category?.name ?? "",
+            String(check?.name ?? ""),
+            String(check?.status ?? ""),
+            String(check?.score ?? ""),
+            String(check?.max_score ?? ""),
+            String(check?.importance ?? ""),
+            String(check?.message ?? ""),
+          ]);
+        });
+      });
+    } else if (Array.isArray(healthData.checks)) {
+      healthData.checks.forEach((check: Record<string, unknown>) => {
+        rows.push([
+          String(check?.category ?? ""),
+          String(check?.name ?? ""),
+          String(check?.status ?? ""),
+          String(check?.score ?? ""),
+          String(check?.max_score ?? ""),
+          String(check?.importance ?? ""),
+          String(check?.message ?? ""),
+        ]);
+      });
+    }
+
+    // Summary last, so the per-check rows stay a clean rectangular table that
+    // sorts and filters properly in a spreadsheet.
+    rows.push([]);
+    rows.push(["Summary"]);
+    rows.push(["Domain", domain?.name ?? ""]);
+    rows.push(["URL", domain?.url ?? ""]);
+    rows.push(["Grade", String(healthData.grade ?? "")]);
+    rows.push(["Score", `${healthData.health_score ?? ""} / ${healthData.max_score ?? ""}`]);
+    rows.push(["Percentage", String(healthData.percentage ?? "")]);
+    rows.push(["Passed", String(healthData.summary?.passed ?? "")]);
+    rows.push(["Warnings", String(healthData.summary?.warnings ?? "")]);
+    rows.push(["Failed", String(healthData.summary?.failed ?? "")]);
+    rows.push(["Exported", new Date().toISOString()]);
+
+    const csv = rows.map((row) => row.map(escapeCsv).join(",")).join(CSV_NEWLINE);
+
+    // The BOM makes Excel read it as UTF-8; without it accented characters and
+    // the en-dashes these messages use come out as mojibake.
+    const blob = new Blob([CSV_BOM + csv], { type: "text/csv;charset=utf-8;" });
+
+    const slug = (domain?.name || "domain")
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, "-")
+      .replace(/^-|-$/g, "")
+      .slice(0, 50);
+
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = `health-check-${slug || "domain"}-${Date.now()}.csv`;
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+    URL.revokeObjectURL(url);
+
+    toast({
+      title: "Health check exported",
+      description: `${link.download}`,
+    });
+  };
+
   const handleSaveGuidelines = async () => {
     if (!domain) return;
 
@@ -1605,10 +1819,30 @@ export default function DomainSettings() {
         <TabsContent value="content-guidelines" className="space-y-4 mt-6">
           <Card className="border border-border">
             <CardHeader>
-              <CardTitle>Content Guidelines</CardTitle>
-              <CardDescription>
-                Define content guidelines and tone of voice for AI-generated content
-              </CardDescription>
+              <div className="flex items-start justify-between gap-4">
+                <div className="space-y-1.5">
+                  <CardTitle>Content Guidelines</CardTitle>
+                  <CardDescription>
+                    Define content guidelines and tone of voice for AI-generated content
+                  </CardDescription>
+                </div>
+                {/* Fills only the blank fields on this tab. Anything already
+                    written is left untouched. */}
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="gap-2 shrink-0"
+                  onClick={() => autoFillFields("guidelines")}
+                  disabled={isFillingGuidelines || isSavingGuidelines || !domain}
+                >
+                  {isFillingGuidelines ? (
+                    <Loader2 className="h-4 w-4 animate-spin" />
+                  ) : (
+                    <Sparkles className="h-4 w-4" />
+                  )}
+                  {isFillingGuidelines ? "Generating..." : "Auto-fill with AI"}
+                </Button>
+              </div>
             </CardHeader>
             <CardContent className="space-y-4">
               <div className="space-y-2">
@@ -1674,10 +1908,28 @@ export default function DomainSettings() {
         <TabsContent value="brand-identity" className="space-y-4 mt-6">
           <Card className="border border-border">
             <CardHeader>
-              <CardTitle>Brand Identity</CardTitle>
-              <CardDescription>
-                Define your brand's identity and market positioning. These values are auto-populated using AI when you create a new brand.
-              </CardDescription>
+              <div className="flex items-start justify-between gap-4">
+                <div className="space-y-1.5">
+                  <CardTitle>Brand Identity</CardTitle>
+                  <CardDescription>
+                    Define your brand's identity and market positioning. These values are auto-populated using AI when you create a new brand.
+                  </CardDescription>
+                </div>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="gap-2 shrink-0"
+                  onClick={() => autoFillFields("brand-identity")}
+                  disabled={isFillingBrandIdentity || isSavingBrandIdentity || !domain}
+                >
+                  {isFillingBrandIdentity ? (
+                    <Loader2 className="h-4 w-4 animate-spin" />
+                  ) : (
+                    <Sparkles className="h-4 w-4" />
+                  )}
+                  {isFillingBrandIdentity ? "Generating..." : "Auto-fill with AI"}
+                </Button>
+              </div>
             </CardHeader>
             <CardContent className="space-y-4">
               <div className="space-y-2">
@@ -1976,6 +2228,23 @@ export default function DomainSettings() {
             <CardHeader>
               <div className="flex items-center justify-between">
                 <CardTitle>Website Health Check</CardTitle>
+                <div className="flex items-center gap-2">
+                {/* Export is client-side only — healthData is already in state,
+                    so there is no request to make. Appears only once a check has
+                    run: with no result there is nothing to export. */}
+                {healthData && (
+                  <Button
+                    onClick={handleExportHealthCsv}
+                    size="sm"
+                    variant="outline"
+                    className="gap-2"
+                    disabled={isLoadingHealth}
+                    title="Download the results as a .csv"
+                  >
+                    <Download className="h-4 w-4" />
+                    Export CSV
+                  </Button>
+                )}
                 {/* Hide button when domain is processing */}
                 {domain?.processing_status !== 'PROC' && domain?.processing_status !== 'SCHD' && (
                   <Button
@@ -1997,6 +2266,7 @@ export default function DomainSettings() {
                     )}
                   </Button>
                 )}
+                </div>
               </div>
               <CardDescription>
                 Technical assessment of your website's AI-friendliness and SEO optimization

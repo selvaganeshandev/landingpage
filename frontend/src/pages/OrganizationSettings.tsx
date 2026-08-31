@@ -223,6 +223,21 @@ export default function OrganizationSettings() {
 
   type ProviderId = typeof PROVIDERS[number]['id'];
 
+  // Token consumption, shown beneath the provider cards. Grouped by model
+  // rather than by key because six of the seven models bill to one OpenRouter
+  // credential — a per-key view would be a single undifferentiated line.
+  const [tokenUsage, setTokenUsage] = useState<{
+    summary?: { calls: number; total_tokens: number; input_tokens: number; output_tokens: number;
+                cached_tokens: number; cost: number | null; failed: number;
+                byok_calls: number; unpriced_calls: number };
+    by_model?: Array<{ model_name: string; provider: string; calls: number;
+                       total_tokens: number; cost: number | null; priced: boolean; failed: number }>;
+    by_feature?: Array<{ feature: string; calls: number; total_tokens: number; cost: number | null }>;
+    coverage_note?: string;
+  } | null>(null);
+  const [tokenUsageDays, setTokenUsageDays] = useState(30);
+  const [loadingTokenUsage, setLoadingTokenUsage] = useState(false);
+
   // OpenRouter credit balance, shown against the AI Platforms card. Kept
   // separate from apiKeys because it comes from a different endpoint and its
   // absence must not make the card look broken.
@@ -688,6 +703,24 @@ export default function OrganizationSettings() {
     }, 400);
     return () => clearTimeout(timer);
   }, [domainSearchQuery]);
+
+  const loadTokenUsage = async (days: number) => {
+    setLoadingTokenUsage(true);
+    try {
+      const res = (await apiClient.getTokenUsage({ days })) as { status?: string; data?: unknown };
+      setTokenUsage(res?.status === "success" ? (res.data as typeof tokenUsage) : null);
+    } catch {
+      // Consumption is informational — a failure here must not disturb the
+      // key-management screen it sits beneath.
+      setTokenUsage(null);
+    } finally {
+      setLoadingTokenUsage(false);
+    }
+  };
+
+  useEffect(() => {
+    loadTokenUsage(tokenUsageDays);
+  }, [tokenUsageDays]);
 
   const loadTeamMembers = async () => {
     try {
@@ -2133,6 +2166,143 @@ export default function OrganizationSettings() {
             {/* Not an LLM provider, so it sits in its own card rather than the
                 grid above — different auth shape, and a different bill. */}
             <DataForSeoCredentialsCard />
+
+            {/* Token consumption per LLM. Grouped by model, not by key: six of
+                the seven models bill to the single OpenRouter credential, so a
+                per-key view would collapse to one undifferentiated line. */}
+            <Card className="border border-border">
+              <CardHeader>
+                <div className="flex items-start justify-between gap-4">
+                  <div className="space-y-1.5">
+                    <CardTitle>Token Consumption</CardTitle>
+                    <CardDescription>
+                      Tokens and cost per model for this organisation.
+                    </CardDescription>
+                  </div>
+                  <div className="flex items-center gap-2 shrink-0">
+                    {[7, 30, 90].map((d) => (
+                      <Button
+                        key={d}
+                        size="sm"
+                        variant={tokenUsageDays === d ? "default" : "outline"}
+                        onClick={() => setTokenUsageDays(d)}
+                        disabled={loadingTokenUsage}
+                      >
+                        {d}d
+                      </Button>
+                    ))}
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      onClick={() => loadTokenUsage(tokenUsageDays)}
+                      disabled={loadingTokenUsage}
+                    >
+                      {loadingTokenUsage ? (
+                        <Loader2 className="h-4 w-4 animate-spin" />
+                      ) : (
+                        <RefreshCw className="h-4 w-4" />
+                      )}
+                    </Button>
+                  </div>
+                </div>
+              </CardHeader>
+              <CardContent className="space-y-5">
+                {loadingTokenUsage && !tokenUsage ? (
+                  <div className="flex items-center justify-center py-10">
+                    <Loader2 className="h-6 w-6 animate-spin text-primary" />
+                  </div>
+                ) : !tokenUsage || !tokenUsage.summary?.calls ? (
+                  <p className="text-sm text-muted-foreground py-6 text-center">
+                    No recorded usage in the last {tokenUsageDays} days.
+                  </p>
+                ) : (
+                  <>
+                    {/* Headline figures */}
+                    <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+                      {[
+                        { label: "Calls", value: tokenUsage.summary.calls.toLocaleString() },
+                        { label: "Total tokens", value: tokenUsage.summary.total_tokens.toLocaleString() },
+                        {
+                          label: "Cost",
+                          value:
+                            tokenUsage.summary.cost === null
+                              ? "Not priced"
+                              : "$" + tokenUsage.summary.cost.toFixed(4),
+                        },
+                        { label: "Failed", value: tokenUsage.summary.failed.toLocaleString() },
+                      ].map((stat) => (
+                        <div key={stat.label} className="rounded-lg border bg-muted/30 p-3">
+                          <div className="text-xs text-muted-foreground">{stat.label}</div>
+                          <div className="text-xl font-semibold tabular-nums mt-0.5">{stat.value}</div>
+                        </div>
+                      ))}
+                    </div>
+
+                    {/* Per-model breakdown — the point of the module */}
+                    <div className="rounded-lg border overflow-hidden">
+                      <div className="overflow-x-auto">
+                        <table className="w-full text-sm">
+                          <thead className="bg-muted/50">
+                            <tr className="text-left">
+                              <th className="px-3 py-2 font-medium">Model</th>
+                              <th className="px-3 py-2 font-medium text-right">Calls</th>
+                              <th className="px-3 py-2 font-medium text-right">Tokens</th>
+                              <th className="px-3 py-2 font-medium text-right">Cost</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {(tokenUsage.by_model || []).map((m) => (
+                              <tr key={m.provider + "-" + m.model_name} className="border-t">
+                                <td className="px-3 py-2">
+                                  <div className="font-medium break-all">{m.model_name}</div>
+                                  <div className="text-xs text-muted-foreground">{m.provider}</div>
+                                </td>
+                                <td className="px-3 py-2 text-right tabular-nums">{m.calls.toLocaleString()}</td>
+                                <td className="px-3 py-2 text-right tabular-nums">{m.total_tokens.toLocaleString()}</td>
+                                <td className="px-3 py-2 text-right tabular-nums">
+                                  {/* Gemini reports tokens but no price, so it
+                                      shows a quota label rather than $0.00 —
+                                      which would read as free when it is in
+                                      fact the tightest limit we have. */}
+                                  {!m.priced ? (
+                                    <span className="text-muted-foreground text-xs">Quota-based</span>
+                                  ) : m.cost === null ? (
+                                    <span className="text-muted-foreground text-xs">&mdash;</span>
+                                  ) : (
+                                    "$" + m.cost.toFixed(4)
+                                  )}
+                                </td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+                    </div>
+
+                    {/* Per-feature, so it is clear which part of the product spends */}
+                    {(tokenUsage.by_feature || []).length > 0 && (
+                      <div className="flex flex-wrap gap-2">
+                        {(tokenUsage.by_feature || []).map((f) => (
+                          <span
+                            key={f.feature}
+                            className="inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-xs"
+                          >
+                            <span className="font-medium">{f.feature}</span>
+                            <span className="text-muted-foreground tabular-nums">
+                              {f.total_tokens.toLocaleString()}
+                            </span>
+                          </span>
+                        ))}
+                      </div>
+                    )}
+
+                    {tokenUsage.coverage_note && (
+                      <p className="text-xs text-muted-foreground">{tokenUsage.coverage_note}</p>
+                    )}
+                  </>
+                )}
+              </CardContent>
+            </Card>
           </TabsContent>
         )}
 

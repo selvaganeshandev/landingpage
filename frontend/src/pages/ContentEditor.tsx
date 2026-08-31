@@ -78,6 +78,7 @@ import {
 } from "@/components/ui/select";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { apiClient } from "@/services/api";
+import { ImageGenerationDialog } from "@/components/ImageGenerationDialog";
 
 /**
  * Builds an HTML <table> from an array of pipe-delimited markdown rows.
@@ -276,6 +277,11 @@ const ContentEditor = () => {
 
   // Image modal state
   const [imageModalOpen, setImageModalOpen] = useState(false);
+  // Image generation (two stages over OpenRouter). Kept separate from the
+  // insert-by-URL modal above so neither complicates the other.
+  const [imageGenOpen, setImageGenOpen] = useState(false);
+  const [imageGenSelectedText, setImageGenSelectedText] = useState("");
+  const [imageGenHeading, setImageGenHeading] = useState("");
   const [imageUrl, setImageUrl] = useState("");
   const [imageAlt, setImageAlt] = useState("");
   const savedSelectionRef = useRef<Range | null>(null);
@@ -2045,6 +2051,87 @@ const ContentEditor = () => {
     setImageModalOpen(true);
   };
 
+  // Open the generate-image dialog. Captures both the range (so the image can
+  // be inserted back at the cursor) and the selected TEXT (which is what the
+  // prompt is written from).
+  const handleOpenImageGenerator = () => {
+    const selection = window.getSelection();
+    let text = "";
+    if (selection && selection.rangeCount > 0) {
+      savedSelectionRef.current = selection.getRangeAt(0).cloneRange();
+      text = selection.toString().trim();
+    }
+    // Fall back to the article title when nothing is selected, so the dialog is
+    // still usable rather than refusing to open.
+    setImageGenSelectedText(text || title || "");
+    setImageGenHeading(findHeadingAboveSelection());
+    setImageGenOpen(true);
+  };
+
+  /**
+   * The nearest heading above the cursor, used as the generated image's alt
+   * text. Walks backwards from the selection through previous siblings and then
+   * up through ancestors, because the selection is usually inside a <p> that is
+   * a sibling of the heading rather than a child of it. Returns "" when there is
+   * no heading above, letting the caller fall back to the article title.
+   */
+  const findHeadingAboveSelection = (): string => {
+    const selection = window.getSelection();
+    if (!selection || selection.rangeCount === 0 || !editorRef.current) return "";
+
+    let node: Node | null = selection.getRangeAt(0).startContainer;
+    if (node.nodeType === Node.TEXT_NODE) node = node.parentNode;
+
+    const isHeading = (el: Element) => /^H[1-6]$/.test(el.tagName);
+
+    while (node && node !== editorRef.current) {
+      let sibling: Node | null = (node as Element).previousElementSibling;
+      while (sibling) {
+        const el = sibling as Element;
+        if (isHeading(el)) return (el.textContent || "").trim();
+        // A heading may be nested inside a wrapper (section, div).
+        const nested = el.querySelectorAll?.("h1,h2,h3,h4,h5,h6");
+        if (nested && nested.length) {
+          return (nested[nested.length - 1].textContent || "").trim();
+        }
+        sibling = el.previousElementSibling;
+      }
+      node = node.parentNode;
+    }
+    return "";
+  };
+
+  // Insert a generated image at the saved cursor position. Mirrors
+  // handleInsertImage below, but takes the URL directly from the dialog.
+  const handleInsertGeneratedImage = (url: string, alt: string) => {
+    if (!editorRef.current) return;
+    const imgHtml = `<img src="${url}" alt="${alt}" style="max-width: 100%; height: auto;" />`;
+    editorRef.current.focus();
+
+    let inserted = false;
+    if (savedSelectionRef.current) {
+      try {
+        const selection = window.getSelection();
+        if (selection) {
+          selection.removeAllRanges();
+          selection.addRange(savedSelectionRef.current);
+          // Collapse to the END of the selection so the image lands after the
+          // passage it illustrates rather than replacing it.
+          selection.collapseToEnd();
+          inserted = document.execCommand("insertHTML", false, imgHtml);
+        }
+      } catch (e) {
+        console.log("Could not restore selection, appending to end");
+      }
+    }
+    if (!inserted) {
+      editorRef.current.innerHTML += imgHtml;
+    }
+
+    handleContentChange();
+    savedSelectionRef.current = null;
+  };
+
   // Handle image insertion
   const handleInsertImage = () => {
     if (imageUrl && editorRef.current) {
@@ -2973,7 +3060,7 @@ const ContentEditor = () => {
         <div className="w-80 border-l border-border bg-card overflow-y-auto">
           <Tabs defaultValue="content" className="h-full flex flex-col">
             <div className="border-b border-border bg-card p-3">
-              <TabsList className="grid w-full grid-cols-2">
+              <TabsList className="grid w-full grid-cols-3">
                 <TabsTrigger value="content">Content</TabsTrigger>
                 <TabsTrigger value="reviews">
                   Comments
@@ -2983,8 +3070,46 @@ const ContentEditor = () => {
                     </span>
                   )}
                 </TabsTrigger>
+                <TabsTrigger value="ai-image">
+                  <Sparkles className="h-3.5 w-3.5 mr-1" />
+                  AI Image
+                </TabsTrigger>
               </TabsList>
             </div>
+
+            {/* Second entry point for the image generator — the toolbar image
+                icon is the other. Both open the same dialog. */}
+            <TabsContent value="ai-image" className="flex-1 overflow-y-auto mt-0">
+              <div className="p-6 space-y-4">
+                <div>
+                  <h3 className="text-sm font-semibold">Generate image with AI</h3>
+                  <p className="text-xs text-muted-foreground mt-1">
+                    A text model writes the prompt from your article, then an image
+                    model renders it. You can edit the prompt before rendering.
+                  </p>
+                </div>
+
+                <div className="rounded-lg border bg-muted/30 p-3">
+                  <p className="text-xs font-medium mb-1">How it works</p>
+                  <ol className="text-xs text-muted-foreground space-y-1 list-decimal list-inside">
+                    <li>Select a passage in the article (optional)</li>
+                    <li>Pick a style and generate the prompt</li>
+                    <li>Edit the prompt, then render</li>
+                    <li>Save it to your computer or insert it</li>
+                  </ol>
+                </div>
+
+                <Button className="w-full" onClick={handleOpenImageGenerator}>
+                  <Sparkles className="h-4 w-4 mr-2" />
+                  Generate image with AI
+                </Button>
+
+                <p className="text-xs text-muted-foreground">
+                  With no text selected the prompt is written from the article title,
+                  so selecting the passage you want illustrated gives a better result.
+                </p>
+              </div>
+            </TabsContent>
 
             <TabsContent value="content" className="flex-1 overflow-y-auto mt-0">
               <div className="p-6 space-y-6">
@@ -3541,12 +3666,57 @@ const ContentEditor = () => {
       </div>
 
       {/* Image Insert Modal */}
+      <ImageGenerationDialog
+        open={imageGenOpen}
+        onOpenChange={setImageGenOpen}
+        selectedText={imageGenSelectedText}
+        articleTitle={title}
+        nearestHeading={imageGenHeading}
+        keyword={(typeof contentData?.keywords === "string" ? contentData.keywords.split(",")[0] : "").trim()}
+        domainId={contentData?.domain_id || contentData?.domain}
+        onInsert={handleInsertGeneratedImage}
+      />
+
       <Dialog open={imageModalOpen} onOpenChange={setImageModalOpen}>
         <DialogContent className="sm:max-w-[500px]">
           <DialogHeader>
             <DialogTitle>Insert Image</DialogTitle>
           </DialogHeader>
-          <div className="grid gap-4 py-4">
+
+          {/* Generating and pasting a URL are two routes to the same result, so
+              they live behind one toolbar icon. This hands off to the generator
+              and closes this dialog rather than nesting two modals. */}
+          <button
+            type="button"
+            onClick={() => {
+              setImageModalOpen(false);
+              handleOpenImageGenerator();
+            }}
+            className="flex w-full items-center gap-3 rounded-lg border border-primary/30 bg-primary/5 p-3 text-left transition-colors hover:bg-primary/10"
+          >
+            <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-md bg-primary/10">
+              <Sparkles className="h-4 w-4 text-primary" />
+            </span>
+            <span className="min-w-0">
+              <span className="block text-sm font-medium">Generate with AI</span>
+              <span className="block text-xs text-muted-foreground">
+                Describe an image, or write one from the selected passage
+              </span>
+            </span>
+          </button>
+
+          <div className="relative py-1">
+            <div className="absolute inset-0 flex items-center">
+              <span className="w-full border-t" />
+            </div>
+            <div className="relative flex justify-center">
+              <span className="bg-background px-2 text-xs text-muted-foreground">
+                or paste a URL
+              </span>
+            </div>
+          </div>
+
+          <div className="grid gap-4 py-2">
             <div className="grid gap-2">
               <Label htmlFor="imageUrl">Image URL</Label>
               <Input

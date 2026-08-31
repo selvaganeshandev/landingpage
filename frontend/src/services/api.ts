@@ -1676,6 +1676,54 @@ export const apiClient = {
     body: JSON.stringify(data),
   }),
 
+  // --- Image generation (content editor) -------------------------------
+  // Two stages: a text model writes the prompt, an image model renders it.
+  // --- SEO keyword manual reset (on-demand twin of the 2 AM nightly run) ---
+  // Uses the existing force-rescrape endpoint in its `safe` mode: skips
+  // keywords already ranked today and refuses while a run is in flight.
+  resetSeoKeywords: (data: { domain_id: number; keyword_ids?: number[] }) =>
+    apiRequest('/seo/force-rescrape/', {
+      method: 'POST',
+      body: JSON.stringify({ ...data, safe: true }),
+    }),
+
+  // --- Token consumption monitoring (Settings > API Keys) ---
+  getTokenUsage: (params?: { days?: number; provider?: string; model?: string }) => {
+    const q = new URLSearchParams();
+    if (params?.days) q.set('days', String(params.days));
+    if (params?.provider) q.set('provider', params.provider);
+    if (params?.model) q.set('model', params.model);
+    const qs = q.toString();
+    return apiRequest(`/content/token-usage/${qs ? `?${qs}` : ''}`);
+  },
+
+  getImageStyles: () => apiRequest('/content/image-styles/'),
+
+  generateImagePrompt: (data: {
+    domain_id?: number;
+    title?: string;
+    keyword?: string;
+    selected_text: string;
+    style: string;
+    additional_instructions?: string;
+  }) => apiRequest('/content/image-prompt/', {
+    method: 'POST',
+    body: JSON.stringify(data),
+    // The text model can take ~30s on a free tier.
+    timeout: 120000,
+  }),
+
+  generateImage: (data: {
+    domain_id?: number;
+    prompt: string;
+    brand_colors?: string[];
+  }) => apiRequest('/content/generate-image/', {
+    method: 'POST',
+    body: JSON.stringify(data),
+    // Rendering is slow and unstreamed; the server allows 180s.
+    timeout: 200000,
+  }),
+
   generateContentFromOutline: (data: any) => apiRequest('/content/generate-from-outline/', {
     method: 'POST',
     body: JSON.stringify(data),

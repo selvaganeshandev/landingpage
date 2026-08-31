@@ -6333,13 +6333,27 @@ def seo_keyword_competitors(request, seo_kw_id):
 @permission_classes([IsAuthenticated])
 def seo_force_rescrape(request):
     """
-    Force reset keywords to 'avail' and trigger scraping.
+    Reset keywords to 'avail' and trigger scraping.
 
-    Body:
+    TWO MODES, so the user-facing button and the admin sledgehammer can share
+    one code path:
+
+    DEFAULT (unchanged — existing callers and scripts are unaffected):
         { "domain_id": 123 }   — single domain
         {}                     — all domains the user has access to
+        Admin only. Resets EVERY status (busy, done, fail, load, read),
+        including keywords already ranked today. "Force" means force.
 
-    Resets every status (busy, done, fail, load, read) back to 'avail'.
+    SAFE (`"safe": true`) — what the "Reset keywords" button sends:
+        { "domain_id": 123, "safe": true }
+        { "domain_id": 123, "safe": true, "keyword_ids": [1, 2, 3] }
+        Requires domain_id. Available to anyone with keyword-edit rights.
+        Skips keywords already ranked today (same rule as the 2 AM nightly
+        job), refuses with 409 while a run is in flight, and can be scoped to
+        selected keywords. Sets manual_call_status so user-triggered runs are
+        distinguishable from the nightly sweep.
+
+    The 2 AM nightly schedule is unaffected by either mode.
 
     Usage:
         # Single domain
@@ -6353,13 +6367,25 @@ def seo_force_rescrape(request):
             -H "Authorization: Bearer <token>" \
             -H "Content-Type: application/json"
     """
-    if request.user.role not in ['admin', 'super_admin']:
-        return Response(
-            {'error': 'Only admins can force re-scrape'},
-            status=status.HTTP_403_FORBIDDEN,
-        )
+    # `safe` mode is the user-facing "Reset keywords" button: it skips keywords
+    # already ranked today and refuses while a run is in flight, so it cannot
+    # re-spend DataForSEO credits on data that is already fresh. Because it is
+    # bounded that way, keyword-edit rights are enough for it. The unbounded
+    # default — reset everything, every domain — stays admin-only.
+    safe_mode = bool(request.data.get('safe'))
+    keyword_ids = request.data.get('keyword_ids') or []
+
+    is_admin = request.user.role in ['admin', 'super_admin']
+    if not is_admin:
+        if not (safe_mode and user_has_module_permission(request.user, MODULE_KEYWORDS_EDIT)):
+            return Response(
+                {'error': 'Only admins can force re-scrape'},
+                status=status.HTTP_403_FORBIDDEN,
+            )
 
     import requests as http_requests
+    from datetime import date as _date
+    from django.utils import timezone as _tz
     engine_url = getattr(settings, 'ENGINE_API_URL', 'http://localhost:8001')
     allowed_ids = list(_get_user_domain_ids(request.user))
 
@@ -6373,6 +6399,13 @@ def seo_force_rescrape(request):
                 status=status.HTTP_403_FORBIDDEN,
             )
         target_domain_ids = [int(domain_id)]
+    elif safe_mode:
+        # The button always names its domain. Refuse to fan out across every
+        # domain from a user-facing control — that is an admin-only action.
+        return Response(
+            {'error': 'domain_id is required'},
+            status=status.HTTP_400_BAD_REQUEST,
+        )
     else:
         # All domains that have SEO keywords
         target_domain_ids = list(
@@ -6389,14 +6422,63 @@ def seo_force_rescrape(request):
             'results': [],
         })
 
+    # Safe mode: refuse while keywords are mid-flight, so a double click cannot
+    # queue the same work twice and bill DataForSEO twice.
+    if safe_mode:
+        in_flight = SeoKeywordRank.objects.filter(
+            domain_id__in=target_domain_ids,
+            auto_call_status__in=['load', 'read'],
+        ).count()
+        if in_flight:
+            return Response(
+                {
+                    'error': f'A keyword run is already in progress ({in_flight} still processing). '
+                             'Wait for it to finish before starting another.',
+                    'code': 'run_in_progress',
+                    'in_flight': in_flight,
+                },
+                status=status.HTTP_409_CONFLICT,
+            )
+
+    today_start = _tz.make_aware(
+        _tz.datetime.combine(_date.today(), _tz.datetime.min.time())
+    )
+
     results = []
+    skipped_today_total = 0
     for did in target_domain_ids:
-        total = SeoKeywordRank.objects.filter(domain_id=did).count()
-        reset = SeoKeywordRank.objects.filter(
-            domain_id=did,
-        ).exclude(
+        scope = SeoKeywordRank.objects.filter(domain_id=did)
+        if safe_mode and keyword_ids:
+            # Only the keywords ticked on the page — each one is a paid call.
+            try:
+                scope = scope.filter(id__in=[int(k) for k in keyword_ids])
+            except (TypeError, ValueError):
+                return Response(
+                    {'error': 'keyword_ids must be numbers'},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+
+        total = scope.count()
+        resettable = scope.exclude(auto_call_status='avail')
+
+        skipped_today = 0
+        if safe_mode:
+            # Same rule the 2 AM nightly job uses: leave keywords that already
+            # ranked today alone rather than paying for the same data twice.
+            skipped_today = resettable.filter(
+                auto_call_status='done', last_ranked_date__gte=today_start
+            ).count()
+            resettable = resettable.exclude(
+                auto_call_status='done', last_ranked_date__gte=today_start
+            )
+            skipped_today_total += skipped_today
+
+        reset = resettable.update(
             auto_call_status='avail',
-        ).update(auto_call_status='avail')
+            # Dormant on the model since the initial migration — this is what it
+            # was added for. Marks the run as user-triggered, not the nightly sweep.
+            manual_call_status=bool(safe_mode),
+        )
 
         triggered = False
         try:
@@ -6413,6 +6495,7 @@ def seo_force_rescrape(request):
             'domain_id': did,
             'total_keywords': total,
             'reset_count': reset,
+            'skipped_today': skipped_today,
             'triggered': triggered,
         })
 
@@ -6422,9 +6505,27 @@ def seo_force_rescrape(request):
         )
 
     total_kw = sum(r['total_keywords'] for r in results)
+    total_reset = sum(r['reset_count'] for r in results)
+
+    if safe_mode:
+        if total_reset == 0:
+            message = (
+                'All keywords were already ranked today, so nothing needed running.'
+                if skipped_today_total else 'No keywords needed running.'
+            )
+        else:
+            message = f'{total_reset} keyword{"s" if total_reset != 1 else ""} queued for ranking.'
+            if skipped_today_total:
+                message += f' {skipped_today_total} skipped (already ranked today).'
+    else:
+        message = f'Force re-scrape triggered for {total_kw} keywords across {len(results)} domain(s)'
+
     return Response({
         'status': 'success',
-        'message': f'Force re-scrape triggered for {total_kw} keywords across {len(results)} domain(s)',
+        'safe_mode': safe_mode,
+        'reset_count': total_reset,
+        'skipped_today': skipped_today_total,
+        'message': message,
         'domains_processed': len(results),
         'results': results,
     })
