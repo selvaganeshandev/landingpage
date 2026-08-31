@@ -970,6 +970,20 @@ const ContentEditor = () => {
     return findLinksInRange(selection.getRangeAt(0));
   };
 
+  // Unwrap one anchor in place. A link whose text was swapped for its URL
+  // carries the words it displaced, so put those back first — otherwise
+  // unlinking leaves a bare URL sitting in the middle of a sentence.
+  const unwrapAnchor = (link: HTMLAnchorElement) => {
+    const parent = link.parentNode;
+    if (!parent) return;
+
+    const original = link.getAttribute('data-anchor-text');
+    if (original !== null) link.textContent = original;
+
+    while (link.firstChild) parent.insertBefore(link.firstChild, link);
+    parent.removeChild(link);
+  };
+
   // Unwrap the anchors, keeping their children exactly where they are. The
   // words stay, only the hyperlink goes.
   //
@@ -982,12 +996,7 @@ const ContentEditor = () => {
     const links = range ? findLinksInRange(range) : findLinksInSelection();
     if (links.length === 0) return;
 
-    links.forEach(link => {
-      const parent = link.parentNode;
-      if (!parent) return;
-      while (link.firstChild) parent.insertBefore(link.firstChild, link);
-      parent.removeChild(link);
-    });
+    links.forEach(unwrapAnchor);
 
     editorRef.current.normalize();
     // Rewrites content state and history, and puts the freed URL back in the
@@ -1945,13 +1954,23 @@ const ContentEditor = () => {
     range.setStart(startSegment.node, match.start - startSegment.start);
     range.setEnd(endSegment.node, match.end - endSegment.start);
 
-    const anchor = document.createElement('a');
     // The full absolute URL exactly as the link map holds it, e.g.
     // https://www.nike.in — same shape a manual Insert Link produces.
-    anchor.setAttribute('href', toAbsoluteUrl(url));
+    const href = toAbsoluteUrl(url);
+    const anchor = document.createElement('a');
+    anchor.setAttribute('href', href);
+
     // extractContents clones any partially selected inline tag rather than
     // throwing, which surroundContents would do on exactly these matches.
-    anchor.appendChild(range.extractContents());
+    const matched = range.extractContents();
+
+    // The anchor text is the URL, not the keyword it replaced, so an editor
+    // adding many links can see at a glance where each one points. The words
+    // it displaced are kept on the element: without them, removing the link
+    // would leave a bare URL stranded in the sentence.
+    anchor.setAttribute('data-anchor-text', matched.textContent || '');
+    anchor.textContent = href;
+
     range.insertNode(anchor);
     pruneEmptyInlineTags(entry.paragraph);
     return true;
@@ -4124,11 +4143,8 @@ const ContentEditor = () => {
                 variant="outline"
                 className="mr-auto text-destructive hover:text-destructive"
                 onClick={() => {
-                  const link = editingLinkElement;
-                  const parent = link.parentNode;
-                  if (parent) {
-                    while (link.firstChild) parent.insertBefore(link.firstChild, link);
-                    parent.removeChild(link);
+                  if (editingLinkElement.parentNode) {
+                    unwrapAnchor(editingLinkElement);
                     editorRef.current?.normalize();
                     handleContentChange();
                   }
