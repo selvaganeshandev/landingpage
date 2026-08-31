@@ -122,6 +122,10 @@ Thumbs.db
 # Celery beat runtime state — regenerated on each start, never commit.
 engine/celerybeat-schedule
 engine/celerybeat-schedule.*
+
+# Provider quota-alert state — written at runtime by the engine, never commit.
+engine/quota_alert_state.json
+
 # Rankmaxx migration credentials — private key and plaintext host passwords.
 # Untracked, and must stay that way.
 rankmaxx/
