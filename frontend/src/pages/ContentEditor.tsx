@@ -1801,7 +1801,25 @@ const ContentEditor = () => {
   // buildKeywordRegex) can never match across it.
   const LINK_BREAK_MARKER = String.fromCharCode(0);
 
-  const normalizeLinkUrl = (url: string) => url.trim().toLowerCase().replace(/\/+$/, '');
+  // An href must be absolute or it resolves against the app's own origin, so a
+  // bare `www.nike.in` would open localhost:8080/www.nike.in instead of the
+  // site. Anything already carrying a scheme, a deliberate site-relative path,
+  // or a page anchor is left exactly as written.
+  const toAbsoluteUrl = (url: string) => {
+    const trimmed = url.trim();
+    if (!trimmed) return trimmed;
+    if (/^[a-z][a-z0-9+.-]*:\/\//i.test(trimmed)) return trimmed;
+    if (/^(mailto|tel|sms):/i.test(trimmed)) return trimmed;
+    if (trimmed.startsWith('/') || trimmed.startsWith('#')) return trimmed;
+    return `https://${trimmed}`;
+  };
+
+  // For building an href inside an HTML string, where a quote in the URL would
+  // otherwise break out of the attribute.
+  const escapeHtmlAttribute = (value: string) =>
+    value.replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+
+  const normalizeLinkUrl = (url: string) => toAbsoluteUrl(url).toLowerCase().replace(/\/+$/, '');
 
   // Whitespace inside a keyword becomes \s+, so a phrase still matches when the
   // source HTML wraps it across lines or inline markup left an extra space.
@@ -1928,7 +1946,9 @@ const ContentEditor = () => {
     range.setEnd(endSegment.node, match.end - endSegment.start);
 
     const anchor = document.createElement('a');
-    anchor.setAttribute('href', url);
+    // The full absolute URL exactly as the link map holds it, e.g.
+    // https://www.nike.in — same shape a manual Insert Link produces.
+    anchor.setAttribute('href', toAbsoluteUrl(url));
     // extractContents clones any partially selected inline tag rather than
     // throwing, which surroundContents would do on exactly these matches.
     anchor.appendChild(range.extractContents());
@@ -2203,10 +2223,13 @@ const ContentEditor = () => {
 
     editorRef.current?.focus();
     const relValue = buildRelAttribute();
+    // A URL typed without a scheme would become a path under the app's own
+    // origin, so it never reaches the site it names.
+    const href = toAbsoluteUrl(linkUrl);
 
     // If editing an existing link, update it directly
     if (editingLinkElement && editingLinkElement.parentNode) {
-      editingLinkElement.href = linkUrl;
+      editingLinkElement.setAttribute('href', href);
       editingLinkElement.textContent = linkText || linkUrl;
 
       if (linkTarget === "_blank") {
@@ -2233,7 +2256,7 @@ const ContentEditor = () => {
         const textToLink = linkText || linkUrl;
         const targetAttr = linkTarget === "_blank" ? ' target="_blank"' : '';
         const relAttr = relValue ? ` rel="${relValue}"` : '';
-        const linkHtml = `<a href="${linkUrl}"${targetAttr}${relAttr}>${textToLink}</a>`;
+        const linkHtml = `<a href="${escapeHtmlAttribute(href)}"${targetAttr}${relAttr}>${textToLink}</a>`;
 
         document.execCommand('insertHTML', false, linkHtml);
         handleContentChange();
@@ -2243,7 +2266,7 @@ const ContentEditor = () => {
       const textToLink = linkText || linkUrl;
       const targetAttr = linkTarget === "_blank" ? ' target="_blank"' : '';
       const relAttr = relValue ? ` rel="${relValue}"` : '';
-      const linkHtml = `<a href="${linkUrl}"${targetAttr}${relAttr}>${textToLink}</a>`;
+      const linkHtml = `<a href="${escapeHtmlAttribute(href)}"${targetAttr}${relAttr}>${textToLink}</a>`;
       document.execCommand('insertHTML', false, linkHtml);
       handleContentChange();
     }
