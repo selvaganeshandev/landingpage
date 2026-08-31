@@ -40,6 +40,7 @@ import {
   Loader2,
   RefreshCw,
   Link2,
+  Unlink,
   ExternalLink,
   Check,
   MessageSquare,
@@ -321,6 +322,9 @@ const ContentEditor = () => {
 
   // Rewrite state
   const [hasSelection, setHasSelection] = useState(false);
+  // Drives the Remove link button. Tracked apart from hasSelection because a
+  // caret resting inside a link is a valid target with no selected text.
+  const [selectionHasLink, setSelectionHasLink] = useState(false);
   const [rewriteDialogOpen, setRewriteDialogOpen] = useState(false);
   const [rewritePrompt, setRewritePrompt] = useState("");
   const [isRewriting, setIsRewriting] = useState(false);
@@ -939,6 +943,57 @@ const ContentEditor = () => {
     return () => observer.disconnect();
   }, [loading]);
 
+  // Links the current caret or selection touches, inside the editor only.
+  // A collapsed caret resolves to the one link it sits in; a wider selection
+  // resolves to every link it crosses, so removing works the way Bold does.
+  const findLinksInSelection = (): HTMLAnchorElement[] => {
+    const selection = window.getSelection();
+    if (!selection || selection.rangeCount === 0 || !editorRef.current) return [];
+
+    const range = selection.getRangeAt(0);
+    if (!editorRef.current.contains(range.commonAncestorContainer)) return [];
+
+    const container = range.commonAncestorContainer;
+    const element = container.nodeType === Node.ELEMENT_NODE
+      ? (container as Element)
+      : container.parentElement;
+    const enclosing = element?.closest('a');
+
+    if (enclosing && editorRef.current.contains(enclosing)) {
+      return [enclosing as HTMLAnchorElement];
+    }
+
+    return Array.from(editorRef.current.querySelectorAll('a'))
+      .filter(anchor => range.intersectsNode(anchor));
+  };
+
+  // Unwrap the anchors, keeping their children exactly where they are. The
+  // words stay, only the hyperlink goes.
+  const handleRemoveLink = () => {
+    if (!editorRef.current) return;
+
+    const links = findLinksInSelection();
+    if (links.length === 0) return;
+
+    links.forEach(link => {
+      const parent = link.parentNode;
+      if (!parent) return;
+      while (link.firstChild) parent.insertBefore(link.firstChild, link);
+      parent.removeChild(link);
+    });
+
+    editorRef.current.normalize();
+    // Rewrites content state and history, and puts the freed URL back in the
+    // internal link opportunities list.
+    handleContentChange();
+    setSelectionHasLink(false);
+
+    toast({
+      title: links.length === 1 ? "Link removed" : `${links.length} links removed`,
+      description: "The text stays, only the hyperlink is gone.",
+    });
+  };
+
   // Track text selection in editor for rewrite button
   useEffect(() => {
     const handleSelectionChange = () => {
@@ -947,6 +1002,10 @@ const ContentEditor = () => {
       if (rewriteDialogOpen) {
         return;
       }
+
+      // Computed before the text check below: a caret inside a link is a valid
+      // Remove target even though it selects no text.
+      setSelectionHasLink(findLinksInSelection().length > 0);
 
       const selection = window.getSelection();
       if (selection && editorRef.current) {
@@ -2924,6 +2983,18 @@ const ContentEditor = () => {
                 <RefreshCw className="h-4 w-4" />
                 Optimize with custom prompt
               </Button>
+              {/* Remove link — enabled whenever the caret or selection is on a link */}
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={handleRemoveLink}
+                disabled={!selectionHasLink}
+                title="Remove the hyperlink and keep the text"
+                className={`gap-1 ${selectionHasLink ? '' : 'opacity-50'}`}
+              >
+                <Unlink className="h-4 w-4" />
+                Remove link
+              </Button>
               <Separator orientation="vertical" className="h-6 mx-1" />
               {/* Meta Details */}
               <Button
@@ -4001,6 +4072,36 @@ const ContentEditor = () => {
             </div>
           </div>
           <DialogFooter>
+            {/* Only in edit mode — there is nothing to remove when inserting. */}
+            {editingLinkElement && (
+              <Button
+                variant="outline"
+                className="mr-auto text-destructive hover:text-destructive"
+                onClick={() => {
+                  const link = editingLinkElement;
+                  const parent = link.parentNode;
+                  if (parent) {
+                    while (link.firstChild) parent.insertBefore(link.firstChild, link);
+                    parent.removeChild(link);
+                    editorRef.current?.normalize();
+                    handleContentChange();
+                  }
+                  setLinkDialogOpen(false);
+                  setLinkUrl("");
+                  setLinkText("");
+                  setLinkRel("dofollow");
+                  setEditingLinkElement(null);
+                  linkSelectionRef.current = null;
+                  toast({
+                    title: "Link removed",
+                    description: "The text stays, only the hyperlink is gone.",
+                  });
+                }}
+              >
+                <Unlink className="h-4 w-4 mr-2" />
+                Remove link
+              </Button>
+            )}
             <Button variant="outline" onClick={() => {
               setLinkDialogOpen(false);
               setLinkUrl("");
