@@ -1708,42 +1708,164 @@ const ContentEditor = () => {
 
   // --- Internal link placement -------------------------------------------
   //
-  // Links are placed in BODY PARAGRAPHS ONLY, and everything below works on
-  // DOM text nodes rather than on the HTML string. A string replace matched
-  // inside attributes too, so a keyword sitting in `<img alt="running shoes">`
-  // produced broken markup, and the old "not already inside an anchor" regex
-  // guard could not see past a nested tag such as
-  // `<a href="/x">buy <strong>shoes</strong></a>`.
+  // Links go into BODY PARAGRAPHS ONLY.
+  //
+  // Placement runs over one flattened string per <p>, together with a map back
+  // to the text nodes that string came from. Not over the article's HTML, and
+  // not over one text node at a time:
+  //
+  //   * A regex over the HTML string also matched inside attributes, so a
+  //     keyword in `<img alt="running shoes">` produced broken markup.
+  //   * A regex over a single text node cannot see a keyword that inline markup
+  //     has split — `running <strong>shoes</strong>`, or any term the keyword
+  //     highlighter has wrapped in <mark>. Those are the phrases the link map
+  //     targets, so they were missed, and missed silently.
+  //
+  // Detection and application share this traversal, so the count shown in the
+  // modal is the number of places a link can really go.
 
   // A <p> inside one of these is not body copy — never link its text.
   const LINK_SKIP_SELECTOR = 'a, h1, h2, h3, h4, h5, h6, code, pre, figcaption, blockquote, table';
 
+  // Marks a spot no keyword may span, currently a <br>. A NUL, deliberately
+  // NOT whitespace, so the whitespace class in a keyword pattern (see
+  // buildKeywordRegex) can never match across it.
+  const LINK_BREAK_MARKER = String.fromCharCode(0);
+
   const normalizeLinkUrl = (url: string) => url.trim().toLowerCase().replace(/\/+$/, '');
 
+  // Whitespace inside a keyword becomes \s+, so a phrase still matches when the
+  // source HTML wraps it across lines or inline markup left an extra space.
   const buildKeywordRegex = (keyword: string, flags: string) =>
-    new RegExp(`\\b${keyword.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\b`, flags);
+    new RegExp(
+      `\\b${keyword.trim().replace(/[.*+?^${}()|[\]\\]/g, '\\$&').replace(/\s+/g, '\\s+')}\\b`,
+      flags
+    );
 
-  // Every text node inside a <p> and outside the skip list. This is the only
-  // place a link is allowed to land.
-  const collectLinkableTextNodes = (root: HTMLElement): Text[] => {
-    const nodes: Text[] = [];
-    const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
-    let node = walker.nextNode() as Text | null;
+  type LinkableParagraph = {
+    paragraph: HTMLElement;
+    text: string;
+    segments: Array<{ node: Text; start: number; end: number; linkable: boolean }>;
+  };
 
-    while (node) {
-      const parent = node.parentElement;
-      if (
-        parent &&
-        node.data.trim().length > 0 &&
-        parent.closest('p') &&
-        !parent.closest(LINK_SKIP_SELECTOR)
-      ) {
-        nodes.push(node);
+  // Every <p> that is body copy, flattened to a string plus the map back to its
+  // text nodes. Text inside an existing <a> (or code, etc.) stays in the string
+  // so adjacency stays truthful, but is marked unlinkable.
+  const collectLinkableParagraphs = (root: HTMLElement): LinkableParagraph[] => {
+    const results: LinkableParagraph[] = [];
+
+    root.querySelectorAll('p').forEach(paragraph => {
+      if (paragraph.closest(LINK_SKIP_SELECTOR)) return;
+
+      const segments: LinkableParagraph['segments'] = [];
+      let text = '';
+
+      const walker = document.createTreeWalker(
+        paragraph,
+        NodeFilter.SHOW_TEXT | NodeFilter.SHOW_ELEMENT
+      );
+      let node = walker.nextNode();
+
+      while (node) {
+        if (node.nodeType === Node.ELEMENT_NODE) {
+          if ((node as Element).tagName === 'BR') text += LINK_BREAK_MARKER;
+        } else {
+          const textNode = node as Text;
+          const start = text.length;
+          text += textNode.data;
+          segments.push({
+            node: textNode,
+            start,
+            end: text.length,
+            linkable: !textNode.parentElement?.closest(LINK_SKIP_SELECTOR),
+          });
+        }
+        node = walker.nextNode();
       }
-      node = walker.nextNode() as Text | null;
+
+      if (segments.length > 0) results.push({ paragraph, text, segments });
+    });
+
+    return results;
+  };
+
+  // Matches of `keyword` in a flattened paragraph that sit entirely inside
+  // linkable text. A match is rejected when it touches an existing link, or
+  // when it only exists because two nodes met across a <br>.
+  const findKeywordMatches = (entry: LinkableParagraph, keyword: string) => {
+    const regex = buildKeywordRegex(keyword, 'gi');
+    const matches: Array<{ start: number; end: number }> = [];
+    let match = regex.exec(entry.text);
+
+    while (match) {
+      const start = match.index;
+      const end = start + match[0].length;
+      const covering = entry.segments.filter(segment => segment.start < end && segment.end > start);
+
+      // Linkable, and contiguous: no gap where a break marker was inserted.
+      const usable =
+        covering.length > 0 &&
+        covering.every(segment => segment.linkable) &&
+        covering[0].start <= start &&
+        covering[covering.length - 1].end >= end &&
+        covering.every((segment, i) => i === 0 || segment.start === covering[i - 1].end);
+
+      if (usable) matches.push({ start, end });
+
+      if (regex.lastIndex === match.index) regex.lastIndex++; // zero-length guard
+      match = regex.exec(entry.text);
     }
 
-    return nodes;
+    return matches;
+  };
+
+  // Elements that still render with no text — never prune these, or anything
+  // holding one.
+  const LINK_PRUNE_KEEP_SELECTOR = 'br, img, hr, input, wbr, source, iframe, video, audio, svg';
+
+  // extractContents leaves the shell of a partially selected inline tag behind,
+  // so `Our <strong>running</strong> shoes` ends up with an empty <strong></strong>
+  // sitting in front of the new anchor. The shell holds an empty text node, so
+  // emptiness is textContent, not childNodes. Deepest first, so
+  // <span><mark></mark></span> collapses in a single pass.
+  const pruneEmptyInlineTags = (scope: HTMLElement) => {
+    Array.from(scope.querySelectorAll('*'))
+      .reverse()
+      .forEach(element => {
+        if (
+          element.textContent === '' &&
+          !element.matches(LINK_PRUNE_KEEP_SELECTOR) &&
+          !element.querySelector(LINK_PRUNE_KEEP_SELECTOR)
+        ) {
+          element.remove();
+        }
+      });
+  };
+
+  // Wrap one match in an anchor. A Range is used so a phrase split by inline
+  // markup becomes a SINGLE link that keeps the markup inside it:
+  // `running <strong>shoes</strong>` -> `<a ...>running <strong>shoes</strong></a>`.
+  const wrapMatchInLink = (
+    entry: LinkableParagraph,
+    match: { start: number; end: number },
+    url: string
+  ) => {
+    const startSegment = entry.segments.find(s => s.start <= match.start && s.end > match.start);
+    const endSegment = entry.segments.find(s => s.start < match.end && s.end >= match.end);
+    if (!startSegment || !endSegment) return false;
+
+    const range = document.createRange();
+    range.setStart(startSegment.node, match.start - startSegment.start);
+    range.setEnd(endSegment.node, match.end - endSegment.start);
+
+    const anchor = document.createElement('a');
+    anchor.setAttribute('href', url);
+    // extractContents clones any partially selected inline tag rather than
+    // throwing, which surroundContents would do on exactly these matches.
+    anchor.appendChild(range.extractContents());
+    range.insertNode(anchor);
+    pruneEmptyInlineTags(entry.paragraph);
+    return true;
   };
 
   const findLinkOpportunities = (htmlContent: string, links: typeof internalLinks) => {
@@ -1757,12 +1879,7 @@ const ContentEditor = () => {
     const tempDiv = document.createElement('div');
     tempDiv.innerHTML = htmlContent;
 
-    // Only paragraph text counts. A keyword that appears solely in a heading
-    // or a table is not an opportunity, because it can never be linked.
-    const linkableText = collectLinkableTextNodes(tempDiv)
-      .map(node => node.data)
-      .join(' ')
-      .toLowerCase();
+    const paragraphs = collectLinkableParagraphs(tempDiv);
 
     // URLs already linked anywhere in the article. A second link to the same
     // page is a duplicate, not an opportunity — repeated identical links hurt
@@ -1782,8 +1899,11 @@ const ContentEditor = () => {
       keywordList.forEach(keyword => {
         if (keyword.length < 2) return; // Skip very short keywords
 
-        const matches = linkableText.match(buildKeywordRegex(keyword, 'gi'));
-        const count = matches ? matches.length : 0;
+        // Counted exactly the way it will be applied.
+        const count = paragraphs.reduce(
+          (sum, entry) => sum + findKeywordMatches(entry, keyword).length,
+          0
+        );
         if (count === 0) return;
 
         totalKeywordsFound++;
@@ -1814,22 +1934,6 @@ const ContentEditor = () => {
     return `${opportunity.linkId}-${opportunity.keyword}`;
   };
 
-  // Wrap the first match of `keyword` inside `node` in an anchor. Splitting the
-  // text node keeps every surrounding tag and attribute untouched.
-  const linkTextNode = (node: Text, keyword: string, url: string) => {
-    const match = buildKeywordRegex(keyword, 'i').exec(node.data);
-    if (!match || !node.parentNode) return false;
-
-    const keywordNode = node.splitText(match.index);
-    keywordNode.splitText(match[0].length); // keywordNode now holds exactly the keyword
-
-    const anchor = document.createElement('a');
-    anchor.setAttribute('href', url);
-    anchor.textContent = keywordNode.data; // original casing preserved
-    keywordNode.parentNode?.replaceChild(anchor, keywordNode);
-    return true;
-  };
-
   // Apply selected internal links to content
   const handleApplySelectedLinks = () => {
     if (!editorRef.current || selectedLinkOpportunities.size === 0) return;
@@ -1841,7 +1945,7 @@ const ContentEditor = () => {
       let appliedCount = 0;
 
       // One link per URL, and at most one new link per paragraph, so links
-      // spread down the article instead of stacking in the first paragraph.
+      // spread down the article instead of stacking in the opening sentences.
       const linkedUrls = new Set(
         Array.from(root.querySelectorAll('a[href]'))
           .map(anchor => normalizeLinkUrl(anchor.getAttribute('href') || ''))
@@ -1852,28 +1956,25 @@ const ContentEditor = () => {
         if (!selectedLinkOpportunities.has(getLinkOpportunityKey(opportunity))) return;
         if (linkedUrls.has(normalizeLinkUrl(opportunity.url))) return;
 
-        // Re-walked per link: the previous insertion invalidated the old list.
-        const candidates = collectLinkableTextNodes(root)
-          .filter(node => buildKeywordRegex(opportunity.keyword, 'i').test(node.data));
+        // Re-read per link: the previous insertion moved every offset after it.
+        const candidates = collectLinkableParagraphs(root)
+          .map(entry => ({ entry, matches: findKeywordMatches(entry, opportunity.keyword) }))
+          .filter(candidate => candidate.matches.length > 0);
         if (candidates.length === 0) return;
 
-        // Prefer a paragraph nothing has been added to yet. Falling back to the
-        // first candidate means a link the user ticked is never silently dropped.
-        const target = candidates.find(node => {
-          const paragraph = node.parentElement?.closest('p');
-          return paragraph ? !usedParagraphs.has(paragraph as HTMLElement) : false;
-        }) || candidates[0];
+        // Prefer a paragraph nothing was added to yet. Falling back to the first
+        // one means a link the user ticked is never silently dropped.
+        const target =
+          candidates.find(candidate => !usedParagraphs.has(candidate.entry.paragraph)) || candidates[0];
 
-        const paragraph = target.parentElement?.closest('p') as HTMLElement | null;
-
-        if (linkTextNode(target, opportunity.keyword, opportunity.url)) {
+        if (wrapMatchInLink(target.entry, target.matches[0], opportunity.url)) {
           appliedCount++;
           linkedUrls.add(normalizeLinkUrl(opportunity.url));
-          if (paragraph) usedParagraphs.add(paragraph);
+          usedParagraphs.add(target.entry.paragraph);
         }
       });
 
-      // Merge the text nodes left over from splitting.
+      // Merge the text nodes left behind by the range surgery.
       root.normalize();
 
       // Rewrites content state, history and the opportunity list.
