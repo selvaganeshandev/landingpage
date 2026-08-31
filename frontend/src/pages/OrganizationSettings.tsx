@@ -208,11 +208,12 @@ export default function OrganizationSettings() {
   const PROVIDERS = [
     // One key covers ChatGPT, Claude and Perplexity — all three share a
     // transport, so their individual vendor keys are never consulted. The id
-    // stays 'openrouter' because it is what the API returns; only the label is
-    // shown, and the transport is not named anywhere in the UI.
-    // No docsUrl: it is not rendered for any provider, and shipping it put the
-    // transport's domain in the bundle for anyone reading the JS.
-    { id: 'openrouter', label: 'AI Platforms (ChatGPT, Claude, Perplexity)', color: '#6d28d9' },
+    // stays 'openrouter' because it is what the API returns.
+    // The label names the transport: customers paste an OpenRouter key here, so
+    // calling it anything else left them guessing which key to get. This
+    // replaces an earlier label that deliberately kept the transport unnamed.
+    // Still no docsUrl — it is not rendered for any provider anyway.
+    { id: 'openrouter', label: 'OpenRouter API (ChatGPT, Claude, Perplexity)', color: '#6d28d9' },
     { id: 'openai',     label: 'OpenAI (ChatGPT)',   color: '#10a37f', docsUrl: 'https://platform.openai.com/api-keys' },
     { id: 'gemini',     label: 'Google Gemini',       color: '#4285F4', docsUrl: 'https://aistudio.google.com/app/apikey' },
     { id: 'perplexity', label: 'Perplexity',          color: '#20808D', docsUrl: 'https://www.perplexity.ai/settings/api' },
@@ -238,7 +239,7 @@ export default function OrganizationSettings() {
   const [tokenUsageDays, setTokenUsageDays] = useState(30);
   const [loadingTokenUsage, setLoadingTokenUsage] = useState(false);
 
-  // OpenRouter credit balance, shown against the AI Platforms card. Kept
+  // OpenRouter credit balance, shown against the OpenRouter API card. Kept
   // separate from apiKeys because it comes from a different endpoint and its
   // absence must not make the card look broken.
   const [openRouterBalance, setOpenRouterBalance] = useState<{
