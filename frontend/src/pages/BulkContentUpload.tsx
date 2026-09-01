@@ -23,6 +23,7 @@ import {
   Upload,
   Download,
   FileText,
+  X,
   ChevronDown,
   Loader2,
   CheckCircle2,
@@ -110,7 +111,10 @@ const BulkContentUpload = () => {
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   // Upload state
-  const [selectedFile, setSelectedFile] = useState<File | null>(null);
+  const [selectedFiles, setSelectedFiles] = useState<File[]>([]);
+  // When multiple files are chosen, combine them all into ONE batch (else each
+  // file becomes its own batch). Defaults off so behaviour matches today.
+  const [combineIntoOne, setCombineIntoOne] = useState(false);
   const [uploading, setUploading] = useState(false);
   const [isDragOver, setIsDragOver] = useState(false);
   const [validationErrors, setValidationErrors] = useState<ValidationError[]>([]);
@@ -226,75 +230,153 @@ const BulkContentUpload = () => {
     }
   };
 
-  const acceptFile = (file: File) => {
-    if (!isAcceptedFile(file.name)) {
+  const acceptFiles = (files: File[]) => {
+    const valid = files.filter(f => isAcceptedFile(f.name));
+    const rejected = files.length - valid.length;
+    if (rejected > 0) {
       toast({
-        title: "Invalid file",
-        description: "Only .xlsx and .docx files are supported",
+        title: "Some files skipped",
+        description: `${rejected} file(s) ignored — only .xlsx and .docx are supported`,
         variant: "destructive",
       });
-      return;
     }
+    if (valid.length === 0) return;
     setValidationErrors([]);
-    setSelectedFile(file);
+    // Append, de-duplicating by name + size so the same file isn't added twice.
+    setSelectedFiles(prev => {
+      const seen = new Set(prev.map(f => `${f.name}:${f.size}`));
+      const additions = valid.filter(f => !seen.has(`${f.name}:${f.size}`));
+      return [...prev, ...additions];
+    });
+  };
+
+  const removeFile = (index: number) => {
+    setSelectedFiles(prev => prev.filter((_, i) => i !== index));
   };
 
   const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (file) acceptFile(file);
+    const files = Array.from(e.target.files || []);
+    if (files.length) acceptFiles(files);
+    // Reset the input so re-selecting the same file re-fires onChange.
+    e.target.value = '';
   };
 
   const handleDrop = (e: React.DragEvent) => {
     e.preventDefault();
     setIsDragOver(false);
-    const file = e.dataTransfer.files?.[0];
-    if (file) acceptFile(file);
+    const files = Array.from(e.dataTransfer.files || []);
+    if (files.length) acceptFiles(files);
   };
 
   const handleUpload = async () => {
-    if (!selectedFile || !selectedDomain || isProcessing) return;
+    if (!selectedFiles.length || !selectedDomain || isProcessing) return;
 
     setUploading(true);
     setValidationErrors([]);
-    const isDocx = getFileExtension(selectedFile.name) === ".docx";
-    try {
-      const upload = isDocx
-        ? apiClient.uploadBulkContentDocx
-        : apiClient.uploadBulkContent;
-      const response: any = await upload(Number(selectedDomain.id), selectedFile);
+    const domainId = Number(selectedDomain.id);
 
-      if (response?.data?.id) {
-        const newBatchId = response.data.id;
-        setBatchData(response.data);
-        setSelectedFile(null);
-        setCurrentPage(1);
-
-        startPolling(newBatchId);
-
-        toast({
-          title: "Upload successful",
-          description: `${response.data.total_items} items queued. Generation started automatically.`,
-        });
-      }
-    } catch (err: any) {
-      const errorData = err?.response;
-      if (errorData?.validation_errors) {
-        const errorCount = errorData.validation_errors.length;
-        const unit = isDocx ? "brief" : "row";
-        // Keep every error on the page — the toast only summarises.
-        setValidationErrors(errorData.validation_errors);
-        toast({
-          title: `Validation failed (${errorCount} ${unit}${errorCount > 1 ? 's' : ''})`,
-          description: "Nothing was imported. See the details below.",
-          variant: "destructive",
-        });
-      } else {
+    // --- Path 1: combine several files into ONE batch (new endpoint) ---
+    if (combineIntoOne && selectedFiles.length >= 1) {
+      try {
+        const response: any = await apiClient.uploadBulkContentMulti(domainId, selectedFiles);
+        if (response?.data?.id) {
+          setBatchData(response.data);
+          setSelectedFiles([]);
+          setCurrentPage(1);
+          startPolling(response.data.id);
+          const reports = response.file_reports || [];
+          const skipped = reports.filter((r: any) => r.status === 'skipped');
+          toast({
+            title: "Upload successful",
+            description: `${response.data.total_items} items queued from ${reports.length - skipped.length} file(s)`
+              + (skipped.length ? `. ${skipped.length} file(s) skipped.` : '.'),
+          });
+        }
+      } catch (err: any) {
+        const errorData = err?.response;
         toast({
           title: "Upload failed",
           description: errorData?.message || "An error occurred",
           variant: "destructive",
         });
+      } finally {
+        setUploading(false);
       }
+      return;
+    }
+
+    // --- Path 2: single file → existing endpoint (unchanged behaviour) ---
+    if (selectedFiles.length === 1) {
+      const file = selectedFiles[0];
+      const isDocx = getFileExtension(file.name) === ".docx";
+      try {
+        const upload = isDocx ? apiClient.uploadBulkContentDocx : apiClient.uploadBulkContent;
+        const response: any = await upload(domainId, file);
+        if (response?.data?.id) {
+          setBatchData(response.data);
+          setSelectedFiles([]);
+          setCurrentPage(1);
+          startPolling(response.data.id);
+          toast({
+            title: "Upload successful",
+            description: `${response.data.total_items} items queued. Generation started automatically.`,
+          });
+        }
+      } catch (err: any) {
+        const errorData = err?.response;
+        if (errorData?.validation_errors) {
+          const errorCount = errorData.validation_errors.length;
+          const unit = isDocx ? "brief" : "row";
+          setValidationErrors(errorData.validation_errors);
+          toast({
+            title: `Validation failed (${errorCount} ${unit}${errorCount > 1 ? 's' : ''})`,
+            description: "Nothing was imported. See the details below.",
+            variant: "destructive",
+          });
+        } else {
+          toast({
+            title: "Upload failed",
+            description: errorData?.message || "An error occurred",
+            variant: "destructive",
+          });
+        }
+      } finally {
+        setUploading(false);
+      }
+      return;
+    }
+
+    // --- Path 3: multiple files, keep SEPARATE → one batch per file ---
+    try {
+      const created: string[] = [];
+      const failed: string[] = [];
+      let lastBatch: any = null;
+      for (const file of selectedFiles) {
+        const isDocx = getFileExtension(file.name) === ".docx";
+        try {
+          const upload = isDocx ? apiClient.uploadBulkContentDocx : apiClient.uploadBulkContent;
+          const response: any = await upload(domainId, file);
+          if (response?.data?.id) {
+            lastBatch = response.data;
+            created.push(file.name);
+          }
+        } catch (err: any) {
+          const msg = err?.response?.message || 'upload error';
+          failed.push(`${file.name} (${msg})`);
+        }
+      }
+      if (lastBatch) {
+        setBatchData(lastBatch);
+        setCurrentPage(1);
+        startPolling(lastBatch.id);
+      }
+      setSelectedFiles([]);
+      toast({
+        title: `Uploaded ${created.length} file(s) as separate batches`,
+        description: (failed.length ? `${failed.length} failed: ${failed.join('; ')}. ` : '')
+          + (lastBatch ? 'Showing the most recent batch; the rest are processing in the background.' : ''),
+        variant: failed.length ? "destructive" : undefined,
+      });
     } finally {
       setUploading(false);
     }
@@ -424,6 +506,7 @@ const BulkContentUpload = () => {
           type="file"
           ref={fileInputRef}
           accept=".xlsx,.docx"
+          multiple
           onChange={handleFileSelect}
           className="hidden"
           disabled={isProcessing}
@@ -439,42 +522,79 @@ const BulkContentUpload = () => {
               ? 'border-border bg-muted/30 cursor-not-allowed opacity-50'
               : isDragOver
                 ? 'border-primary bg-primary/5 cursor-pointer'
-                : selectedFile
+                : selectedFiles.length
                   ? 'border-emerald-400 bg-emerald-50/80 dark:bg-emerald-500/5 cursor-pointer'
                   : 'border-border hover:border-primary/40 hover:bg-muted/20 cursor-pointer'
           }`}
         >
-          {selectedFile ? (
+          {selectedFiles.length ? (
             <div className="flex flex-col items-center gap-1">
-              {getFileExtension(selectedFile.name) === ".docx" ? (
-                <FileText className="h-5 w-5 text-blue-600" />
-              ) : (
-                <FileSpreadsheet className="h-5 w-5 text-emerald-600" />
-              )}
-              <span className="font-medium text-sm text-emerald-700 dark:text-emerald-400 truncate">
-                {selectedFile.name}
+              <FileSpreadsheet className="h-5 w-5 text-emerald-600" />
+              <span className="font-medium text-sm text-emerald-700 dark:text-emerald-400">
+                {selectedFiles.length} file{selectedFiles.length > 1 ? 's' : ''} selected
               </span>
               <span className="text-xs text-muted-foreground">
-                {(selectedFile.size / 1024).toFixed(1)} KB —{" "}
-                {getFileExtension(selectedFile.name) === ".docx" ? "Word" : "Excel"} — Ready to upload
+                Click or drop to add more (.xlsx / .docx)
               </span>
             </div>
           ) : (
             <div className="flex flex-col items-center gap-1">
               <Upload className="h-5 w-5 text-muted-foreground" />
               <span className="text-sm text-muted-foreground">
-                Drop <span className="font-medium text-foreground">.xlsx</span> or{" "}
-                <span className="font-medium text-foreground">.docx</span> file here or click to browse
+                Drop one or more <span className="font-medium text-foreground">.xlsx</span> /{" "}
+                <span className="font-medium text-foreground">.docx</span> files here or click to browse
               </span>
             </div>
           )}
         </div>
 
+        {/* Selected files list + combine option */}
+        {selectedFiles.length > 0 && (
+          <div className="mt-3 space-y-2">
+            {selectedFiles.map((file, idx) => (
+              <div key={`${file.name}:${file.size}:${idx}`} className="flex items-center gap-2 rounded-md border border-border bg-muted/20 px-3 py-1.5">
+                {getFileExtension(file.name) === ".docx" ? (
+                  <FileText className="h-4 w-4 text-blue-600 shrink-0" />
+                ) : (
+                  <FileSpreadsheet className="h-4 w-4 text-emerald-600 shrink-0" />
+                )}
+                <span className="text-sm truncate flex-1">{file.name}</span>
+                <span className="text-xs text-muted-foreground shrink-0">{(file.size / 1024).toFixed(1)} KB</span>
+                {!isProcessing && (
+                  <button
+                    type="button"
+                    onClick={(e) => { e.stopPropagation(); removeFile(idx); }}
+                    className="text-muted-foreground hover:text-destructive shrink-0"
+                    title="Remove"
+                  >
+                    <X className="h-4 w-4" />
+                  </button>
+                )}
+              </div>
+            ))}
+            {selectedFiles.length > 1 && (
+              <label className="flex items-center gap-2 mt-2 cursor-pointer select-none">
+                <input
+                  type="checkbox"
+                  checked={combineIntoOne}
+                  onChange={(e) => setCombineIntoOne(e.target.checked)}
+                  disabled={isProcessing}
+                  className="h-4 w-4 rounded border-border"
+                />
+                <span className="text-sm">
+                  Combine all files into <span className="font-medium">one batch</span>
+                  <span className="text-xs text-muted-foreground"> (off = each file becomes its own batch)</span>
+                </span>
+              </label>
+            )}
+          </div>
+        )}
+
         {/* Row 3: Upload button centered */}
         <div className="flex justify-center mt-4">
           <Button
             onClick={handleUpload}
-            disabled={!selectedFile || uploading || !selectedDomain || isProcessing}
+            disabled={!selectedFiles.length || uploading || !selectedDomain || isProcessing}
             className="gradient-primary shadow-md shadow-primary/25 px-8"
           >
             {uploading ? (
@@ -517,7 +637,7 @@ const BulkContentUpload = () => {
               {validationErrors.map((entry) => (
                 <div key={entry.row} className="flex gap-3 px-3 py-2">
                   <span className="text-xs font-medium text-red-700 dark:text-red-400 whitespace-nowrap pt-0.5">
-                    {errorRowLabel(selectedFile?.name, entry.row)}
+                    {errorRowLabel(selectedFiles[0]?.name, entry.row)}
                   </span>
                   <ul className="text-xs text-muted-foreground space-y-0.5">
                     {entry.errors.map((message, i) => (

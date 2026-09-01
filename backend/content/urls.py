@@ -44,6 +44,7 @@ urlpatterns = [
     path('bulk-upload/template-docx/', views.download_bulk_upload_docx_template, name='bulk_upload_template_docx'),
     path('bulk-upload/', views.bulk_upload_content, name='bulk_upload_content'),
     path('bulk-upload/docx/', views.bulk_upload_content_docx, name='bulk_upload_content_docx'),
+    path('bulk-upload/multi/', views.bulk_upload_content_multi, name='bulk_upload_content_multi'),
     path('bulk-upload/batches/', views.get_bulk_upload_batches, name='bulk_upload_batches'),
     path('bulk-upload/batches/<int:batch_id>/', views.get_bulk_upload_batch_detail, name='bulk_upload_batch_detail'),
     path('bulk-upload/items/<int:item_id>/retry/', views.retry_bulk_upload_item, name='bulk_upload_item_retry'),
@@ -54,6 +55,7 @@ urlpatterns = [
 
     # Issue 8B: Keyword Suggestions
     path('suggest-keywords/', views.suggest_keywords, name='suggest_keywords'),
+    path('suggest-anchor-links/', views.suggest_anchor_links, name='suggest_anchor_links'),
 
     # Issue 8C: Content Planning & Rescheduling
     path('plan/', views.plan_content, name='plan_content'),

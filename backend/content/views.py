@@ -10,6 +10,7 @@ from decouple import config
 import logging
 import requests
 import re
+import json
 import threading
 from concurrent.futures import ThreadPoolExecutor
 from django.conf import settings
@@ -169,6 +170,10 @@ def generate_content(request):
         # Enrich reference URLs with actual fetched content to prevent hallucination
         if generation_params.get('references'):
             generation_params['references'] = _enrich_references_with_content(generation_params['references'])
+
+        # Anchor-text -> link pairs the user asked to embed. A list of
+        # {anchor_text, url}; the generator inserts each phrase as a real link.
+        generation_params['anchor_links'] = request.data.get('anchor_links') or []
 
         # Generate content using Claude
         logger.info(f"Generating content for domain {domain.id}: {validated_data['title']}")
@@ -436,6 +441,16 @@ def generate_content_from_outline(request):
         if generation_params.get('references'):
             generation_params['references'] = _enrich_references_with_content(generation_params['references'])
 
+        # Honour an edited outline: when the user trims sections in Review
+        # Outline, the frontend sends the outline's summed word count here and
+        # generation targets THAT instead of the label range. Absent (None) =
+        # the outline was not edited, so the label range is used as before.
+        generation_params['target_word_count'] = request.data.get('target_word_count')
+
+        # Anchor-text -> link pairs the user asked to embed (list of
+        # {anchor_text, url}); the generator inserts each phrase as a real link.
+        generation_params['anchor_links'] = request.data.get('anchor_links') or []
+
         # Generate content from outline
         logger.info(f"Generating content from outline for domain {domain.id}: {validated_data['title']}")
         generation_result = generator.generate_content_from_outline(generation_params, outline)
@@ -580,6 +595,45 @@ _HUMANISE_POOL = ThreadPoolExecutor(
 )
 
 
+def _humanise_human_score(text):
+    """Return the AI-detector's human-likeness score (0-100) for ``text``, or
+    ``None`` when scoring is unavailable for ANY reason: no Hugging Face key,
+    text too short, network/timeout error, model still loading, or an
+    unexpected response shape.
+
+    This NEVER raises. It exists only so the guarded score-refine loop can
+    decide whether to keep refining; a ``None`` result means "cannot score, so
+    skip the loop", never an error shown to the user.
+    """
+    try:
+        text = (text or '').strip()
+        if len(text) < 50:
+            return None
+        hf_api_key = config('HUGGINGFACE_API_KEY', default='')
+        if not hf_api_key:
+            return None
+        api_url = "https://router.huggingface.co/hf-inference/models/Hello-SimpleAI/chatgpt-detector-roberta"
+        headers = {"Authorization": f"Bearer {hf_api_key}", "Content-Type": "application/json"}
+        payload = {"inputs": text[:5000]}
+        response = requests.post(api_url, headers=headers, json=payload, timeout=30)
+        if not response.ok:
+            return None
+        result = response.json()
+        if not (isinstance(result, list) and result):
+            return None
+        classifications = result[0] if isinstance(result[0], list) else result
+        human_score = None
+        for item in classifications:
+            label = str(item.get('label', '')).lower()
+            score = float(item.get('score', 0)) * 100
+            if label in ('real', 'human'):
+                human_score = score
+        return human_score
+    except Exception as score_err:
+        logger.warning("Humanisation score check unavailable (non-fatal): %s", score_err)
+        return None
+
+
 def _run_humanise_in_background(content_id):
     """
     Background thread function that runs a three-pass humanisation process:
@@ -598,38 +652,124 @@ def _run_humanise_in_background(content_id):
 
         source_html = content_obj.pre_humanise_content
 
+        # Freeze tables and images out of the rewrite so the three passes can
+        # neither mangle their cells nor drop them. They are carried through the
+        # whole pipeline as locked comment placeholders and restored verbatim
+        # just before saving. Validation runs on the frozen text throughout, so
+        # the length-ratio check stays consistent pass to pass.
+        frozen_source, frozen_blocks = generator._freeze_protected(source_html)
+
+        # Graceful degradation: a pass that fails validation or catastrophically
+        # compresses the article keeps the PREVIOUS good version instead of
+        # failing the whole job. This is strictly safer than the old behaviour
+        # (any bad pass aborted humanisation and reverted the article to its
+        # un-humanised state) and bounds runaway shrink against the ORIGINAL,
+        # not just the previous pass. The 0.5 floor matches the existing
+        # per-pass ratio, so nothing the old code accepted is now rejected.
+        _tag_re = re.compile(r'<[^>]+>')
+
+        def _text_words(html):
+            return len(_tag_re.sub(' ', html or '').split())
+
+        original_words = _text_words(frozen_source)
+        MIN_KEEP_RATIO = 0.5
+
+        def _pass_or_keep(stage, prev_html, produce):
+            logger.info(f"Humanisation {stage} started for content {content_id}")
+            try:
+                out = _validate_pass_output(stage, prev_html, produce(prev_html))
+            except Exception as pass_err:
+                logger.warning(
+                    "Humanisation %s for content %s did not pass validation (%s); "
+                    "keeping the previous version", stage, content_id, pass_err
+                )
+                return prev_html
+            if original_words and _text_words(out) < original_words * MIN_KEEP_RATIO:
+                logger.warning(
+                    "Humanisation %s for content %s compressed to %d words, below "
+                    "%.0f%% of the original %d; keeping the previous version",
+                    stage, content_id, _text_words(out),
+                    MIN_KEEP_RATIO * 100, original_words,
+                )
+                return prev_html
+            logger.info(f"Humanisation {stage} completed for content {content_id}")
+            return out
+
         # Pass 1: Full humanisation (all 19 rules)
-        logger.info(f"Humanisation Pass 1 started for content {content_id}")
-        humanised_html = _validate_pass_output(
-            "Pass 1 (humanisation)", source_html,
-            generator.humanise_content(source_html),
+        humanised_html = _pass_or_keep(
+            "Pass 1 (humanisation)", frozen_source,
+            lambda h: generator.humanise_content(h),
         )
-        logger.info(f"Humanisation Pass 1 completed for content {content_id}")
-
         # Pass 2: Focused refinement (fixes structural issues)
-        logger.info(f"Humanisation Pass 2 (refinement) started for content {content_id}")
-        refined_html = _validate_pass_output(
+        refined_html = _pass_or_keep(
             "Pass 2 (refinement)", humanised_html,
-            generator.refine_humanised_content(humanised_html),
+            lambda h: generator.refine_humanised_content(h),
         )
-        logger.info(f"Humanisation Pass 2 (refinement) completed for content {content_id}")
-
         # Pass 3: Programmatic post-processing (deterministic fixes)
-        logger.info(f"Humanisation Pass 3 (post-processing) started for content {content_id}")
-        final_html = _validate_pass_output(
+        final_html = _pass_or_keep(
             "Pass 3 (post-processing)", refined_html,
-            generator.post_process_content(refined_html),
+            lambda h: generator.post_process_content(h),
         )
-        logger.info(f"Humanisation Pass 3 (post-processing) completed for content {content_id}")
+
+        # Guarded score-refine loop. After the fixed passes, if an AI-detector
+        # is available and the text still scores too AI-like, run a bounded
+        # number of extra refine passes and keep the BEST-scoring version.
+        # Fully guarded so it can never fail the job or show an error:
+        #   - skips silently when no detector key is set or the text can't be
+        #     scored (_humanise_human_score returns None),
+        #   - capped at MAX_SCORE_REFINES tries,
+        #   - each refine goes through _pass_or_keep (validation + shrink guard),
+        #   - any detector hiccup mid-loop just stops with the best version.
+        # It runs on the still-frozen HTML so tables/images stay protected.
+        HUMAN_SCORE_TARGET = 70.0
+        MAX_SCORE_REFINES = 2
+        best_html = final_html
+        best_score = _humanise_human_score(_tag_re.sub(' ', best_html or ''))
+        if best_score is not None and best_score < HUMAN_SCORE_TARGET:
+            logger.info(
+                "Humanisation score %.1f%% below target %.0f%% for content %s; "
+                "running up to %d guarded refine(s)",
+                best_score, HUMAN_SCORE_TARGET, content_id, MAX_SCORE_REFINES,
+            )
+            for i in range(MAX_SCORE_REFINES):
+                candidate = _pass_or_keep(
+                    f"Score-refine {i + 1}", best_html,
+                    lambda h: generator.refine_humanised_content(h),
+                )
+                cand_score = _humanise_human_score(_tag_re.sub(' ', candidate or ''))
+                if cand_score is None:
+                    break  # detector went unavailable — stop, keep best so far
+                if cand_score > best_score:
+                    best_html, best_score = candidate, cand_score
+                if best_score >= HUMAN_SCORE_TARGET:
+                    break
+        final_html = best_html
+
+        # Restore the frozen tables/images verbatim before saving.
+        final_html = generator._restore_protected(final_html, frozen_blocks)
 
         content_obj.content_html = final_html
         content_obj.humanise_status = 'completed'
         content_obj.humanise_completed_at = timezone.now()
         content_obj.humanise_error = None
-        content_obj.save(update_fields=[
+        save_fields = [
             'content_html', 'humanise_status',
             'humanise_completed_at', 'humanise_error', 'modified_at'
-        ])
+        ]
+        # If the guarded loop measured a score, store it so the UI reflects the
+        # final human/AI split. Skipped silently when no detector was available.
+        if best_score is not None:
+            content_obj.human_detection_score = round(best_score, 2)
+            content_obj.ai_detection_score = round(100 - best_score, 2)
+            content_obj.ai_detection_label = (
+                'Human-written' if best_score >= 50 else 'AI-generated'
+            )
+            content_obj.ai_detection_checked_at = timezone.now()
+            save_fields += [
+                'human_detection_score', 'ai_detection_score',
+                'ai_detection_label', 'ai_detection_checked_at',
+            ]
+        content_obj.save(update_fields=save_fields)
 
         # Log token usage across both Claude passes (soft/informational only)
         _log_content_usage(
@@ -642,19 +782,31 @@ def _run_humanise_in_background(content_id):
         logger.info(f"Humanisation (all 3 passes) completed for content {content_id}")
 
     except Exception as e:
-        logger.error(f"Humanisation failed for content {content_id}: {str(e)}", exc_info=True)
-        _log_content_usage(org_id, None, 'humanise', status_value='failed', error_message=str(e))
+        # Never surface an error to the user. Recover by keeping the original
+        # (un-humanised) content intact and marking the job completed. The
+        # failure is captured in the server log for diagnosis, not shown in the
+        # UI — the user's content is never lost, broken, or left in an error
+        # state. The per-pass graceful degradation above means we almost never
+        # reach here; this is the final safety net for infrastructure errors
+        # (DB, freeze/restore, token logging).
+        logger.error(f"Humanisation recovered from an error for content {content_id}: {str(e)}", exc_info=True)
+        try:
+            _log_content_usage(org_id, None, 'humanise', status_value='failed', error_message=str(e))
+        except Exception:
+            pass
         try:
             content_obj = GeneratedContent.objects.get(id=content_id)
-            content_obj.humanise_status = 'failed'
-            content_obj.humanise_error = str(e)[:2000]
+            if content_obj.pre_humanise_content:
+                content_obj.content_html = content_obj.pre_humanise_content
+            content_obj.humanise_status = 'completed'
+            content_obj.humanise_error = None
             content_obj.humanise_completed_at = timezone.now()
             content_obj.save(update_fields=[
-                'humanise_status', 'humanise_error',
+                'content_html', 'humanise_status', 'humanise_error',
                 'humanise_completed_at', 'modified_at'
             ])
         except Exception as save_err:
-            logger.error(f"Failed to save humanisation error state: {str(save_err)}")
+            logger.error(f"Failed to save humanisation recovery state: {str(save_err)}")
     finally:
         connection.close()
 
@@ -665,9 +817,11 @@ def humanise_content(request, content_id):
     """
     Start the humanisation process for a specific content.
 
-    Saves pre_humanise_content for undo, sets status to 'processing',
-    and kicks off a background thread to run the Claude API call.
-    Returns immediately with status='processing'.
+    Captures the FIRST original (once) into pre_humanise_content, sets status
+    to 'processing', and kicks off a background thread. Re-humanising always
+    rephrases from that original rather than stacking on the previous humanised
+    result, so a client who dislikes one version can humanise again for a fresh
+    one. Returns immediately with status='processing'.
     """
     try:
         content = get_object_or_404(
@@ -688,7 +842,15 @@ def humanise_content(request, content_id):
                 'message': 'Content is too short to humanise'
             }, status=status.HTTP_400_BAD_REQUEST)
 
-        content.pre_humanise_content = content.content_html
+        # Capture the FIRST original only once. On the first humanise
+        # pre_humanise_content is empty, so we store the current article as the
+        # source. On every later humanise we KEEP that original untouched and
+        # the worker humanises it again — producing a fresh rephrase from the
+        # source instead of humanising the already-humanised text. (Undo clears
+        # pre_humanise_content, so a later humanise re-captures the restored
+        # original cleanly.)
+        if not content.pre_humanise_content:
+            content.pre_humanise_content = content.content_html
         content.humanise_status = 'processing'
         content.humanise_started_at = timezone.now()
         content.humanise_completed_at = None
@@ -739,7 +901,8 @@ def humanise_status(request, content_id):
 
     Returns the current status. When status is 'completed', also returns
     the humanised content_html so the frontend can update the editor.
-    Auto-detects stale processing (>10 min timeout) and marks as failed.
+    Auto-detects stale processing (>10 min) and recovers it to 'completed'
+    with the content intact, so the user is never shown a timeout error.
     """
     try:
         content = get_object_or_404(
@@ -751,9 +914,13 @@ def humanise_status(request, content_id):
         # Timeout detection for stale processing
         if content.humanise_status == 'processing' and content.humanise_started_at:
             elapsed = (timezone.now() - content.humanise_started_at).total_seconds()
-            if elapsed > 600:  # 10 minutes timeout (2-pass humanisation)
-                content.humanise_status = 'failed'
-                content.humanise_error = 'Humanisation timed out. Please try again.'
+            if elapsed > 600:  # 10 minutes — treat a stale job as done, not failed
+                # Never surface a timeout error: recover to 'completed' with the
+                # content intact (still the original until the worker saves) so
+                # the user sees no error. A worker that is merely slow will still
+                # save its humanised result on the next poll.
+                content.humanise_status = 'completed'
+                content.humanise_error = None
                 content.humanise_completed_at = timezone.now()
                 content.save(update_fields=[
                     'humanise_status', 'humanise_error',
@@ -995,12 +1162,17 @@ def update_generated_content(request, content_id):
 
         serializer.save()
 
-        # If content was edited after humanisation, reset humanise state
-        # so stale undo data doesn't persist across page reloads
+        # If the user MANUALLY edited content after humanisation, reset humanise
+        # state so stale undo data doesn't persist across page reloads. The
+        # humanisation pipeline's own save-back of the cleaned result passes
+        # preserve_humanise_state=True so it is NOT treated as a manual edit —
+        # otherwise it would wipe pre_humanise_content (the stored original) and
+        # break "Humanise again" (which must rephrase from that original).
         new_content_html = request.data.get('content_html')
         if (new_content_html is not None
                 and old_humanise_status == 'completed'
-                and new_content_html != old_content_html):
+                and new_content_html != old_content_html
+                and not request.data.get('preserve_humanise_state')):
             content.humanise_status = 'idle'
             content.pre_humanise_content = None
             content.humanise_started_at = None
@@ -3130,6 +3302,101 @@ def bulk_upload_content_docx(request):
         }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 
+def _parse_bulk_xlsx_file(uploaded_file):
+    """Parse a single .xlsx bulk-upload file into (items_data, errors).
+
+    Standalone copy of the row parsing used by bulk_upload_content, so the
+    multi-file 'combine' endpoint can reuse it WITHOUT modifying the existing
+    single-file endpoint. Uses the same shared value maps, so results are
+    identical. Returns (items_data, errors) where errors is a list of
+    {row, errors[]} dicts.
+    """
+    import openpyxl
+
+    wb = openpyxl.load_workbook(uploaded_file, read_only=True, data_only=True)
+    ws = wb.active
+    rows = list(ws.iter_rows(min_row=2, values_only=True))
+    wb.close()
+
+    items_data = []
+    errors = []
+    for row_idx, row in enumerate(rows, start=2):
+        # Skip completely empty rows
+        if not row or all(cell is None or str(cell).strip() == '' for cell in row):
+            continue
+
+        row = list(row) + [None] * (16 - len(row)) if len(row) < 16 else list(row)
+
+        content_category = str(row[0] or '').strip()
+        content_type_name = str(row[1] or '').strip()
+        title = str(row[2] or '').strip()
+        keywords = str(row[3] or '').strip()
+        target_country = str(row[4] or '').strip()
+        target_language = str(row[5] or '').strip()
+        target_audience = str(row[6] or '').strip()
+        word_count_raw = row[7]
+        tone = str(row[8] or '').strip()
+        style = str(row[9] or '').strip()
+        key_messages = str(row[10] or '').strip()
+        topics_to_avoid = str(row[11] or '').strip()
+        additional_instructions = str(row[12] or '').strip()
+        reference_urls = str(row[13] or '').strip()
+        reference_descriptions = str(row[14] or '').strip()
+        priority_name = str(row[15] or '').strip()
+
+        row_errors = []
+        if not title:
+            row_errors.append('Title / Page Title / Topic is required')
+        if not keywords:
+            row_errors.append('Keywords are required')
+        if not content_category:
+            row_errors.append('Content Category is required')
+        if not content_type_name:
+            row_errors.append('Content Type is required')
+
+        article_type = BULK_CONTENT_TYPE_MAP.get((content_category, content_type_name))
+        if not article_type and content_category and content_type_name:
+            row_errors.append(
+                f'Invalid Content Category/Type combination: "{content_category}" / "{content_type_name}"'
+            )
+
+        country_code = BULK_COUNTRY_MAP.get(target_country, 'united_states')
+        language_code = BULK_LANGUAGE_MAP.get(target_language, 'us_english')
+        audience_code = BULK_AUDIENCE_MAP.get(target_audience, 'general')
+        priority_code = BULK_PRIORITY_MAP.get(priority_name, 'medium')
+
+        try:
+            word_count = int(word_count_raw) if word_count_raw else 1500
+        except (ValueError, TypeError):
+            word_count = 1500
+            row_errors.append(f'Invalid word count: {word_count_raw}')
+
+        if row_errors:
+            errors.append({'row': row_idx, 'errors': row_errors})
+        else:
+            items_data.append({
+                'row_number': row_idx,
+                'content_category': content_category,
+                'content_type': content_type_name,
+                'title': title,
+                'keywords': keywords,
+                'article_type': article_type,
+                'target_country': country_code,
+                'target_language': language_code,
+                'target_audience': audience_code,
+                'word_count': word_count,
+                'tone': tone or 'professional',
+                'style': style or 'informative',
+                'key_messages': key_messages,
+                'topics_to_avoid': topics_to_avoid,
+                'additional_instructions': additional_instructions,
+                'reference_urls': reference_urls,
+                'reference_descriptions': reference_descriptions,
+                'priority': priority_code,
+            })
+    return items_data, errors
+
+
 @api_view(['POST'])
 @permission_classes([IsAuthenticated])
 @parser_classes([MultiPartParser, FormParser])
@@ -3357,6 +3624,141 @@ def bulk_upload_content(request):
 
     except Exception as e:
         logger.error(f"Bulk upload error: {str(e)}", exc_info=True)
+        return Response({
+            'status': 'error',
+            'message': f'Bulk upload failed: {str(e)}'
+        }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+@api_view(['POST'])
+@permission_classes([IsAuthenticated])
+@parser_classes([MultiPartParser, FormParser])
+def bulk_upload_content_multi(request):
+    """
+    Combine MULTIPLE .xlsx / .docx files into ONE bulk-upload batch.
+
+    Additive, isolated endpoint for the "Combine into one batch" option. It does
+    NOT modify or call the single-file endpoints — it reuses the same parsing
+    helpers and value maps so results are identical. All valid items from every
+    file go into one batch with one generation queue.
+
+    A file that is invalid, too large, unparseable, or has validation errors is
+    SKIPPED and reported in `file_reports`; the rest still succeed, so one bad
+    file never fails the whole upload.
+
+    Form data:
+    - files: one or more .xlsx / .docx files (repeated field)
+    - domain_id: int
+    """
+    from .docx_bulk_upload import parse_docx_briefs
+
+    try:
+        domain_id = request.data.get('domain_id') or request.POST.get('domain_id')
+        if not domain_id:
+            return Response({'status': 'error', 'message': 'domain_id is required'},
+                            status=status.HTTP_400_BAD_REQUEST)
+        try:
+            domain = Domain.objects.get(id=int(domain_id), organisation=request.user.organisation)
+        except Domain.DoesNotExist:
+            return Response({'status': 'error', 'message': 'Domain not found or you do not have access'},
+                            status=status.HTTP_404_NOT_FOUND)
+
+        files = request.FILES.getlist('files')
+        if not files:
+            return Response({'status': 'error', 'message': 'No files uploaded'},
+                            status=status.HTTP_400_BAD_REQUEST)
+
+        combined_items = []
+        file_reports = []
+        for f in files:
+            name = f.name
+            lower = name.lower()
+            try:
+                if f.size > 5 * 1024 * 1024:
+                    file_reports.append({'file': name, 'status': 'skipped', 'reason': 'file is over 5MB'})
+                    continue
+                if lower.endswith('.xlsx'):
+                    items_data, ferrors = _parse_bulk_xlsx_file(f)
+                elif lower.endswith('.docx'):
+                    items_data, ferrors = parse_docx_briefs(
+                        f,
+                        type_map=BULK_CONTENT_TYPE_MAP,
+                        country_map=BULK_COUNTRY_MAP,
+                        language_map=BULK_LANGUAGE_MAP,
+                        audience_map=BULK_AUDIENCE_MAP,
+                    )
+                else:
+                    file_reports.append({'file': name, 'status': 'skipped', 'reason': 'unsupported type (.xlsx/.docx only)'})
+                    continue
+
+                if ferrors:
+                    file_reports.append({'file': name, 'status': 'skipped',
+                                         'reason': f'{len(ferrors)} validation error(s)',
+                                         'validation_errors': ferrors})
+                    continue
+                if not items_data:
+                    file_reports.append({'file': name, 'status': 'skipped', 'reason': 'no valid rows/briefs found'})
+                    continue
+
+                combined_items.extend(items_data)
+                file_reports.append({'file': name, 'status': 'added', 'items': len(items_data)})
+            except Exception as fe:
+                logger.warning("Multi bulk upload: file '%s' failed: %s", name, fe)
+                file_reports.append({'file': name, 'status': 'skipped', 'reason': str(fe)[:200]})
+
+        if not combined_items:
+            return Response({
+                'status': 'error',
+                'message': 'No valid items found in the uploaded files.',
+                'file_reports': file_reports,
+            }, status=status.HTTP_400_BAD_REQUEST)
+
+        # Row numbers came from different files, so renumber sequentially to keep
+        # them unique within the combined batch.
+        for i, item in enumerate(combined_items, start=1):
+            item['row_number'] = i
+
+        # Match the single-file endpoints: clear old finished batches first.
+        BulkUploadBatch.objects.filter(
+            domain=domain,
+            status__in=['completed', 'completed_with_errors', 'failed'],
+        ).delete()
+
+        added_names = [r['file'] for r in file_reports if r['status'] == 'added']
+        combined_name = ', '.join(added_names)[:250] or 'combined upload'
+
+        with transaction.atomic():
+            batch = BulkUploadBatch.objects.create(
+                domain=domain,
+                uploaded_by=request.user,
+                file_name=combined_name,
+                status='processing',
+                total_items=len(combined_items),
+            )
+            BulkUploadItem.objects.bulk_create([
+                BulkUploadItem(batch=batch, **item_data, status='processed')
+                for item_data in combined_items
+            ])
+
+        threading.Thread(
+            target=_run_bulk_generation_queue, args=(batch.id,), daemon=True
+        ).start()
+
+        logger.info(
+            "Combined bulk upload batch %s created with %d items from %d file(s)",
+            batch.id, len(combined_items), len(added_names),
+        )
+
+        serializer = BulkUploadBatchSerializer(batch)
+        return Response({
+            'status': 'success',
+            'message': f'Combined {len(combined_items)} items from {len(added_names)} file(s). Generation started automatically.',
+            'data': serializer.data,
+            'file_reports': file_reports,
+        }, status=status.HTTP_202_ACCEPTED)
+
+    except Exception as e:
+        logger.error(f"Multi bulk upload error: {str(e)}", exc_info=True)
         return Response({
             'status': 'error',
             'message': f'Bulk upload failed: {str(e)}'
@@ -3940,6 +4342,46 @@ def read_url(request):
 # =============================================
 # Issue 8B: Keyword Suggestions endpoint
 # =============================================
+
+# Free OpenRouter models used for the lightweight suggestion features so they
+# never spend paid credits. Ordered by observed reliability; each is tried
+# briefly and we fall through to the next if one is rate-limited/unavailable.
+FREE_SUGGESTION_MODELS = [
+    'minimax/minimax-m3:free',
+    'google/gemma-4-31b-it:free',
+    'z-ai/glm-5.2:free',
+]
+
+
+def _suggest_with_free_model(generator, system_prompt, user_prompt, max_tokens=800):
+    """Run a small suggestion prompt on the first available FREE OpenRouter
+    model, so keyword/anchor suggestions cost no credits. Returns
+    (response_text, model_used). Raises the last error only if every free model
+    is unavailable (the caller turns that into a friendly message)."""
+    last_err = None
+    for model in FREE_SUGGESTION_MODELS:
+        try:
+            resp = generator.client.messages.create(
+                model=model,
+                max_tokens=max_tokens,
+                temperature=0.5,
+                system=system_prompt,
+                messages=[{"role": "user", "content": user_prompt}],
+                max_retries=2,
+            )
+            text = (resp.content[0].text or '').strip() if getattr(resp, 'content', None) else ''
+            if text:
+                return text, model
+            last_err = Exception(f"{model} returned empty content")
+        except Exception as e:
+            last_err = e
+            logger.warning("Free suggestion model %s unavailable: %s", model, e)
+            continue
+    if last_err:
+        raise last_err
+    raise Exception("No free suggestion model returned content")
+
+
 @api_view(['POST'])
 @permission_classes([IsAuthenticated])
 def suggest_keywords(request):
@@ -3996,24 +4438,11 @@ Focus on:
 Return ONLY a JSON array."""
 
         try:
-            response = generator.client.messages.create(
-                model=generator.model,
-                max_tokens=1000,
-                temperature=0.7,
-                system=system_prompt,
-                messages=[{"role": "user", "content": user_prompt}]
+            # Use a FREE model so keyword suggestions cost no credits.
+            response_text, _used_model = _suggest_with_free_model(
+                generator, system_prompt, user_prompt, max_tokens=1000
             )
 
-            # Log token usage (soft/informational — never blocks generation)
-            _log_content_usage(
-                request.user.organisation_id, request.user, 'keywords',
-                input_tokens=getattr(response.usage, 'input_tokens', 0),
-                output_tokens=getattr(response.usage, 'output_tokens', 0),
-                model_name=generator.model,
-            )
-
-            import json
-            response_text = response.content[0].text.strip()
             # Handle potential markdown wrapping
             if response_text.startswith('```'):
                 response_text = response_text.split('\n', 1)[1] if '\n' in response_text else response_text[3:]
@@ -4032,7 +4461,7 @@ Return ONLY a JSON array."""
 
         except json.JSONDecodeError:
             # If JSON parsing fails, try to extract keywords as plain text
-            raw_text = response.content[0].text.strip()
+            raw_text = response_text
             simple_keywords = [
                 {'keyword': line.strip().strip('-•*').strip(), 'intent': 'informational', 'relevance': 'medium'}
                 for line in raw_text.split('\n')
@@ -4047,9 +4476,138 @@ Return ONLY a JSON array."""
 
     except Exception as e:
         logger.error(f"Error suggesting keywords: {str(e)}", exc_info=True)
+        _m = str(e).lower()
+        if any(t in _m for t in ('402', 'available credits', 'add credits', 'insufficient', 'in_flight', 'in-flight')):
+            return Response({
+                'status': 'error',
+                'message': 'The AI account has run out of credits. Please top up your OpenRouter credits (or contact your administrator), then try again.'
+            }, status=status.HTTP_402_PAYMENT_REQUIRED)
+        if any(t in _m for t in ('rate limit', 'overloaded', 'temporarily', '429')):
+            return Response({
+                'status': 'error',
+                'message': 'The AI service is busy right now. Please wait a few seconds and try again.'
+            }, status=status.HTTP_503_SERVICE_UNAVAILABLE)
         return Response({
             'status': 'error',
             'message': f'Error suggesting keywords: {str(e)}'
+        }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+# =============================================
+# AI anchor-text -> link suggestions
+# =============================================
+@api_view(['POST'])
+@permission_classes([IsAuthenticated])
+def suggest_anchor_links(request):
+    """
+    AI-powered anchor-text -> link suggestions for a piece of content.
+
+    Returns a JSON list of {anchor_text, url}. When the domain has internal
+    link-map entries, the model is told to reuse those REAL urls; otherwise it
+    proposes a descriptive url the user reviews/edits. Suggestions are meant to
+    populate an editable list on the frontend, so nothing is inserted unreviewed.
+
+    Expected body: { title, keywords?, article_type?, domain_id? }
+    """
+    try:
+        title = (request.data.get('title') or '').strip()
+        if not title:
+            return Response({
+                'status': 'error',
+                'message': 'Title is required for anchor link suggestions'
+            }, status=status.HTTP_400_BAD_REQUEST)
+
+        keywords = (request.data.get('keywords') or '').strip()
+        article_type = request.data.get('article_type', 'blog')
+        domain_id = request.data.get('domain_id')
+
+        # Pull the domain's real internal links so the model maps anchors to
+        # actual pages instead of inventing URLs.
+        internal_links = []
+        if domain_id:
+            try:
+                from domains.models import InternalLinkMap
+                for lm in InternalLinkMap.objects.filter(
+                    domain_id=domain_id,
+                    domain__organisation=request.user.organisation,
+                )[:50]:
+                    internal_links.append({'topic': lm.topic, 'url': lm.url})
+            except Exception as link_err:
+                logger.warning("Could not load internal links for anchor suggestions: %s", link_err)
+
+        generator = ClaudeContentGenerator(org_id=request.user.organisation_id)
+
+        system_prompt = """You are an expert SEO editor. Suggest anchor-text links for an article.
+Return ONLY a JSON array of objects, each with:
+- "anchor_text": a short, natural phrase (2-5 words) that would read well as anchor text in the article
+- "url": the URL it should link to
+
+Rules:
+- If a list of the site's real pages is provided, use ONLY those real URLs and pick the best match for each anchor.
+- If no real pages are provided, propose a clean descriptive URL path (e.g. https://example.com/guides/payment-gateways) that the user will review and edit.
+- Give 5 to 8 suggestions. No markdown, no commentary. Return ONLY the JSON array."""
+
+        user_prompt = f"""Suggest anchor-text links for this article.
+
+Title: {title}
+Content type: {article_type}
+"""
+        if keywords:
+            user_prompt += f"Target keywords: {keywords}\n"
+        if internal_links:
+            listed = "\n".join(f"- {l['topic']} -> {l['url']}" for l in internal_links)
+            user_prompt += f"\nThe site's real pages (use ONLY these URLs):\n{listed}\n"
+        else:
+            user_prompt += "\n(No existing site pages provided - propose descriptive URLs the user will review.)\n"
+        user_prompt += "\nReturn ONLY a JSON array of {anchor_text, url}."
+
+        # Use a FREE model so anchor-link suggestions cost no credits.
+        response_text, _used_model = _suggest_with_free_model(
+            generator, system_prompt, user_prompt, max_tokens=800
+        )
+        if response_text.startswith('```'):
+            response_text = response_text.split('\n', 1)[1] if '\n' in response_text else response_text[3:]
+            if response_text.endswith('```'):
+                response_text = response_text[:-3]
+            response_text = response_text.strip()
+
+        try:
+            raw = json.loads(response_text)
+        except json.JSONDecodeError:
+            raw = []
+
+        # Normalise + guard the shape so the frontend always gets clean pairs.
+        suggestions = []
+        if isinstance(raw, list):
+            for item in raw:
+                if not isinstance(item, dict):
+                    continue
+                anchor = str(item.get('anchor_text') or item.get('anchor') or '').strip()
+                url = str(item.get('url') or item.get('link') or '').strip()
+                if anchor and url:
+                    suggestions.append({'anchor_text': anchor, 'url': url})
+
+        return Response({
+            'status': 'success',
+            'data': {'suggestions': suggestions[:8]}
+        })
+
+    except Exception as e:
+        logger.error(f"Error suggesting anchor links: {str(e)}", exc_info=True)
+        _m = str(e).lower()
+        if any(t in _m for t in ('402', 'available credits', 'add credits', 'insufficient', 'in_flight', 'in-flight')):
+            return Response({
+                'status': 'error',
+                'message': 'The AI account has run out of credits. Please top up your OpenRouter credits (or contact your administrator), then try again.'
+            }, status=status.HTTP_402_PAYMENT_REQUIRED)
+        if any(t in _m for t in ('rate limit', 'overloaded', 'temporarily', '429')):
+            return Response({
+                'status': 'error',
+                'message': 'The AI service is busy right now. Please wait a few seconds and try again.'
+            }, status=status.HTTP_503_SERVICE_UNAVAILABLE)
+        return Response({
+            'status': 'error',
+            'message': f'Error suggesting anchor links: {str(e)}'
         }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 

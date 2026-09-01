@@ -1674,6 +1674,7 @@ export const apiClient = {
   generateOutline: (data: any) => apiRequest('/content/generate-outline/', {
     method: 'POST',
     body: JSON.stringify(data),
+    timeout: 300000, // 5 minutes - outline is an LLM call, same budget as generate/from-outline
   }),
 
   // --- Image generation (content editor) -------------------------------
@@ -2149,6 +2150,28 @@ export const apiClient = {
     return data;
   },
 
+  // Combine several .xlsx/.docx files into ONE batch (isolated endpoint).
+  uploadBulkContentMulti: async (domainId: number, files: File[]) => {
+    const formData = new FormData();
+    files.forEach((f) => formData.append('files', f));
+    formData.append('domain_id', String(domainId));
+
+    const token = getAuthToken();
+    const response = await fetch(`${API_BASE_URL}/content/bulk-upload/multi/`, {
+      method: 'POST',
+      headers: {
+        ...(token ? { 'Authorization': `Bearer ${token}` } : {}),
+      },
+      body: formData,
+    });
+
+    const data = await response.json();
+    if (!response.ok) {
+      throw { response: data, status: response.status };
+    }
+    return data;
+  },
+
   getBulkUploadBatches: (params?: { domain_id?: string }) => {
     const queryParams = params?.domain_id ? `?domain_id=${params.domain_id}` : '';
     return apiRequest(`/content/bulk-upload/batches/${queryParams}`);
@@ -2179,6 +2202,13 @@ export const apiClient = {
     apiRequest('/content/suggest-keywords/', {
       method: 'POST',
       body: JSON.stringify(data),
+    }),
+
+  suggestAnchorLinks: (data: { title: string; keywords?: string; article_type?: string; domain_id?: number }) =>
+    apiRequest('/content/suggest-anchor-links/', {
+      method: 'POST',
+      body: JSON.stringify(data),
+      timeout: 120000,
     }),
 
   // ===== Content Planning (Issue 8C) =====

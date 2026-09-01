@@ -996,6 +996,103 @@ AFTER (converted to <ul>):
             logger.warning(f"Table-fix pass failed (non-fatal): {e}")
             return content_html, 0
 
+    def _ensure_min_word_count(self, content_html, word_count, range_override=None):
+        """Safety net that EXPANDS an article which came back below the
+        user-selected minimum word count.
+
+        The generation prompt asks for a length, but models routinely undershoot
+        and land below the lower bound of the selected range. This mirrors
+        _enforce_word_count_limit (which trims when the article is OVER the
+        upper bound) for the UNDER case: it runs up to two Claude passes that
+        deepen the EXISTING sections — more explanation, examples, detail —
+        without changing the structure, the headings, or inventing facts, until
+        the article reaches the lower bound. On any failure, or if a pass fails
+        to grow the article, the best version so far is returned so generation
+        never blocks on the safety net.
+
+        Returns (expanded_html, extra_completion_tokens).
+        """
+        if not content_html or not word_count or word_count <= 0:
+            return content_html, 0
+
+        if range_override:
+            lower, upper = range_override
+        else:
+            lower = self._lower_word_limit(word_count)
+            upper = self._upper_word_limit(word_count)
+        target = lower + (upper - lower) * 3 // 4
+
+        def _wc(html):
+            return len(re.sub(r'<[^>]+>', ' ', html).split())
+
+        # Small tolerance so a near-miss (e.g. 985 vs 1000) is accepted.
+        floor = int(lower * 0.97)
+        if _wc(content_html) >= floor:
+            return content_html, 0
+
+        extra_tokens_total = 0
+        for _ in range(2):
+            if _wc(content_html) >= floor:
+                break
+            current = _wc(content_html)
+            system_prompt = (
+                "You are an expert content editor. The HTML article below is "
+                f"TOO SHORT: it has about {current} words but MUST be at least "
+                f"{lower} words (aim for about {target}). Expand it to reach "
+                "that length.\n\n"
+                "RULES:\n"
+                "1. Keep the EXISTING structure — same headings, same order, "
+                "same sections. Do NOT add or remove <h2>/<h3> sections.\n"
+                "2. Expand by ADDING depth to the existing content: more "
+                "explanation, concrete examples, context, and practical detail "
+                "on points already made.\n"
+                "3. Do NOT invent false facts, fake statistics, prices, or "
+                "quotes, and do NOT pad with repetition or filler.\n"
+                "4. Preserve every existing keyword, link, list, table, and "
+                "image. Keep the same tone and language.\n"
+                f"5. The final article must be between {lower} and {upper} "
+                f"words — do not exceed {upper}.\n"
+                "6. Return ONLY the updated HTML — no markdown fences, no "
+                "commentary."
+            )
+            user_prompt = (
+                f"Expand this article to at least {lower} words by deepening "
+                "the existing sections. Do NOT change the structure or invent "
+                "facts. Return ONLY the updated HTML.\n\n"
+                f"Article HTML:\n{content_html}"
+            )
+            try:
+                response = self.client.messages.create(
+                    model=self.model,
+                    max_tokens=self._calculate_max_tokens(word_count),
+                    temperature=0.4,
+                    system=system_prompt,
+                    messages=[{"role": "user", "content": user_prompt}],
+                )
+                expanded = response.content[0].text
+                expanded = self._sanitize_html_response(expanded)
+                expanded = self._convert_markdown_to_html(expanded)
+                extra_tokens_total += getattr(response.usage, 'output_tokens', 0)
+
+                # Only accept a pass that actually grew the article; if it did
+                # not, further passes will not help either, so stop.
+                if expanded and _wc(expanded) > current:
+                    content_html = expanded
+                    logger.info(
+                        "Min-word-count pass expanded article to ~%d words (floor %d)",
+                        _wc(content_html), lower,
+                    )
+                else:
+                    logger.warning(
+                        "Min-word-count pass did not grow the article; keeping current"
+                    )
+                    break
+            except Exception as e:
+                logger.warning(f"Min-word-count pass failed (non-fatal): {e}")
+                break
+
+        return content_html, extra_tokens_total
+
     def _fix_missing_keywords(self, content_html, missing, word_count):
         """Run a focused Claude call that weaves missing keywords into existing
         content without changing structure or exceeding the word-count cap.
@@ -1144,7 +1241,7 @@ AFTER (converted to <ul>):
         return ''.join(result_parts)
 
     @classmethod
-    def _enforce_word_count_limit(cls, content_html, word_count, outline=None):
+    def _enforce_word_count_limit(cls, content_html, word_count, outline=None, upper_override=None):
         """Cap content at the user-selected word count range's upper bound,
         preserving the conclusion so the article never ends mid-thought.
 
@@ -1167,7 +1264,7 @@ AFTER (converted to <ul>):
         if not content_html or not word_count or word_count <= 0:
             return content_html
 
-        upper = cls._upper_word_limit(word_count)
+        upper = upper_override if upper_override else cls._upper_word_limit(word_count)
         plain_text = re.sub(r'<[^>]+>', ' ', content_html)
         current_words = len(plain_text.split())
 
@@ -1986,6 +2083,108 @@ Now extract ONLY the relevant portions. If nothing is relevant, return exactly: 
             logger.warning(f"Reference content matching failed (non-fatal): {str(e)}")
             return ''
 
+    @staticmethod
+    def _insert_anchor_links(html, anchor_links):
+        """Wrap the FIRST plain-text occurrence of each requested anchor phrase
+        in a real <a href> link.
+
+        Uses an HTML parser so it can NEVER break the surrounding markup —
+        tables, lists and existing links are left intact. `anchor_links` is a
+        list of {'anchor_text': str, 'url': str}. A pair is skipped when its
+        anchor or url is empty, or when the phrase is not found as a whole
+        word/phrase in the body text. Matching respects word boundaries so a
+        short anchor (e.g. "pay") is never linked inside a larger word (e.g.
+        "payment"). Different anchors may point to the same url. This is a
+        best-effort enhancement that must never fail generation, so every path
+        is guarded and returns the original html on any problem.
+        """
+        if not html or not anchor_links:
+            return html
+        try:
+            from bs4 import BeautifulSoup, NavigableString
+        except Exception:
+            return html
+
+        def _find_whole(text, phrase):
+            """Index of the first occurrence of `phrase` in `text` that is NOT
+            embedded inside a larger word (its neighbours are non-alphanumeric),
+            or -1. Prevents "pay" matching inside "payment"."""
+            start = 0
+            n = len(phrase)
+            while True:
+                idx = text.find(phrase, start)
+                if idx == -1:
+                    return -1
+                before_ok = idx == 0 or not text[idx - 1].isalnum()
+                end = idx + n
+                after_ok = end >= len(text) or not text[end].isalnum()
+                if before_ok and after_ok:
+                    return idx
+                start = idx + 1
+
+        try:
+            soup = BeautifulSoup(html, 'html.parser')
+            changed = False
+            for pair in anchor_links:
+                if not isinstance(pair, dict):
+                    continue
+                anchor = (pair.get('anchor_text') or '').strip()
+                url = (pair.get('url') or '').strip()
+                if not anchor or not url:
+                    continue
+                # First text node that contains the phrase as a whole word/
+                # phrase and is not already inside a link, a heading, or a
+                # script/style block. (Different anchors may share a url; a
+                # phrase already inside an <a> is skipped by the parent check,
+                # so the same phrase is never double-linked.)
+                for text_node in list(soup.find_all(string=True)):
+                    if text_node.find_parent(['a', 'script', 'style',
+                                              'h1', 'h2', 'h3', 'h4', 'h5', 'h6']):
+                        continue
+                    idx = _find_whole(str(text_node), anchor)
+                    if idx == -1:
+                        continue
+                    before = text_node[:idx]
+                    after = text_node[idx + len(anchor):]
+                    new_link = soup.new_tag('a', href=url)
+                    new_link.string = anchor
+                    text_node.replace_with(new_link)
+                    if before:
+                        new_link.insert_before(NavigableString(before))
+                    if after:
+                        new_link.insert_after(NavigableString(after))
+                    changed = True
+                    break
+            return str(soup) if changed else html
+        except Exception as e:
+            logger.warning("Anchor-link insertion failed (non-fatal): %s", e)
+            return html
+
+    @staticmethod
+    def _format_anchor_links_for_prompt(anchor_links):
+        """Render the anchor phrases as a short instruction so the model works
+        them into the copy, giving _insert_anchor_links a phrase to link.
+        Returns '' when there is nothing to add."""
+        if not anchor_links:
+            return ''
+        phrases = []
+        for pair in anchor_links:
+            if not isinstance(pair, dict):
+                continue
+            anchor = (pair.get('anchor_text') or '').strip()
+            url = (pair.get('url') or '').strip()
+            if anchor and url:
+                phrases.append(anchor)
+        if not phrases:
+            return ''
+        listed = '; '.join(f'"{p}"' for p in phrases)
+        return (
+            "\n\n**Required anchor phrases:** Work each of these exact phrases "
+            f"naturally into the body text, once each: {listed}. Write them as "
+            "plain text (do NOT add markdown or HTML links yourself) — they will "
+            "be turned into links automatically afterwards."
+        )
+
     def generate_content(self, params):
         """
         Generate content based on provided parameters
@@ -2128,8 +2327,14 @@ Now extract ONLY the relevant portions. If nothing is relevant, return exactly: 
                 )
                 total_completion_tokens += extra_tokens
 
-            # Post-processing: enforce the word count range the user selected
+            # Post-processing: expand if the article came back below the
+            # selected minimum, THEN enforce the upper bound.
+            content_html, extra_tokens = self._ensure_min_word_count(content_html, word_count)
+            total_completion_tokens += extra_tokens
             content_html = self._enforce_word_count_limit(content_html, word_count)
+
+            # Insert the requested anchor-text links (best-effort, never fails).
+            content_html = self._insert_anchor_links(content_html, params.get('anchor_links'))
 
             # Calculate generation time
             generation_time = time.time() - start_time
@@ -2313,7 +2518,7 @@ LIST FORMATTING — USE <ul> / <ol> WHEREVER THEY IMPROVE SCANNABILITY:
 - Goal: {goal}
 - Target Audience: {audience}
 - Content Depth: {depth}
-- Target Word Count: {self._lower_word_limit(word_count)}-{self._upper_word_limit(word_count)} words (HARD LIMIT: the final article MUST be between {self._lower_word_limit(word_count)} and {self._upper_word_limit(word_count)} words — do NOT exceed {self._upper_word_limit(word_count)} words under any circumstance)
+- Target Word Count: {self._lower_word_limit(word_count)}-{self._upper_word_limit(word_count)} words (HARD REQUIREMENT: the final article MUST be AT LEAST {self._lower_word_limit(word_count)} words — an article shorter than {self._lower_word_limit(word_count)} words is a FAILURE and will be rejected. Aim for the upper part of the range, close to {self._upper_word_limit(word_count)} words, and do not exceed {self._upper_word_limit(word_count)}. If a draft is short, expand each section with more detail, examples, and explanation until it reaches at least {self._lower_word_limit(word_count)} words.)
 
 **IMPORTANT - Language & Spelling:** Write the entire content in {language_display}.
 - Use spelling, grammar, and vocabulary conventions specific to {language_display}
@@ -2556,17 +2761,19 @@ The following instructions take precedence over the default structure guidelines
 
         lower_limit = self._lower_word_limit(word_count)
         upper_limit = self._upper_word_limit(word_count)
-        target_mid = (lower_limit + upper_limit) // 2
+        target_mid = lower_limit + (upper_limit - lower_limit) * 3 // 4
 
         user_prompt += f"""
 **IMPORTANT - Content Completion Rule:**
-- Target approximately {target_mid} words so you stay comfortably within the {lower_limit}-{upper_limit} range. Plan sections to fit that budget.
+- The article MUST be AT LEAST {lower_limit} words — fewer than {lower_limit} is a failure. Aim for about {target_mid} words (upper part of the {lower_limit}-{upper_limit} range) and never exceed {upper_limit}. Plan and size sections so the total reaches at least {lower_limit} words; if you are short, add depth, examples and explanation rather than stopping early.
 - Every target keyword listed above MUST appear at least once in the final HTML — spread them across different sections, not clustered together.
 - Always complete every sentence and paragraph fully. If you are approaching your output limit, wrap up the current section with a proper conclusion rather than starting a new section.
 - Never end mid-sentence or leave content incomplete. Every article MUST end with a proper closing section (e.g. \"Conclusion\", \"Final Verdict\", or \"Key Takeaways\") and valid closing HTML tags.
 - Return well-formed HTML only. No markdown syntax (no `#` headings, no `|` tables, no ``` code fences). Use real <h2>/<h3>/<table>/<ul>/<ol>/<strong> tags.
 
 Begin writing the content now. Return ONLY the HTML content."""
+
+        user_prompt += self._format_anchor_links_for_prompt(params.get('anchor_links'))
 
         return system_prompt, user_prompt
 
@@ -3064,26 +3271,47 @@ CRITICAL RULES for using references — STRICT ANTI-DUPLICATION:
                 user_prompt += "\n" + "\n".join(explicit_reinforcement) + "\n"
 
         requested_word_count = params.get('word_count', 1500)
-        lower_limit = self._lower_word_limit(requested_word_count)
-        upper_limit = self._upper_word_limit(requested_word_count)
-        target_mid = (lower_limit + upper_limit) // 2
+        # If the user edited the outline in Review Outline, the frontend sends
+        # the outline's summed word count as `target_word_count`. Honour it:
+        # build a tight range around that number instead of the label range,
+        # so the article matches the edited outline. Absent = unedited -> label.
+        try:
+            explicit_target = int(params.get('target_word_count') or 0)
+        except (TypeError, ValueError):
+            explicit_target = 0
+        if explicit_target > 0:
+            # Edited outline: aim squarely AT the edited count. Keep the upper
+            # bound at the target itself (not above it) so the article matches
+            # the count the user trimmed to rather than drifting high.
+            lower_limit = max(1, int(explicit_target * 0.9))
+            upper_limit = explicit_target
+            target_mid = explicit_target
+            effective_range = (lower_limit, upper_limit)
+        else:
+            lower_limit = self._lower_word_limit(requested_word_count)
+            upper_limit = self._upper_word_limit(requested_word_count)
+            target_mid = lower_limit + (upper_limit - lower_limit) * 3 // 4
+            effective_range = None
 
         user_prompt += f"""
 IMPORTANT:
 - Follow the outline structure exactly (same headings, same order)
 - Cover all key points mentioned for each section
-- Target approximately {target_mid} words so you stay comfortably within the {lower_limit}-{upper_limit} range. Match the estimated word count for each section and budget accordingly — do NOT exceed the upper bound.
+- The finished article MUST be AT LEAST {lower_limit} words — fewer than {lower_limit} is a failure. Aim for about {target_mid} words (upper part of the {lower_limit}-{upper_limit} range) and do NOT exceed {upper_limit}. Expand each section with enough detail to reach that length; if you are short, deepen sections rather than stopping early.
 - Every target keyword MUST appear at least once across the final article.
 - Use h2 tags for main sections, h3 tags for subsections. For comparison/listing topics, honour the structural rules above (tables for comparisons, <ul>/<ol> for enumerations).
 - Always complete every sentence and paragraph fully. If you are approaching your output limit, wrap up the current section with a proper conclusion rather than starting a new section.
 - Never end mid-sentence or leave content incomplete. Every article MUST end with a proper closing section (Conclusion / Final Verdict / Key Takeaways) and valid closing HTML tags.
 - Return ONLY the HTML content, no markdown (no `#`, no `|` tables, no ``` fences)."""
 
-        # Target word count is what the user selected; the outline's
-        # estimated_words is advisory and must not push us past the user
-        # range's upper bound. requested_word_count is defined above when
-        # building the user prompt — reuse it here.
-        max_tokens = self._calculate_max_tokens(requested_word_count)
+        user_prompt += self._format_anchor_links_for_prompt(params.get('anchor_links'))
+
+        # Size the output budget from the effective upper bound (the edited
+        # outline's tight range when present, else the label range).
+        if effective_range:
+            max_tokens = max(2048, min(int(upper_limit * 2.5) + 1500, 24576))
+        else:
+            max_tokens = self._calculate_max_tokens(requested_word_count)
 
         try:
             response = self.client.messages.create(
@@ -3184,12 +3412,21 @@ IMPORTANT:
             )
             total_completion_tokens += extra_tokens
 
-            # Post-processing: enforce the word count range the user
-            # selected. Pass the outline so trimming preserves every planned
-            # section heading instead of silently dropping middle sections.
-            content_html = self._enforce_word_count_limit(
-                content_html, requested_word_count, outline=outline
+            # Post-processing: expand if the article came back below the
+            # selected minimum, THEN enforce the upper bound. Pass the outline
+            # so trimming preserves every planned section heading instead of
+            # silently dropping middle sections.
+            content_html, extra_tokens = self._ensure_min_word_count(
+                content_html, requested_word_count, range_override=effective_range
             )
+            total_completion_tokens += extra_tokens
+            content_html = self._enforce_word_count_limit(
+                content_html, requested_word_count, outline=outline,
+                upper_override=(upper_limit if effective_range else None)
+            )
+
+            # Insert the requested anchor-text links (best-effort, never fails).
+            content_html = self._insert_anchor_links(content_html, params.get('anchor_links'))
 
             generation_time = time.time() - start_time
             plain_text = re.sub(r'<[^>]+>', ' ', content_html)
@@ -3378,6 +3615,55 @@ Rewritten text:"""
 
         raise Exception(f"Claude API error during rewrite after {max_retries} retries: {str(last_error)}")
 
+    # Blocks whose internal content must survive humanisation untouched: tables
+    # (the sentence-length / list-reduction / no-repeat-word rules mangle their
+    # cells) and images (atomic). They are lifted out before the rewrite passes,
+    # replaced with locked HTML-comment placeholders the passes cannot
+    # meaningfully edit, and restored verbatim afterwards. HTML comments are
+    # used because _sanitize_html_response, _convert_markdown_to_html and the
+    # programmatic post-processing all leave them intact, and the dash-cleanup
+    # regex only matches em/en dashes, not the ASCII hyphens in <!-- -->.
+    _PROTECT_RE = re.compile(r'<table\b.*?</table>|<img\b[^>]*/?>', re.IGNORECASE | re.DOTALL)
+
+    def _freeze_protected(self, html):
+        """Replace <table>/<img> blocks with locked placeholders.
+
+        Returns (html_with_placeholders, blocks). Restore the output of the
+        passes with _restore_protected using the same blocks list.
+        """
+        blocks = []
+
+        def _repl(match):
+            idx = len(blocks)
+            blocks.append(match.group(0))
+            return f'<!--PMX_FROZEN_{idx}-->'
+
+        return self._PROTECT_RE.sub(_repl, html or ''), blocks
+
+    def _restore_protected(self, html, blocks):
+        """Put frozen <table>/<img> blocks back where their placeholders are.
+
+        Any placeholder a pass dropped is re-appended at the end so a table or
+        image is never lost, even if the model deleted its comment marker.
+        """
+        if not blocks:
+            return html or ''
+        out = html or ''
+        missing = []
+        for idx, block in enumerate(blocks):
+            placeholder = f'<!--PMX_FROZEN_{idx}-->'
+            if placeholder in out:
+                out = out.replace(placeholder, block)
+            else:
+                missing.append(block)
+        if missing:
+            logger.warning(
+                "Humanisation dropped %d protected block(s) (table/img); "
+                "re-appending them so no content is lost", len(missing)
+            )
+            out = out + '\n' + '\n'.join(missing)
+        return out
+
     def humanise_content(self, content_html, max_retries=3):
         """
         Apply humanisation rules to the full content HTML in a single API call.
@@ -3491,7 +3777,9 @@ PROTECTIVE RULES (MUST NOT violate):
 
 Return ONLY the transformed HTML content. Do not add any explanations, comments, or markdown code blocks."""
 
-        user_prompt = f"""Apply all humanisation rules to the following HTML content. Return ONLY the transformed HTML:
+        user_prompt = f"""Apply all humanisation rules to the following HTML content. Return ONLY the transformed HTML.
+
+The content may contain locked placeholders written as HTML comments, e.g. <!--PMX_FROZEN_0-->. Reproduce every such comment EXACTLY where it appears. Never remove, move, edit, or add these comments — they mark protected blocks.
 
 {content_html}"""
 
@@ -3647,7 +3935,9 @@ Return ONLY the fixed HTML. No explanations, no markdown code blocks."""
             len(violations['too_short']), len(violations['too_long']),
         )
 
-        user_prompt = f"""Review and fix ONLY the 5 specific issues described above in this HTML content. Make minimal changes. Return ONLY the fixed HTML:
+        user_prompt = f"""Review and fix ONLY the 5 specific issues described above in this HTML content. Make minimal changes. Return ONLY the fixed HTML.
+
+Any HTML comment like <!--PMX_FROZEN_0--> is a locked placeholder — reproduce it EXACTLY where it appears and never remove, move, or edit it.
 {violation_block}
 
 {content_html}"""

@@ -40,6 +40,7 @@ grounded answers will not be byte-identical to the previous Anthropic path.
 """
 
 import logging
+import time
 from dataclasses import dataclass
 from typing import Any, Dict, List, Optional, Sequence, Tuple
 
@@ -180,6 +181,7 @@ class _MessagesAPI:
         temperature: Optional[float] = None,
         tools: Optional[Sequence[Any]] = None,
         reasoning: Optional[Dict[str, Any]] = None,
+        max_retries: Optional[int] = None,
         **unsupported: Any,
     ) -> Message:
         chat_messages: List[Dict[str, str]] = []
@@ -230,8 +232,51 @@ class _MessagesAPI:
                 ", ".join(sorted(unsupported)),
             )
 
-        response = self._client.chat.completions.create(**kwargs)
-        return _to_message(response, resolved_model)
+        # Retry transient OpenRouter conditions with a short backoff so a
+        # momentary rate-limit / concurrency cap does not surface as a hard
+        # error to the user. Covers 402 "in-flight budget exhausted", 429 rate
+        # limits, and upstream 5xx/overload. These usually clear within a few
+        # seconds once other in-flight requests settle, so the waits are short
+        # (bounded total ~24s) rather than honouring a long Retry-After.
+        max_attempts = max_retries if (max_retries and max_retries > 0) else 4
+        last_error = None
+        for attempt in range(max_attempts):
+            try:
+                response = self._client.chat.completions.create(**kwargs)
+                return _to_message(response, resolved_model)
+            except Exception as e:
+                status_code = getattr(e, 'status_code', None)
+                msg = str(e).lower()
+                # A 402 / "out of credits" is NOT transient — retrying cannot
+                # make credits appear, so fail fast with a clear error rather
+                # than making the user wait through backoffs. Only genuine
+                # rate-limit / overload / upstream 5xx are worth retrying.
+                out_of_credits = (
+                    status_code == 402
+                    or 'insufficient' in msg
+                    or 'available credits' in msg
+                    or 'add credits' in msg
+                )
+                transient = (not out_of_credits) and (
+                    status_code in (408, 409, 429, 500, 502, 503, 504, 529)
+                    or 'rate limit' in msg
+                    or 'rate-limit' in msg
+                    or 'overloaded' in msg
+                    or 'temporarily' in msg
+                    or 'timeout' in msg
+                )
+                if transient and attempt < max_attempts - 1:
+                    wait = 4 * (attempt + 1)  # 4s, 8s, 12s
+                    logger.warning(
+                        "OpenRouter transient error (status=%s) on attempt %d/%d; "
+                        "retrying in %ss", status_code, attempt + 1, max_attempts, wait,
+                    )
+                    last_error = e
+                    time.sleep(wait)
+                    continue
+                raise
+        if last_error:
+            raise last_error
 
 
 def resolve_openrouter_key(org=None) -> Optional[str]:

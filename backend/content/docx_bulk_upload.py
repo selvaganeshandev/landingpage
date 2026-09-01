@@ -283,7 +283,8 @@ def _add_defaults_block(document, defaults, country_map):
         paragraph.add_run(str(value) if value else '')
 
 
-def _add_article(document, number, type_map):
+def _add_article(document, number, type_map, defaults=None):
+    defaults = defaults or {}
     document.add_paragraph('=' * 50)
     document.add_heading(f'Create Article #{number}', level=1)
 
@@ -310,15 +311,15 @@ def _add_article(document, number, type_map):
             _add_checkbox(option)
             option.add_run(f'  {content_type}')
 
-    _question(document, 'Target country', 'blank uses your default above')
-    _write_line(document)
+    _question(document, 'Target country', 'pre-filled from your default; change if this article differs')
+    _write_line(document, defaults.get('country', ''))
 
-    _question(document, 'Tone', 'blank uses your default above')
-    _write_line(document)
+    _question(document, 'Tone', 'pre-filled from your default; change if this article differs')
+    _write_line(document, defaults.get('tone', ''))
 
     _question(document, 'Approximate length',
-              'roughly how many words; blank uses your default')
-    _write_line(document)
+              'pre-filled from your default; change if this article differs')
+    _write_line(document, str(defaults.get('word_count', '') or ''))
 
     _question(document, 'Any links we should read?',
               'one per line; add "- what it covers" after a link if useful')
@@ -398,13 +399,13 @@ def build_docx_template(*, type_map, country_map, count=DEFAULT_BRIEF_COUNT,
         style='List Bullet',
     )
 
-    _add_defaults_block(document, _build_defaults(domain, country_map),
-                        country_map)
+    template_defaults = _build_defaults(domain, country_map)
+    _add_defaults_block(document, template_defaults, country_map)
 
     document.add_page_break()
 
     for number in range(1, count + 1):
-        _add_article(document, number, type_map)
+        _add_article(document, number, type_map, template_defaults)
 
     buffer = BytesIO()
     document.save(buffer)
@@ -689,8 +690,13 @@ def parse_docx_briefs(uploaded_file, *, type_map, country_map,
         value = defaults.get(key, '')
         return value.strip() if value else fallback
 
+    # Country / Tone / Approximate length are PRE-FILLED from the user's
+    # defaults in every template block, so they are no longer a signal that a
+    # block was used. Decide "did the user actually fill this article?" from the
+    # content fields only, so untouched blocks (defaults only) are still skipped.
+    _CONTENT_KEYS = ('title', 'idea', 'keywords', 'article_type', 'extra', 'reference_urls')
     for number, values in enumerate(_iter_article_blocks(lines, type_index), start=1):
-        if not any(v.strip() for v in values.values()):
+        if not any((values.get(k) or '').strip() for k in _CONTENT_KEYS):
             continue
 
         filled += 1

@@ -1542,26 +1542,56 @@ const ContentEditor = () => {
               humanisePollingRef.current = null;
             }
 
-            if (data.content_html && editorRef.current) {
+            if (data.content_html) {
               let htmlContent = data.content_html;
-              htmlContent = htmlContent.replace(/<h1[^>]*>.*?<\/h1>/gi, '').trim();
-              htmlContent = htmlContent.replace(/line-height:\s*[^;"}]+;?/gi, '');
-              htmlContent = htmlContent.replace(/\s*style="\s*"/gi, '');
-              htmlContent = convertMarkdownInHtml(htmlContent);
+              // Clean the same way the initial load does. Guarded so a bad
+              // regex/markdown case can never abort the whole update and leave
+              // the editor showing the original.
+              try {
+                htmlContent = htmlContent.replace(/<h1[^>]*>.*?<\/h1>/gi, '').trim();
+                htmlContent = htmlContent.replace(/line-height:\s*[^;"}]+;?/gi, '');
+                htmlContent = htmlContent.replace(/\s*style="\s*"/gi, '');
+                htmlContent = convertMarkdownInHtml(htmlContent);
+              } catch (cleanErr) {
+                console.error("Humanise content cleaning failed, using raw:", cleanErr);
+                htmlContent = data.content_html;
+              }
 
               isHumaniseUpdateRef.current = true;
-              editorRef.current.innerHTML = htmlContent;
+
+              // Make the humanised content the source of truth in state and refs
+              // FIRST — even if the editor is momentarily unmounted right now
+              // (a reload can set loading=true, which unmounts the editor and
+              // nulls editorRef). Previously this whole block was skipped when
+              // editorRef was null, so the humanised result silently never
+              // reached the screen. This is the fix for "content doesn't change".
               setContent(htmlContent);
-              handleContentChange();
-              // Delay ref reset so async onInput events from innerHTML change
-              // are still guarded and don't reset humanise status
-              setTimeout(() => { isHumaniseUpdateRef.current = false; }, 300);
+              lastSavedContentRef.current = htmlContent;
+              originalContentRef.current = htmlContent;
+
+              // Route through the reliable initial-load path: with isInitialLoad
+              // true, the load effect re-applies `content` to the editor the
+              // moment it is (re)mounted — the same path that always works on
+              // page load. Also apply immediately if the editor is mounted now.
+              isInitialLoad.current = true;
+              if (editorRef.current) {
+                editorRef.current.innerHTML = htmlContent;
+              }
+              try { updateMetrics(htmlContent); } catch { /* metrics are best-effort */ }
+
+              // Delay ref reset so async onInput events from the innerHTML change
+              // are still guarded and don't reset humanise status.
+              setTimeout(() => { isHumaniseUpdateRef.current = false; }, 400);
 
               // Save cleaned content to backend so page refresh loads the same
-              // content the editor displays (ensures consistent score on reload)
+              // content the editor displays (ensures consistent score on reload).
+              // preserve_humanise_state stops this pipeline save-back from being
+              // mistaken for a manual edit, which would wipe the stored original
+              // and break "Humanise again" (it must rephrase from that original).
               if (id) {
                 apiClient.updateGeneratedContent(parseInt(id), {
-                  content_html: htmlContent
+                  content_html: htmlContent,
+                  preserve_humanise_state: true
                 }).catch(err => console.error("Error saving humanised content:", err));
               }
             }
@@ -1626,23 +1656,34 @@ const ContentEditor = () => {
       return;
     }
 
-    // Save content to backend first
-    try {
-      await apiClient.updateGeneratedContent(parseInt(id), {
-        title,
-        content_html: currentContent
-      });
-    } catch (error) {
-      console.error("Error saving content before humanise:", error);
-      toast({
-        title: "Error",
-        description: "Failed to save content before humanisation",
-        variant: "destructive"
-      });
-      return;
-    }
+    // "Humanise again" always rephrases from the FIRST original. On the first
+    // humanise we persist the current (original) content so the backend
+    // humanises exactly what the user sees. On a RE-humanise (status already
+    // 'completed') we must NOT save the already-humanised text: doing so would
+    // clear the stored original on the backend and make it rephrase the
+    // humanised version instead of the original. So we skip the save and let
+    // the backend humanise the preserved original again for a fresh result.
+    const isRehumanise = humaniseStatus === 'completed';
 
-    preHumaniseContentRef.current = currentContent;
+    if (!isRehumanise) {
+      // Save content to backend first
+      try {
+        await apiClient.updateGeneratedContent(parseInt(id), {
+          title,
+          content_html: currentContent
+        });
+      } catch (error) {
+        console.error("Error saving content before humanise:", error);
+        toast({
+          title: "Error",
+          description: "Failed to save content before humanisation",
+          variant: "destructive"
+        });
+        return;
+      }
+
+      preHumaniseContentRef.current = currentContent;
+    }
 
     try {
       setHumaniseStatus('processing');
@@ -3463,12 +3504,17 @@ const ContentEditor = () => {
                 size="sm"
                 className="flex-1 h-8 text-xs"
                 onClick={handleHumanise}
-                disabled={humaniseStatus === 'processing' || humaniseStatus === 'completed'}
+                disabled={humaniseStatus === 'processing'}
               >
                 {humaniseStatus === 'processing' ? (
                   <>
                     <Loader2 className="h-3 w-3 mr-1.5 animate-spin" />
                     Humanising...
+                  </>
+                ) : humaniseStatus === 'completed' ? (
+                  <>
+                    <Wand2 className="h-3 w-3 mr-1.5" />
+                    Humanise again
                   </>
                 ) : (
                   <>

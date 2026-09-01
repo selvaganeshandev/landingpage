@@ -107,6 +107,7 @@ export const GenerateContentDialog = ({
 
   // AI keyword suggestions state (Issue 8B)
   const [isLoadingKeywordSuggestions, setIsLoadingKeywordSuggestions] = useState(false);
+  const [isLoadingAnchorSuggestions, setIsLoadingAnchorSuggestions] = useState(false);
   const [keywordSuggestions, setKeywordSuggestions] = useState<Array<{ keyword: string; intent: string; relevance: string }>>([]);
   const [showKeywordSuggestions, setShowKeywordSuggestions] = useState(false);
 
@@ -127,6 +128,11 @@ export const GenerateContentDialog = ({
   }>>([]);
   const [isGeneratingOutline, setIsGeneratingOutline] = useState(false);
   const [outlineGenerated, setOutlineGenerated] = useState(false);
+  // Word count of the outline as first generated/imported. If the user edits
+  // the outline in Review Outline (removes/adds/changes sections) the live
+  // total will differ from this, which is how we detect an "edited" outline
+  // and tell the backend to target the edited count instead of the label.
+  const [originalOutlineWords, setOriginalOutlineWords] = useState<number | null>(null);
   const [editingSection, setEditingSection] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const formInitializedRef = useRef(false);
@@ -148,6 +154,10 @@ export const GenerateContentDialog = ({
     wordCount: existingContent?.wordCount || 1500,
     scheduledDate: existingContent?.scheduledDate || new Date(),
   });
+
+  // Target anchor text -> link pairs. Each exact phrase is worked into the copy
+  // and turned into a real <a href> link during generation. Optional.
+  const [anchorLinks, setAnchorLinks] = useState<Array<{ anchor_text: string; url: string }>>([]);
 
   const countries = [
     { id: "united_states", name: "United States" },
@@ -246,8 +256,12 @@ export const GenerateContentDialog = ({
       // Reset outline state
       setOutline([]);
       setOutlineGenerated(false);
+      setOriginalOutlineWords(null);
       setIsGeneratingOutline(false);
       setEditingSection(null);
+      // Anchor links are per-article. Without this they survive the close and
+      // get injected into the NEXT article generated from this dialog.
+      setAnchorLinks([]);
       // Allow form re-initialization on next open
       formInitializedRef.current = false;
     }
@@ -507,6 +521,7 @@ export const GenerateContentDialog = ({
         audience: formData.audience,
         depth: formData.depth,
         word_count: formData.wordCount,
+        anchor_links: anchorLinks.filter(l => l.anchor_text.trim() && l.url.trim()),
         source_type: existingContent?.sourceType || 'manual',
         source_id: existingContent?.sourceId,
         source_reference: sourceReference,
@@ -562,14 +577,21 @@ export const GenerateContentDialog = ({
 
   // Create manual outline handler
   const handleCreateManualOutline = () => {
-    setOutline([{
+    const initialOutline = [{
       id: `manual-${Date.now()}`,
-      type: 'h2',
+      type: 'h2' as const,
       title: 'New Section',
       key_points: ['Key point 1'],
       estimated_words: 150,
-    }]);
+    }];
+    setOutline(initialOutline);
     setOutlineGenerated(true);
+    // Snapshot the baseline like the generated/imported paths do. Without it
+    // the edited-outline check compares against whatever a PREVIOUS article
+    // left behind, so the same actions could send target_word_count or not.
+    setOriginalOutlineWords(
+      initialOutline.reduce((sum, s) => sum + (s.estimated_words || 0), 0)
+    );
   };
 
   // Generate outline handler
@@ -601,6 +623,7 @@ export const GenerateContentDialog = ({
         style: formData.style,
         audience: formData.audience,
         word_count: formData.wordCount,
+        anchor_links: anchorLinks.filter(l => l.anchor_text.trim() && l.url.trim()),
         key_messages: formData.keyMessages,
         topics_to_avoid: formData.topicsToAvoid,
         additional_instructions: formData.additionalInstructions,
@@ -613,6 +636,10 @@ export const GenerateContentDialog = ({
       if (response.status === 'success') {
         setOutline(response.data.outline);
         setOutlineGenerated(true);
+        // Snapshot the freshly generated outline's word count as the baseline.
+        setOriginalOutlineWords(
+          response.data.outline.reduce((sum: number, s: any) => sum + (s.estimated_words || 0), 0)
+        );
 
         toast({
           title: "Outline Generated!",
@@ -679,6 +706,7 @@ export const GenerateContentDialog = ({
         audience: formData.audience,
         depth: formData.depth,
         word_count: formData.wordCount,
+        anchor_links: anchorLinks.filter(l => l.anchor_text.trim() && l.url.trim()),
         source_type: existingContent?.sourceType || 'manual',
         source_id: existingContent?.sourceId,
         source_reference: sourceReference,
@@ -692,6 +720,14 @@ export const GenerateContentDialog = ({
         brand_values: domainGuidelines?.brandValues || '',
         outline: outline,
       };
+
+      // If the user edited the outline in Review Outline, its live word total
+      // now differs from the baseline captured at generation. In that case
+      // target the edited count; otherwise leave length to the label.
+      const currentOutlineWords = outline.reduce((sum, s) => sum + (s.estimated_words || 0), 0);
+      if (originalOutlineWords !== null && currentOutlineWords !== originalOutlineWords && currentOutlineWords > 0) {
+        (generationData as any).target_word_count = currentOutlineWords;
+      }
 
       console.log('Content from outline request:', generationData);
 
@@ -931,6 +967,9 @@ export const GenerateContentDialog = ({
       } else {
         setOutline(parsedOutline);
         setOutlineGenerated(true);
+        setOriginalOutlineWords(
+          parsedOutline.reduce((sum: number, s: any) => sum + (s.estimated_words || 0), 0)
+        );
 
         toast({
           title: "Document Parsed",
@@ -1064,6 +1103,59 @@ export const GenerateContentDialog = ({
       });
     } finally {
       setIsLoadingKeywordSuggestions(false);
+    }
+  };
+
+  // AI-generate anchor-text -> link pairs and add them to the editable list so
+  // the user can review/edit each URL before generating (nothing is inserted
+  // into content unreviewed).
+  const handleSuggestAnchorLinks = async () => {
+    if (!formData.title.trim()) {
+      toast({
+        title: "Title Required",
+        description: "Please enter a title first to get anchor link suggestions",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    setIsLoadingAnchorSuggestions(true);
+    try {
+      const response = await apiClient.suggestAnchorLinks({
+        title: formData.title,
+        keywords: formData.keywords,
+        article_type: formData.articleType,
+        domain_id: selectedDomain?.id,
+      });
+
+      const suggestions = response.status === 'success' ? (response.data?.suggestions || []) : [];
+      if (suggestions.length > 0) {
+        setAnchorLinks(prev => {
+          const existing = new Set(prev.map(l => `${l.anchor_text}|${l.url}`.toLowerCase()));
+          const additions = suggestions
+            .filter((s: any) => s.anchor_text && s.url && !existing.has(`${s.anchor_text}|${s.url}`.toLowerCase()))
+            .map((s: any) => ({ anchor_text: String(s.anchor_text), url: String(s.url) }));
+          return [...prev, ...additions];
+        });
+        toast({
+          title: "Anchor links suggested",
+          description: `Added ${suggestions.length} suggestion(s). Review and edit the URLs before generating.`,
+        });
+      } else {
+        toast({
+          title: "No Suggestions",
+          description: "Could not generate anchor link suggestions. Try adjusting your title or keywords.",
+        });
+      }
+    } catch (err: any) {
+      console.error('Error suggesting anchor links:', err);
+      toast({
+        title: "Error",
+        description: "Failed to generate anchor link suggestions",
+        variant: "destructive",
+      });
+    } finally {
+      setIsLoadingAnchorSuggestions(false);
     }
   };
 
@@ -1456,6 +1548,88 @@ export const GenerateContentDialog = ({
                    : isCommunity ? 'Topics and tags relevant to the community'
                    : 'These keywords will be naturally integrated into your content'}
                 </p>
+              </div>
+
+              {/* Target Anchor Text -> Link mapping */}
+              <div>
+                <div className="flex items-center justify-between mb-1">
+                  <Label>Target Anchor Text &rarr; Link (optional)</Label>
+                  <div className="flex gap-1">
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      onClick={handleSuggestAnchorLinks}
+                      disabled={isLoadingAnchorSuggestions}
+                      className="h-7 text-xs"
+                    >
+                      {isLoadingAnchorSuggestions ? (
+                        <>
+                          <Loader2 className="h-3 w-3 mr-1 animate-spin" />
+                          Suggesting...
+                        </>
+                      ) : (
+                        <>
+                          <Sparkles className="h-3 w-3 mr-1" />
+                          AI Suggest
+                        </>
+                      )}
+                    </Button>
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      className="h-7 text-xs"
+                      onClick={() => setAnchorLinks([...anchorLinks, { anchor_text: '', url: '' }])}
+                    >
+                      + Add Link
+                    </Button>
+                  </div>
+                </div>
+                {anchorLinks.length === 0 ? (
+                  <p className="text-xs text-muted-foreground">
+                    Add exact phrases to turn into links in the content, e.g. "payment gateway guide" &rarr; https://yoursite.com/guide
+                  </p>
+                ) : (
+                  <div className="space-y-2">
+                    {anchorLinks.map((link, idx) => (
+                      <div key={idx} className="flex items-center gap-2">
+                        <Input
+                          className="flex-1 h-8 text-sm"
+                          placeholder="Anchor text (e.g. payment gateway guide)"
+                          value={link.anchor_text}
+                          onChange={(e) => {
+                            const next = [...anchorLinks];
+                            next[idx] = { ...next[idx], anchor_text: e.target.value };
+                            setAnchorLinks(next);
+                          }}
+                        />
+                        <Input
+                          className="flex-1 h-8 text-sm"
+                          placeholder="https://link.com"
+                          value={link.url}
+                          onChange={(e) => {
+                            const next = [...anchorLinks];
+                            next[idx] = { ...next[idx], url: e.target.value };
+                            setAnchorLinks(next);
+                          }}
+                        />
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          size="sm"
+                          className="h-8 w-8 p-0"
+                          onClick={() => setAnchorLinks(anchorLinks.filter((_, i) => i !== idx))}
+                        >
+                          <X className="h-4 w-4" />
+                        </Button>
+                      </div>
+                    ))}
+                    <p className="text-[10px] text-muted-foreground">
+                      Each exact phrase will appear once in the content as a link to its URL.
+                    </p>
+                  </div>
+                )}
               </div>
 
               <div className="grid grid-cols-2 gap-4">
@@ -2202,6 +2376,7 @@ export const GenerateContentDialog = ({
                   // Go back to outline not generated state
                   setOutline([]);
                   setOutlineGenerated(false);
+                  setOriginalOutlineWords(null);
                 } else if (step > 1) {
                   setStep(step - 1);
                 } else {
