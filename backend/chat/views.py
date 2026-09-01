@@ -27,6 +27,33 @@ from alerts.models import AlertRule
 
 logger = logging.getLogger(__name__)
 
+# Free OpenRouter models so the chatbot works when the account has no credits.
+# minimax/minimax-m3:free supports tool/function calling (verified). Tried in
+# order; first that responds wins.
+FREE_CHAT_MODELS = [
+    'minimax/minimax-m3:free',
+    'google/gemma-4-31b-it:free',
+    'z-ai/glm-5.2:free',
+]
+
+
+def _chat_completion_free(client, **kwargs):
+    """chat.completions.create — PAID model first, then FREE models as a
+    fallback. A funded key gets full paid quality; a $0 balance still works on
+    free models instead of failing with a 402. Raises the last error only if
+    every model is unavailable."""
+    paid_model = getattr(settings, "OPENROUTER_INTERNAL_MODEL", "openai/gpt-5-mini")
+    last_err = None
+    for idx, model in enumerate([paid_model] + FREE_CHAT_MODELS):
+        try:
+            return client.chat.completions.create(model=model, **kwargs)
+        except Exception as e:
+            last_err = e
+            tag = "Paid" if idx == 0 else "Free"
+            logger.warning("%s chat model %s unavailable: %s", tag, model, e)
+            continue
+    raise last_err or Exception("No chat model available")
+
 
 class ChatViewSet(viewsets.ViewSet):
     """
@@ -435,8 +462,8 @@ Remember: You're helping users improve their visibility in AI-generated response
 
         try:
             # Call ChatGPT with function calling
-            response = openai_client.chat.completions.create(
-                model=getattr(settings, "OPENROUTER_INTERNAL_MODEL", "openai/gpt-5-mini"),  # Cost-effective model
+            response = _chat_completion_free(
+                openai_client,
                 messages=messages,
                 tools=CHAT_TOOLS,
                 tool_choice="auto",
@@ -489,8 +516,8 @@ Remember: You're helping users improve their visibility in AI-generated response
                     })
 
                 # Get final response from ChatGPT
-                final_response = openai_client.chat.completions.create(
-                    model=getattr(settings, "OPENROUTER_INTERNAL_MODEL", "openai/gpt-5-mini"),
+                final_response = _chat_completion_free(
+                    openai_client,
                     messages=messages,
                     temperature=0.7
                 )

@@ -2831,6 +2831,46 @@ Return ONLY the regenerated HTML content for this specific section."""
         except Exception as e:
             raise Exception(f"Claude API error during regeneration: {str(e)}")
 
+    # Free OpenRouter models used when the account has no credits, so
+    # outline generation still works. Tried in order; first that returns
+    # content wins. Ordered by observed reliability.
+    _FREE_MODELS = [
+        'minimax/minimax-m3:free',
+        'google/gemma-4-31b-it:free',
+        'z-ai/glm-5.2:free',
+    ]
+
+    def _create_with_fallback(self, **kwargs):
+        """Try the configured (paid) model FIRST for best quality; if it fails
+        — e.g. the account is out of credits (402) — fall back to the free
+        models so the feature still works. Returns the first response that has
+        content. Raises only if every model is unavailable.
+
+        This is what makes a funded OpenRouter key give full paid quality while
+        a $0 balance still works on free models instead of erroring."""
+        last_err = None
+        # 1. Paid / configured model first.
+        try:
+            resp = self.client.messages.create(model=self.model, **kwargs)
+            if getattr(resp, 'content', None) and (resp.content[0].text or '').strip():
+                return resp
+            last_err = Exception(f"{self.model} returned empty content")
+        except Exception as e:
+            last_err = e
+            logger.warning("Paid model %s unavailable (%s); falling back to free models", self.model, e)
+        # 2. Free models fallback.
+        for model in self._FREE_MODELS:
+            try:
+                resp = self.client.messages.create(model=model, max_retries=2, **kwargs)
+                if getattr(resp, 'content', None) and (resp.content[0].text or '').strip():
+                    return resp
+                last_err = Exception(f"{model} returned empty content")
+            except Exception as e:
+                last_err = e
+                logger.warning("Free model %s unavailable: %s", model, e)
+                continue
+        raise last_err or Exception("No model available")
+
     def generate_outline(self, params, extended_tokens=False):
         """
         Generate a content outline based on provided parameters
@@ -3000,8 +3040,8 @@ Return ONLY the JSON array, nothing else."""
         )
 
         try:
-            response = self.client.messages.create(
-                model=self.model,
+            # Use free models so outline generation works without credits.
+            response = self._create_with_fallback(
                 max_tokens=outline_max_tokens,
                 temperature=0.7,
                 system=system_prompt,
@@ -3054,8 +3094,7 @@ Return ONLY the JSON array, nothing else."""
                 # Retry: ask Claude to fix the malformed JSON. Use the same
                 # token budget as the original outline call so the repair
                 # itself isn't truncated.
-                fix_response = self.client.messages.create(
-                    model=self.model,
+                fix_response = self._create_with_fallback(
                     max_tokens=outline_max_tokens,
                     temperature=0,
                     messages=[
@@ -3786,8 +3825,7 @@ The content may contain locked placeholders written as HTML comments, e.g. <!--P
         last_error = None
         for attempt in range(max_retries):
             try:
-                response = self.client.messages.create(
-                    model=self.model,
+                response = self._create_with_fallback(
                     # Scaled to the article: a rewrite emits roughly what it was
                     # given, so a flat 8192 truncated everything over ~30k chars.
                     max_tokens=_output_ceiling(content_html),
@@ -3945,8 +3983,7 @@ Any HTML comment like <!--PMX_FROZEN_0--> is a locked placeholder — reproduce 
         last_error = None
         for attempt in range(max_retries):
             try:
-                response = self.client.messages.create(
-                    model=self.model,
+                response = self._create_with_fallback(
                     max_tokens=_output_ceiling(content_html),
                     temperature=0.1,
                     system=system_prompt,

@@ -4274,12 +4274,13 @@ FREE_SUGGESTION_MODELS = [
 
 
 def _suggest_with_free_model(generator, system_prompt, user_prompt, max_tokens=800):
-    """Run a small suggestion prompt on the first available FREE OpenRouter
-    model, so keyword/anchor suggestions cost no credits. Returns
-    (response_text, model_used). Raises the last error only if every free model
-    is unavailable (the caller turns that into a friendly message)."""
+    """Run a small suggestion prompt, PAID model first, then FREE models as a
+    fallback. A funded key gets full paid quality; a $0 balance still works on
+    free models instead of erroring. Returns (response_text, model_used).
+    Raises the last error only if every model is unavailable."""
     last_err = None
-    for model in FREE_SUGGESTION_MODELS:
+    # Paid / configured model first, then the free models.
+    for idx, model in enumerate([generator.model] + FREE_SUGGESTION_MODELS):
         try:
             resp = generator.client.messages.create(
                 model=model,
@@ -4295,11 +4296,12 @@ def _suggest_with_free_model(generator, system_prompt, user_prompt, max_tokens=8
             last_err = Exception(f"{model} returned empty content")
         except Exception as e:
             last_err = e
-            logger.warning("Free suggestion model %s unavailable: %s", model, e)
+            tag = "Paid" if idx == 0 else "Free"
+            logger.warning("%s suggestion model %s unavailable: %s", tag, model, e)
             continue
     if last_err:
         raise last_err
-    raise Exception("No free suggestion model returned content")
+    raise Exception("No suggestion model returned content")
 
 
 @api_view(['POST'])
