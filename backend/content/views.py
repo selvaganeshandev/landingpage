@@ -27,6 +27,13 @@ from .serializers import (
     BulkUploadBatchSerializer, BulkUploadBatchListSerializer, BulkUploadItemSerializer
 )
 from .claude_content_generator import ClaudeContentGenerator
+from .ai_detection import (
+    AIDetectionError,
+    AIDetectionModelLoading,
+    detect_ai_text,
+    save_detection,
+    strip_html_tags,
+)
 from .humanise_validation import validate_pass_output as _validate_pass_output
 from domains.models import Domain, ReferenceDocument
 from django.db import transaction, connection
@@ -1862,13 +1869,7 @@ def test_cms_provider_connection(request, provider_id):
 
 def _strip_html_tags(html_content: str) -> str:
     """Strip HTML tags from content and return plain text"""
-    if not html_content:
-        return ""
-    # Remove HTML tags
-    clean = re.sub(r'<[^>]+>', '', html_content)
-    # Remove extra whitespace
-    clean = re.sub(r'\s+', ' ', clean).strip()
-    return clean
+    return strip_html_tags(html_content)
 
 
 @api_view(['POST'])
@@ -1892,6 +1893,9 @@ def detect_ai_content(request):
         "confidence": float (0-100),
         "checked_at": str (ISO timestamp, only if content_id provided)
     }
+
+    The detector itself lives in content.ai_detection so the batch command
+    (manage.py detect_ai_drafts) scores drafts the same way.
     """
     try:
         text = request.data.get('text', '')
@@ -1903,130 +1907,46 @@ def detect_ai_content(request):
                 'message': 'Text is required for AI detection'
             }, status=status.HTTP_400_BAD_REQUEST)
 
-        # Strip HTML tags if present
-        plain_text = _strip_html_tags(text)
-
-        if len(plain_text) < 50:
-            return Response({
-                'status': 'error',
-                'message': 'Text must be at least 50 characters for accurate detection'
-            }, status=status.HTTP_400_BAD_REQUEST)
-
-        # Truncate to ~1500 characters (RoBERTa has 514 token limit, ~3 chars per token)
-        if len(plain_text) > 1500:
-            plain_text = plain_text[:1500]
-
-        # Get Hugging Face API key from settings
-        hf_api_key = config('HUGGINGFACE_API_KEY', default='')
-
-        if not hf_api_key:
-            return Response({
-                'status': 'error',
-                'message': 'Hugging Face API key not configured. Please add HUGGINGFACE_API_KEY to your environment.'
-            }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
-
-        # Call Hugging Face Inference API with ChatGPT detector model (more accurate for modern AI)
-        api_url = "https://router.huggingface.co/hf-inference/models/Hello-SimpleAI/chatgpt-detector-roberta"
-
-        headers = {
-            "Authorization": f"Bearer {hf_api_key}",
-            "Content-Type": "application/json"
-        }
-
-        payload = {
-            "inputs": plain_text
-        }
-
-        response = requests.post(api_url, headers=headers, json=payload, timeout=30)
-
-        if response.status_code == 503:
-            # Model is loading
+        try:
+            result = detect_ai_text(text)
+        except AIDetectionModelLoading as exc:
             return Response({
                 'status': 'loading',
-                'message': 'AI detection model is loading. Please try again in a few seconds.',
-                'estimated_time': response.json().get('estimated_time', 20)
+                'message': str(exc),
+                'estimated_time': exc.estimated_time,
             }, status=status.HTTP_503_SERVICE_UNAVAILABLE)
-
-        if not response.ok:
-            logger.error(f"Hugging Face API error: {response.status_code} - {response.text}")
+        except AIDetectionError as exc:
             return Response({
                 'status': 'error',
-                'message': f'AI detection service error: {response.text}'
-            }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+                'message': str(exc),
+            }, status=exc.status_code)
 
-        result = response.json()
+        checked_at = None
+        # Save results to database if content_id is provided
+        if content_id:
+            try:
+                content_obj = GeneratedContent.objects.get(
+                    id=content_id,
+                    domain__organisation=request.user.organisation
+                )
+                checked_at = save_detection(content_obj, result).isoformat()
+                logger.info(f"AI detection results saved for content {content_id}")
+            except GeneratedContent.DoesNotExist:
+                logger.warning(f"Content {content_id} not found for AI detection save")
 
-        # Parse the response - roberta-base-openai-detector returns classifications
-        # Example: [[{"label": "Fake", "score": 0.9}, {"label": "Real", "score": 0.1}]]
-        if isinstance(result, list) and len(result) > 0:
-            classifications = result[0] if isinstance(result[0], list) else result
+        response_data = {
+            'status': 'success',
+            'ai_score': round(result['ai_score'], 1),
+            'human_score': round(result['human_score'], 1),
+            'label': result['label'],
+            'confidence': round(result['confidence'], 1),
+            'text_analyzed_length': result['text_analyzed_length'],
+        }
+        if checked_at:
+            response_data['checked_at'] = checked_at
 
-            ai_score = 0
-            human_score = 0
+        return Response(response_data, status=status.HTTP_200_OK)
 
-            for item in classifications:
-                label = item.get('label', '').lower()
-                score = item.get('score', 0) * 100
-
-                # Handle different model label formats
-                if label in ['fake', 'chatgpt', 'ai', 'gpt']:  # AI-generated labels
-                    ai_score = score
-                elif label in ['real', 'human']:  # Human-written labels
-                    human_score = score
-
-            # Determine label and confidence
-            if ai_score > human_score:
-                label = "AI-generated"
-                confidence = ai_score
-            else:
-                label = "Human-written"
-                confidence = human_score
-
-            checked_at = None
-            # Save results to database if content_id is provided
-            if content_id:
-                try:
-                    content_obj = GeneratedContent.objects.get(
-                        id=content_id,
-                        domain__organisation=request.user.organisation
-                    )
-                    content_obj.ai_detection_score = round(ai_score, 2)
-                    content_obj.human_detection_score = round(human_score, 2)
-                    content_obj.ai_detection_label = label
-                    content_obj.ai_detection_checked_at = timezone.now()
-                    content_obj.save(update_fields=[
-                        'ai_detection_score', 'human_detection_score',
-                        'ai_detection_label', 'ai_detection_checked_at'
-                    ])
-                    checked_at = content_obj.ai_detection_checked_at.isoformat()
-                    logger.info(f"AI detection results saved for content {content_id}")
-                except GeneratedContent.DoesNotExist:
-                    logger.warning(f"Content {content_id} not found for AI detection save")
-
-            response_data = {
-                'status': 'success',
-                'ai_score': round(ai_score, 1),
-                'human_score': round(human_score, 1),
-                'label': label,
-                'confidence': round(confidence, 1),
-                'text_analyzed_length': len(plain_text)
-            }
-            if checked_at:
-                response_data['checked_at'] = checked_at
-
-            return Response(response_data, status=status.HTTP_200_OK)
-        else:
-            logger.error(f"Unexpected response format from Hugging Face: {result}")
-            return Response({
-                'status': 'error',
-                'message': 'Unexpected response from AI detection service'
-            }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
-
-    except requests.exceptions.Timeout:
-        return Response({
-            'status': 'error',
-            'message': 'AI detection service timed out. Please try again.'
-        }, status=status.HTTP_504_GATEWAY_TIMEOUT)
     except Exception as e:
         logger.error(f"Error detecting AI content: {str(e)}", exc_info=True)
         return Response({

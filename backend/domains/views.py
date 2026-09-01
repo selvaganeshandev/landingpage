@@ -34,6 +34,7 @@ from authentication.serializers import AccountSerializer
 from authentication.models import Account
 from keywords.models import Keyword, SecondaryKeyword
 import json
+import re
 import logging
 import requests
 from types import SimpleNamespace
@@ -1136,7 +1137,9 @@ def _fetch_pagespeed_data(url, strategy='mobile'):
         'category': 'performance'
     }
     try:
-        resp = req.get(psi_url, params=params, timeout=25)
+        # Uncached PSI runs regularly exceed 25s (Google's Lighthouse pass for a
+        # heavy page is 30-60s); a short timeout left every CWV check blank.
+        resp = req.get(psi_url, params=params, timeout=60)
         if resp.status_code == 200:
             data = resp.json()
             lighthouse = data.get('lighthouseResult', {})
@@ -1209,11 +1212,92 @@ def _fetch_html_content(url, scrapingdog_api_key=None):
     return html_content, load_time
 
 
+def _response_text(resp, limit=200000):
+    """Body of a 200 response as text (empty for anything else)."""
+    if resp is None or resp.status_code != 200:
+        return ''
+    try:
+        return (resp.text or '')[:limit]
+    except Exception:
+        return ''
+
+
+def _inspect_text_file(resp, excerpt_chars=4000):
+    """Presence + excerpt for a plain-text well-known file (llms.txt, ai.txt).
+
+    A 200 that carries HTML is a soft 404 - many hosts serve the home page
+    for any unknown path - and counts as missing.
+    """
+    text = _response_text(resp)
+    head = text[:500].lower().lstrip()
+    is_html = bool(text) and (head.startswith('<!doctype') or '<html' in head)
+    exists = bool(text) and not is_html
+    return {
+        'exists': exists,
+        'soft_404': is_html,
+        'size_bytes': len(text.encode('utf-8', 'ignore')) if exists else 0,
+        'content': text[:excerpt_chars] if exists else '',
+        'truncated': exists and len(text) > excerpt_chars,
+    }
+
+
+def _inspect_llms_txt(resp):
+    """llms.txt presence, excerpt and a light structure check.
+
+    The llmstxt.org convention: an H1 title, optional blockquote summary,
+    then "## " sections of markdown link lists. Counts are reported rather
+    than enforced.
+    """
+    info = _inspect_text_file(resp)
+    full = _response_text(resp) if info['exists'] else ''
+    lines = [ln.strip() for ln in full.splitlines()]
+    sections = [ln.lstrip('#').strip() for ln in lines if ln.startswith('## ')]
+    links = re.findall(r'\]\((https?://[^)\s]+)\)', full)
+    info.update({
+        'structure_valid': bool(lines) and any(ln.startswith('# ') for ln in lines[:5]),
+        'title': next((ln[2:].strip() for ln in lines if ln.startswith('# ')), ''),
+        'sections': len(sections),
+        'section_names': sections[:20],
+        'links': len(links),
+        'line_count': len(lines),
+    })
+    return info
+
+
+def _inspect_jsonld_block(script_tag):
+    """Parse one <script type="application/ld+json"> block.
+
+    Returns {'valid', 'types', 'error'}. Valid means the body is JSON and
+    carries an @type (directly, in a list, or inside @graph) - the minimum
+    for a crawler to use it. HTML comments wrapping the JSON are tolerated
+    because several CMS plugins emit them.
+    """
+    body = re.sub(r'^<script[^>]*>', '', script_tag.strip(), flags=re.IGNORECASE)
+    body = re.sub(r'</script>$', '', body, flags=re.IGNORECASE).strip()
+    body = re.sub(r'^<!--|-->$', '', body).strip()
+    try:
+        data = json.loads(body)
+    except ValueError as exc:
+        return {'valid': False, 'types': [], 'error': f'Invalid JSON: {exc}'[:200]}
+    nodes = data if isinstance(data, list) else [data]
+    types = []
+    for node in nodes:
+        if not isinstance(node, dict):
+            continue
+        for item in [node] + list(node.get('@graph') or []):
+            if isinstance(item, dict) and item.get('@type'):
+                t = item['@type']
+                types.extend(t if isinstance(t, list) else [t])
+    if not types:
+        return {'valid': False, 'types': [], 'error': 'No @type found'}
+    return {'valid': True, 'types': [str(t) for t in types], 'error': ''}
+
+
 def _run_website_technical_checks(url, html_content, mobile_psi, desktop_psi):
     """
-    Run all 11 Website Technical checks.
+    Run the 11 scored Website Technical checks (60 points) plus two
+    informational 0-point checks (ai.txt, IndexNow).
     Returns list of check dicts with category='website_technical'.
-    Total max: 60 points.
     """
     import requests as req
     from urllib.parse import urljoin
@@ -1364,15 +1448,33 @@ def _run_website_technical_checks(url, html_content, mobile_psi, desktop_psi):
         })
 
     # 6. Schema Tag (8 pts)
+    # Score stays presence-based so the stored history series does not shift;
+    # per-block JSON-LD validity and @type are reported alongside.
     schema_scripts = re.findall(r'<script\s+type=["\']application/ld\+json["\'][^>]*>.*?</script>', html_content, re.IGNORECASE | re.DOTALL)
+    jsonld_blocks = [_inspect_jsonld_block(block) for block in schema_scripts]
+    jsonld_valid = [b for b in jsonld_blocks if b['valid']]
+    if schema_scripts:
+        schema_types = sorted({t for b in jsonld_valid for t in b['types']})
+        schema_message = (
+            f'Found {len(schema_scripts)} structured data (Schema.org) blocks, '
+            f'{len(jsonld_valid)} valid JSON-LD'
+            + (f' ({", ".join(schema_types[:8])})' if schema_types else '')
+        )
+    else:
+        schema_message = 'No structured data (Schema.org) found'
     checks.append({
         'name': 'Schema Tag',
         'category': 'website_technical',
         'status': 'pass' if len(schema_scripts) > 0 else 'fail',
         'score': 8 if len(schema_scripts) > 0 else 0,
         'max_score': 8,
-        'message': f'Found {len(schema_scripts)} structured data (Schema.org) blocks' if schema_scripts else 'No structured data (Schema.org) found',
+        'message': schema_message,
         'importance': 'high',
+        'details': {
+            'blocks_found': len(schema_scripts),
+            'blocks_valid': len(jsonld_valid),
+            'blocks': jsonld_blocks,
+        },
     })
 
     # 7. Canonical Tags (5 pts)
@@ -1410,7 +1512,7 @@ def _run_website_technical_checks(url, html_content, mobile_psi, desktop_psi):
 
     # Fire all URL checks in parallel
     url_checks_to_make = [
-        '/llms.txt', '/robots.txt',
+        '/llms.txt', '/ai.txt', '/robots.txt',
         '/sitemap.xml', '/sitemap_index.xml', '/sitemap.xml.gz', '/sitemap.txt',
         '/sitemap', '/html-sitemap', '/sitemap.html', '/site-map',
     ]
@@ -1423,16 +1525,64 @@ def _run_website_technical_checks(url, html_content, mobile_psi, desktop_psi):
             url_results[path] = resp
 
     # 8. LLM Txt (3 pts)
-    llms_resp = url_results.get('/llms.txt')
-    llms_exists = llms_resp is not None and llms_resp.status_code == 200
+    llms_info = _inspect_llms_txt(url_results.get('/llms.txt'))
+    llms_exists = llms_info['exists']
+    if llms_exists:
+        llms_message = (
+            f"llms.txt found - {llms_info['sections']} sections, "
+            f"{llms_info['links']} links, {llms_info['size_bytes']} bytes"
+        )
+        if not llms_info['structure_valid']:
+            llms_message += ' (no leading "# Title" heading - check structure)'
+    elif llms_info['soft_404']:
+        llms_message = 'llms.txt not found (server returned an HTML page instead of text)'
+    else:
+        llms_message = 'llms.txt not found (recommended for AI optimization)'
     checks.append({
         'name': 'LLM Txt',
         'category': 'website_technical',
         'status': 'pass' if llms_exists else 'warning',
         'score': 3 if llms_exists else 0,
         'max_score': 3,
-        'message': 'llms.txt found - provides AI crawler guidance' if llms_exists else 'llms.txt not found (recommended for AI optimization)',
+        'message': llms_message,
         'importance': 'medium',
+        'details': llms_info,
+    })
+
+    # 8b. ai.txt (informational, 0 pts) - the spawning.ai convention for AI
+    # training permissions. Not scored: adoption is low and scoring it would
+    # shift every stored history point.
+    ai_txt_info = _inspect_text_file(url_results.get('/ai.txt'))
+    checks.append({
+        'name': 'AI Txt',
+        'category': 'website_technical',
+        'status': 'pass' if ai_txt_info['exists'] else 'warning',
+        'score': 0,
+        'max_score': 0,
+        'message': (
+            f"ai.txt found ({ai_txt_info['size_bytes']} bytes)" if ai_txt_info['exists']
+            else 'ai.txt not found (optional - declares AI training permissions)'
+        ),
+        'importance': 'low',
+        'details': ai_txt_info,
+    })
+
+    # 8c. IndexNow (informational, 0 pts). The key file is named after the
+    # key itself, so absence cannot be proven from outside; report any
+    # reference visible in robots.txt or the page source.
+    robots_body = _response_text(url_results.get('/robots.txt'))
+    indexnow_seen = 'indexnow' in (robots_body + html_content[:200000]).lower()
+    checks.append({
+        'name': 'IndexNow',
+        'category': 'website_technical',
+        'status': 'pass' if indexnow_seen else 'warning',
+        'score': 0,
+        'max_score': 0,
+        'message': (
+            'IndexNow reference found in robots.txt or page source' if indexnow_seen
+            else 'No IndexNow reference visible (the key file is named after the key, so this is not proof of absence)'
+        ),
+        'importance': 'low',
     })
 
     # 9. Robots.txt (4 pts)
@@ -2353,15 +2503,16 @@ def domain_health_check(request, domain_id):
                     'error': f'Unable to access website: {str(e)}'
                 }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
-            # Wait for PageSpeed (with short timeout since they started in parallel with HTML)
+            # Wait for PageSpeed. Both futures started alongside the HTML fetch, so
+            # the worst case is one PSI timeout (60s) plus a little slack, not two.
             mobile_psi = None
             desktop_psi = None
             try:
-                mobile_psi = future_mobile.result(timeout=30)
+                mobile_psi = future_mobile.result(timeout=65)
             except Exception:
                 logger.warning(f"PageSpeed mobile timed out for {url}")
             try:
-                desktop_psi = future_desktop.result(timeout=30)
+                desktop_psi = future_desktop.result(timeout=65)
             except Exception:
                 logger.warning(f"PageSpeed desktop timed out for {url}")
 
