@@ -35,9 +35,12 @@ def register(mcp: Any, client: PromptmaxxClient) -> None:
     def get_site_health(domain_id: int) -> dict:
         """Run the site-health audit for a client's website.
 
-        Checks llms.txt presence, robots.txt, Schema.org structured-data
-        blocks, and XML/HTML sitemaps, with scores per check. Results are
-        stored server-side in DomainHealthCheck with history.
+        Checks llms.txt (presence plus its content, title, section and
+        link counts under details), robots.txt, Schema.org JSON-LD blocks
+        (per-block validity and @type under details), XML/HTML sitemaps,
+        Core Web Vitals, and two informational 0-point checks: ai.txt and
+        a visible IndexNow reference. Scores per check; results are stored
+        server-side in DomainHealthCheck with history.
 
         Slow: this performs a live crawl of the client's site (typically
         several seconds), not a cached read. Call it when asked about

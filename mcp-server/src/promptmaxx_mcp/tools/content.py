@@ -44,6 +44,12 @@ def register(mcp: Any, client: PromptmaxxClient) -> None:
     @guard_tool_errors
     def get_content(content_id: int) -> dict:
         """One generated-content artifact by id, with full content_html,
-        outline, AI-detection fields, and humanise state.
+        outline, meta_title/meta_description, AI-detection fields, and
+        humanise state.
+
+        AI-detection fields are null until the draft has been scored -
+        from the Detect AI button, or in bulk by the operator command
+        `manage.py detect_ai_drafts`. Missing meta tags are filled by
+        `manage.py backfill_meta_tags`.
         """
         return client.get(f"/content/{content_id}/")
