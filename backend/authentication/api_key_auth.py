@@ -21,7 +21,15 @@ class ApiKeyAuthentication(authentication.BaseAuthentication):
         if not header:
             return None
         parts = header.split()
-        if len(parts) != 2 or parts[0].lower() != KEYWORD.lower():
+        # `Api-Key pmxk_...` is ours; so is `Bearer pmxk_...` — external
+        # consumers (e.g. Enque) default to Bearer, and the pmxk_ prefix can
+        # never collide with a JWT, so claim it here instead of letting the
+        # JWT authenticator fail it.
+        if len(parts) != 2:
+            return None
+        scheme = parts[0].lower()
+        if scheme != KEYWORD.lower() and not (
+                scheme == 'bearer' and parts[1].startswith(PREFIX)):
             return None  # not ours — let JWT auth try
         plaintext = parts[1]
         if not plaintext.startswith(PREFIX):

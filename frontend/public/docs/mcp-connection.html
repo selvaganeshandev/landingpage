@@ -80,6 +80,10 @@ used for — if a key ever surprises you, revoke it.</div>
 You connect to one URL with your API key:</p>
 <pre>URL:            https://app.promptmaxx.co/mcp
 Authorization:  Bearer pmxk_your_key_here      <span style="color:#8F87A6"># Api-Key pmxk_… also accepted</span></pre>
+<p>Both schemes go <b>inside the <code>Authorization</code> header</b> — a bare <code>Api-Key:</code>
+header of its own is not read. An invalid, revoked or expired key is rejected when you connect
+(the MCP <code>initialize</code> call returns 401), so a bad key fails fast instead of at the
+first tool call.</p>
 <pre>Enque / Claude / your agent (anywhere)
       │  https://app.promptmaxx.co/mcp  + the key
       ▼
@@ -96,10 +100,16 @@ python -m promptmaxx_mcp --http          # serves 127.0.0.1:8010 internally
 # mcp-server/.env: PROMPTMAXX_BASE_URL=http://localhost:8000  (backend on the same machine)</pre>
 <p>Each request authenticates with the key it carries, so several consumers with different keys —
 even different organisations — can share one MCP endpoint safely.</p>
-<div class="note"><b>Enque:</b> Enque's tool system is manifest-based, not an MCP client — connect
-Enque by pointing its tool manifests (or its build-with-AI tool creator) at the Promptmaxx API
-directly with the same <code>Api-Key</code> header. The key and its permissions are identical
-either way. Claude <i>Desktop</i> similarly can't attach a raw bearer header to remote connectors —
+<div class="note"><b>Enque (and other REST consumers):</b> Enque's tool system is manifest-based,
+not an MCP client — point its tool manifests (or its build-with-AI tool creator) at the Promptmaxx
+REST API at <code>https://promtmaxxservice.rankmax.io</code> with the same key
+(<code>Authorization: Bearer pmxk_…</code> or <code>Authorization: Api-Key pmxk_…</code>).
+Start with the discovery pair: <code>GET /v1/me</code> verifies a key at save time (account,
+organisation, read-only flag) and <code>GET /v1/workspaces</code> lists the clients the key may
+reach as <code>{id, name, url}</code> — that <code>id</code> is the <code>domain_id</code> every
+workspace-scoped endpoint takes. Responses carry <code>X-RateLimit-Limit / -Remaining / -Reset</code>;
+429 carries <code>Retry-After</code> (default budget 120 requests/min per key). The key and its
+permissions are identical either way. Claude <i>Desktop</i> similarly can't attach a raw bearer header to remote connectors —
 use Claude Code, or a local stdio bridge.</div>
 <div class="warn"><b>Hosting rules:</b> never expose port 8010 directly to the internet — keep it on
 localhost or a private network and terminate TLS at a reverse proxy (nginx/caddy) if clients
@@ -137,7 +147,10 @@ is chosen per call, and your key's organisation is the hard boundary: ids outsid
 <div class="tw"><table>
   <thead><tr><th>Symptom</th><th>Cause &amp; fix</th></tr></thead>
   <tbody>
-    <tr><td>401 on every call</td><td>Key missing, mistyped, revoked or expired — copy it again from Settings, or mint a new one.</td></tr>
+    <tr><td>401 on every call</td><td>Key missing, mistyped, revoked or expired — copy it again from Settings, or mint a new one. On MCP this now shows up at connect time: <code>initialize</code> itself returns 401.</td></tr>
+    <tr><td>401 with the key in an <code>Api-Key:</code> header</td><td>The scheme belongs inside <code>Authorization</code>: send <code>Authorization: Api-Key pmxk_…</code> (or <code>Authorization: Bearer pmxk_…</code>).</td></tr>
+    <tr><td>429 Too Many Requests</td><td>Per-key budget exhausted (default 120/min). Honour <code>Retry-After</code> and pace with the <code>X-RateLimit-*</code> headers on the REST API.</td></tr>
+    <tr><td>403 "error code: 1010" before any JSON</td><td>Cloudflare bot protection rejected the client's User-Agent/IP, not Promptmaxx — send a descriptive User-Agent; if it persists, the Cloudflare rule needs a skip for this hostname (admin).</td></tr>
     <tr><td>404 for a domain</td><td>The id isn't in your organisation (this is deliberate — existence leaks nothing). Call <code>list_clients</code> for valid ids.</td></tr>
     <tr><td>403 on an action</td><td>Service keys are read-only by design. Writes are impossible with a key.</td></tr>
     <tr><td>Connection refused</td><td>The MCP HTTP process isn't running on the server, or you're using the wrong host/port.</td></tr>

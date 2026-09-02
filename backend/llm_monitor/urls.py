@@ -40,6 +40,8 @@ urlpatterns = [
     path('misinformation/', include('misinformation.urls')),
     path('content/', include('content.urls')),
     path('seo/', include('seo_rankings.urls')),
+    # Public v1 surface for external consumers (workspace picker + key verification)
+    path('v1/', include('public_api.urls')),
     path('', include('chat.urls')),
 ]
 
