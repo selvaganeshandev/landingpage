@@ -85,6 +85,43 @@ def get_openai_client():
         raise Exception(f"Failed to initialize internal LLM client: {e}")
 
 
+# Free OpenRouter models used as a fallback when the internal (paid) model 402s
+# on an empty balance — so domain analysis and keyword seeding keep working at
+# $0, exactly like the chat/outline/humanize paths already do. A funded key
+# still gets full paid quality because the paid model is always tried first.
+FREE_INTERNAL_MODELS = [
+    'minimax/minimax-m3:free',
+    'google/gemma-4-31b-it:free',
+    'z-ai/glm-5.2:free',
+]
+
+
+def create_with_free_fallback(client, **kwargs):
+    """chat.completions.create — PAID internal model first, then FREE models.
+
+    A funded key gets full paid quality; a $0 balance still works on free models
+    instead of failing with a 402. Any ``model`` in kwargs is ignored in favour
+    of the configured internal model for the first attempt. Reasoning-only params
+    (extra_body) are dropped on the free attempts, since the free models are not
+    reasoning models. Raises the last error only if every model is unavailable.
+    """
+    paid_model = getattr(settings, "OPENROUTER_INTERNAL_MODEL", "openai/gpt-5-mini")
+    kwargs.pop('model', None)
+    last_err = None
+    for idx, model in enumerate([paid_model] + FREE_INTERNAL_MODELS):
+        call_kwargs = dict(kwargs)
+        if idx > 0:
+            call_kwargs.pop('extra_body', None)
+        try:
+            return client.chat.completions.create(model=model, **call_kwargs)
+        except Exception as e:
+            last_err = e
+            tag = "Paid" if idx == 0 else "Free"
+            logger.warning("%s internal model %s unavailable: %s", tag, model, e)
+            continue
+    raise last_err or Exception("No internal model available")
+
+
 def _extract_json(text: str, opener: str = '['):
     """Pull the JSON value out of an LLM reply, tolerating the usual damage.
 
@@ -3177,8 +3214,8 @@ def _brand_facts_from_knowledge(brand_name, website):
 
     try:
         client = get_openai_client()
-        response = client.chat.completions.create(
-            model=getattr(settings, "OPENROUTER_INTERNAL_MODEL", "openai/gpt-5-mini"),
+        response = create_with_free_fallback(
+            client,
             messages=[
                 {"role": "system", "content": system},
                 {"role": "user", "content": f"Brand: {brand_name}\nURL: {website}"},

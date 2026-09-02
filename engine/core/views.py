@@ -379,6 +379,40 @@ def start_prompt_analytics_processing(request):
         }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 
+@api_view(['POST'])
+@permission_classes([AllowAny])
+def start_domain_prompt_refresh(request):
+    """Refresh (re-run) ALL of a domain's prompts on demand — the 'Track Prompts'
+    action. Resets the domain's prompts to INIT and enqueues processing so their
+    mentions are re-measured across platforms. Isolated from the existing
+    prompts/process endpoint; costs tokens, so the UI confirms first."""
+    try:
+        domain_id = request.data.get('domain_id')
+        if not domain_id:
+            return Response({'success': False, 'error': 'domain_id is required'},
+                            status=status.HTTP_400_BAD_REQUEST)
+        domain = get_object_or_404(Domain, id=domain_id)
+        prompts_count = (
+            Prompt.objects.filter(group__domain=domain)
+            .exclude(track_status='PROC').count()
+        )
+        if prompts_count == 0:
+            return Response({'success': False, 'error': 'Domain has no prompts to refresh'},
+                            status=status.HTTP_400_BAD_REQUEST)
+        from .processing_tasks import refresh_domain_prompts_task
+        task = refresh_domain_prompts_task.delay(int(domain_id))
+        return Response({
+            'success': True,
+            'domain_id': int(domain_id),
+            'prompts_count': prompts_count,
+            'task_id': task.id,
+            'message': f'Prompt tracking started for domain: {domain.name}',
+        }, status=status.HTTP_200_OK)
+    except Exception as e:
+        return Response({'success': False, 'error': str(e)},
+                        status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
 @api_view(['GET'])
 @permission_classes([AllowAny])
 def prompt_analytics_status(request, domain_id):

@@ -2739,14 +2739,14 @@ export default function DomainSettings() {
                           <TableCell className="font-medium">{link.topic}</TableCell>
                           <TableCell>
                             <div className="flex flex-wrap gap-1">
-                              {link.keywords.split(',').slice(0, 3).map((kw: string, idx: number) => (
+                              {(link.keywords || '').split(',').map((k: string) => k.trim()).filter((k: string) => k.length > 0).slice(0, 3).map((kw: string, idx: number) => (
                                 <Badge key={idx} variant="secondary" className="text-xs">
-                                  {kw.trim()}
+                                  {kw}
                                 </Badge>
                               ))}
-                              {link.keywords.split(',').length > 3 && (
+                              {(link.keywords || '').split(',').map((k: string) => k.trim()).filter((k: string) => k.length > 0).length > 3 && (
                                 <Badge variant="outline" className="text-xs">
-                                  +{link.keywords.split(',').length - 3} more
+                                  +{(link.keywords || '').split(',').map((k: string) => k.trim()).filter((k: string) => k.length > 0).length - 3} more
                                 </Badge>
                               )}
                             </div>

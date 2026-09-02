@@ -311,6 +311,16 @@ OPENROUTER_INTERNAL_MODEL = config('OPENROUTER_INTERNAL_MODEL', default='openai/
 IMAGE_PROMPT_TEXT_MODEL = config('IMAGE_PROMPT_TEXT_MODEL', default=None)
 IMAGE_RENDER_MODEL = config('IMAGE_RENDER_MODEL', default='google/gemini-2.5-flash-image')
 
+# Content generation output-token caps (configurable per environment).
+#   CONTENT_MAX_TOKENS      - hard ceiling for a single article on the PAID model
+#                             (Sonnet 4.5 supports up to 64000).
+#   CONTENT_FREE_MAX_TOKENS - ceiling applied on the FREE-model fallback, which
+#                             has a smaller output limit; keeps large requests
+#                             from erroring at $0 balance.
+# Both have safe defaults, so an environment without these keys is unaffected.
+CONTENT_MAX_TOKENS = config('CONTENT_MAX_TOKENS', default=64000, cast=int)
+CONTENT_FREE_MAX_TOKENS = config('CONTENT_FREE_MAX_TOKENS', default=8192, cast=int)
+
 # Google Gemini API Configuration (for AI-powered features)
 GOOGLE_GEMINI_API_KEY = config('GOOGLE_GEMINI_API_KEY', default=None)
 # Gemini model name — single source of truth so a model retirement (Google returns

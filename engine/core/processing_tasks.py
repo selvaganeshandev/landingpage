@@ -76,6 +76,35 @@ def scheduler_tick(self):
         process_domain_task.delay(domain_id)
 
 
+@shared_task(bind=True, ignore_result=True, max_retries=1)
+def refresh_domain_prompts_task(self, domain_id):
+    """Re-run all of ONE domain's prompts on demand (the per-domain twin of the
+    weekly sweep, powering the 'Track Prompts' button). Resets the domain's
+    prompts (except in-flight PROC) to INIT and enqueues a processing task for
+    each, so their mention data is refreshed across every enabled platform.
+    Costs tokens, which is why the UI confirms before calling this."""
+    now = timezone.now()
+    ids = list(
+        Prompt.objects
+        .filter(group__domain_id=domain_id)
+        .exclude(track_status='PROC')  # never clobber in-flight work
+        .order_by('id')
+        .values_list('id', flat=True)
+    )
+    if not ids:
+        logger.info(f"[Track Prompts] domain {domain_id}: no prompts to refresh")
+        return {'domain_id': domain_id, 'count': 0}
+    for pid in ids:
+        Prompt.objects.filter(id=pid).update(
+            track_status='INIT',
+            track_message=f"Manual refresh scheduled at {now}",
+            modified_at=now,
+        )
+        process_prompt_analytics_task.delay(pid)
+    logger.info(f"[Track Prompts] domain {domain_id}: re-queued {len(ids)} prompts")
+    return {'domain_id': domain_id, 'count': len(ids)}
+
+
 @shared_task(bind=True, ignore_result=True, max_retries=3)
 def process_prompt_analytics_task(self, prompt_id):
     processor = PromptAnalyticsProcessor(max_concurrent_prompts=getattr(settings, 'MAX_CONCURRENT_PROMPT_ANALYTICS', 10))

@@ -47,7 +47,13 @@ class ContentGenerationRequestSerializer(serializers.Serializer):
     """
     domain_id = serializers.IntegerField(required=True)
     title = serializers.CharField(required=True, max_length=500)
-    keywords = serializers.CharField(required=True)
+    keywords = serializers.CharField(
+        required=True,
+        error_messages={
+            'blank': 'Please add at least one keyword before generating.',
+            'required': 'Please add at least one keyword before generating.',
+        },
+    )
     article_type = serializers.ChoiceField(
         choices=[
             # Article Types

@@ -217,3 +217,86 @@ def check_url(url: str) -> Tuple[Optional[bool], Optional[int], Optional[str]]:
         return INCONCLUSIVE, None, "datablue returned non-JSON"
 
     return _interpret(payload)
+
+
+def scrape_content(url: str, max_chars: int = 12000) -> dict:
+    """Fetch a page's readable body via DataBlue, for the chat "explore website" tool.
+
+    Unlike ``check_url`` (which only decides alive/dead), this returns the page
+    content so the assistant can read and summarise a site the user points it at.
+    Reuses the same endpoint, auth and config as the link checker.
+
+    Returns a plain dict and never raises:
+      * {"url", "title", "status_code", "truncated", "content"}  on success
+      * {"url", "error"}                                          on any failure
+    """
+    if not is_enabled():
+        return {"url": url, "error": "Website exploration is not configured (DataBlue key missing)."}
+
+    api_key = _cfg("DATABLUE_API_KEY", "")
+    endpoint = _cfg("DATABLUE_SCRAPE_URL", DEFAULT_SCRAPE_URL)
+    timeout = _cfg("DATABLUE_SCRAPE_TIMEOUT", 30)
+    body = {_cfg("DATABLUE_SCRAPE_URL_FIELD", "url"): url}
+    extra = _cfg("DATABLUE_SCRAPE_EXTRA", None)
+    if isinstance(extra, dict):
+        body.update(extra)
+
+    try:
+        resp = requests.post(
+            endpoint,
+            headers={
+                "Authorization": f"Bearer {api_key}",
+                "Content-Type": "application/json",
+            },
+            json=body,
+            timeout=timeout,
+        )
+    except requests.Timeout:
+        logger.warning(f"[DataBlue explore] timeout for {url}")
+        return {"url": url, "error": "The site took too long to respond."}
+    except requests.RequestException as e:
+        logger.warning(f"[DataBlue explore] request failed for {url}: {e}")
+        return {"url": url, "error": f"Could not reach the site ({e})."}
+
+    if resp.status_code in (401, 403):
+        logger.error(
+            f"[DataBlue explore] auth rejected ({resp.status_code}) — check DATABLUE_API_KEY"
+        )
+        return {"url": url, "error": "Website exploration service rejected the request (auth)."}
+    if resp.status_code != 200:
+        logger.warning(f"[DataBlue explore] non-200 ({resp.status_code}) for {url}")
+        return {"url": url, "error": f"Website exploration service returned HTTP {resp.status_code}."}
+
+    try:
+        payload = resp.json()
+    except ValueError:
+        return {"url": url, "error": "Website exploration service returned an unreadable response."}
+
+    if not isinstance(payload, dict):
+        return {"url": url, "error": "Website exploration service returned an unexpected response."}
+    if payload.get("success") is False:
+        detail = payload.get("error") or payload.get("detail") or "scrape failed"
+        return {"url": url, "error": f"Could not read the page: {detail}."}
+
+    data = payload.get("data")
+    if not isinstance(data, dict):
+        data = payload
+    metadata = data.get("metadata") if isinstance(data.get("metadata"), dict) else {}
+
+    content = _extract_content(data)
+    if not content:
+        reason = data.get("empty_reason") or data.get("status") or "no readable content"
+        return {"url": url, "error": f"The page returned no readable content ({reason})."}
+
+    content = content.strip()
+    truncated = len(content) > max_chars
+    if truncated:
+        content = content[:max_chars].rstrip() + "\n\n…[content truncated]"
+
+    return {
+        "url": url,
+        "title": metadata.get("title") or "",
+        "status_code": _extract_status(metadata),
+        "truncated": truncated,
+        "content": content,
+    }

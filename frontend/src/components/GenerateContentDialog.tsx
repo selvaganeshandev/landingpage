@@ -10,6 +10,7 @@ import {
 } from "@/components/ui/dialog";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Button } from "@/components/ui/button";
+import { RichTextArea } from "@/components/ui/rich-text-area";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
@@ -475,6 +476,31 @@ export const GenerateContentDialog = ({
       setFormData(prev => ({ ...prev, wordCount: 1500 }));
     }
   }, [formData.articleType]);
+
+  // Advance the wizard, but enforce required fields on the Content Details step
+  // (step 2) so the "keywords required" error surfaces HERE, next to the field,
+  // instead of later on the outline/generation step.
+  const handleNextStep = () => {
+    if (step === 2) {
+      if (!formData.title.trim()) {
+        toast({
+          title: "Title required",
+          description: "Please enter a title before continuing.",
+          variant: "destructive",
+        });
+        return;
+      }
+      if (!formData.keywords.trim()) {
+        toast({
+          title: "Keywords required",
+          description: "Please add at least one keyword before continuing.",
+          variant: "destructive",
+        });
+        return;
+      }
+    }
+    setStep(step + 1);
+  };
 
   const handleGenerate = async () => {
     if (!selectedDomain) {
@@ -1559,26 +1585,6 @@ export const GenerateContentDialog = ({
                       type="button"
                       variant="outline"
                       size="sm"
-                      onClick={handleSuggestAnchorLinks}
-                      disabled={isLoadingAnchorSuggestions}
-                      className="h-7 text-xs"
-                    >
-                      {isLoadingAnchorSuggestions ? (
-                        <>
-                          <Loader2 className="h-3 w-3 mr-1 animate-spin" />
-                          Suggesting...
-                        </>
-                      ) : (
-                        <>
-                          <Sparkles className="h-3 w-3 mr-1" />
-                          AI Suggest
-                        </>
-                      )}
-                    </Button>
-                    <Button
-                      type="button"
-                      variant="outline"
-                      size="sm"
                       className="h-7 text-xs"
                       onClick={() => setAnchorLinks([...anchorLinks, { anchor_text: '', url: '' }])}
                     >
@@ -1899,11 +1905,14 @@ export const GenerateContentDialog = ({
             {/* Additional Instructions - separated from other settings */}
             <div className="pb-5 mb-5 border-b border-border">
               <Label>Additional Instructions for Content Generation</Label>
-              <Textarea
-                value={formData.additionalInstructions}
-                onChange={(e) => setFormData({ ...formData, additionalInstructions: e.target.value })}
+              {/* Rich text brief: user formats visually (bold, headings,
+                  lists); only clean plain text is stored + sent to the AI. The
+                  key remounts a fresh editor whenever the dialog opens. */}
+              <RichTextArea
+                key={open ? "instr-open" : "instr-closed"}
                 placeholder="Any specific instructions for the AI to follow when generating content..."
-                rows={3}
+                minHeight={90}
+                onChange={(text) => setFormData((prev) => ({ ...prev, additionalInstructions: text }))}
               />
             </div>
 
@@ -2389,7 +2398,7 @@ export const GenerateContentDialog = ({
             </Button>
 
             {step < 5 ? (
-              <Button onClick={() => setStep(step + 1)} disabled={!formData.title && step === 2}>
+              <Button onClick={handleNextStep} disabled={!formData.title && step === 2}>
                 Next Step
               </Button>
             ) : outlineGenerated ? (

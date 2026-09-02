@@ -29,6 +29,15 @@ from django.utils import timezone
 
 logger = logging.getLogger(__name__)
 
+# Free OpenRouter models used as a fallback when the internal (paid) model 402s
+# on an empty balance, so "Generate with AI" keeps working at $0. The paid model
+# is always tried first, so a funded key still gets full paid quality.
+FREE_INTERNAL_MODELS = [
+    'minimax/minimax-m3:free',
+    'google/gemma-4-31b-it:free',
+    'z-ai/glm-5.2:free',
+]
+
 # Intent taxonomy. `branded` marks intents that name the brand by definition —
 # the planner uses this to honour the requested branded/unbranded ratio.
 INTENTS = {
@@ -116,19 +125,31 @@ def _chat(client, model, system, user, *, max_tokens=2000, temperature=0.7):
     the answer real headroom. `extra_body` is passed through to OpenRouter and
     is ignored by providers that do not implement it.
     """
-    try:
-        resp = client.chat.completions.create(
-            model=model,
-            messages=[
-                {"role": "system", "content": system},
-                {"role": "user", "content": user},
-            ],
-            temperature=temperature,
-            max_tokens=max_tokens,
-            extra_body={"reasoning": {"effort": "low"}},
-        )
-    except Exception as exc:
-        raise GenerationError(f"LLM call failed: {exc}") from exc
+    messages = [
+        {"role": "system", "content": system},
+        {"role": "user", "content": user},
+    ]
+    # PAID internal model first, then FREE models on failure (e.g. a 402 on an
+    # empty balance). Reasoning-only params (extra_body) are for the paid
+    # reasoning model, so they are dropped on the free attempts.
+    resp = None
+    last_exc = None
+    for idx, _m in enumerate([model] + FREE_INTERNAL_MODELS):
+        kwargs = dict(model=_m, messages=messages, temperature=temperature, max_tokens=max_tokens)
+        if idx == 0:
+            kwargs['extra_body'] = {"reasoning": {"effort": "low"}}
+        try:
+            resp = client.chat.completions.create(**kwargs)
+            break
+        except Exception as exc:
+            last_exc = exc
+            logger.warning(
+                "[PromptGen] %s model %s unavailable: %s",
+                "paid" if idx == 0 else "free", _m, exc,
+            )
+            continue
+    if resp is None:
+        raise GenerationError(f"LLM call failed: {last_exc}") from last_exc
 
     usage = getattr(resp, 'usage', None)
     tokens = getattr(usage, 'total_tokens', 0) or 0

@@ -1695,24 +1695,6 @@ const SeoRankings = () => {
                 </DropdownMenuContent>
               </DropdownMenu>
 
-              {/* Reset keywords — the on-demand twin of the 2 AM nightly run.
-                  The schedule is unchanged; this just means not waiting for it. */}
-              {canEditKeywords && (
-                <Button
-                  variant="outline"
-                  className="gap-2"
-                  disabled={resetting || refreshing || !activeDomainId}
-                  onClick={() => setResetConfirmOpen(true)}
-                >
-                  {resetting ? (
-                    <Loader2 className="h-4 w-4 animate-spin" />
-                  ) : (
-                    <RefreshCw className="h-4 w-4" />
-                  )}
-                  {resetting ? "Resetting..." : "Reset keywords"}
-                </Button>
-              )}
-
               {/* Import Button - hidden, use Add Keyword page instead */}
             </div>
 

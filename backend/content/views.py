@@ -266,7 +266,10 @@ def generate_outline(request):
         serializer = ContentGenerationRequestSerializer(data=request.data)
         if not serializer.is_valid():
             logger.error(f"Outline generation validation errors: {serializer.errors}")
-            error_details = "; ".join([f"{k}: {v}" for k, v in serializer.errors.items()])
+            error_details = "; ".join(
+                f"{k}: {', '.join(str(e) for e in (v if isinstance(v, list) else [v]))}"
+                for k, v in serializer.errors.items()
+            )
             return Response({
                 'status': 'error',
                 'message': f'Invalid request data: {error_details}',

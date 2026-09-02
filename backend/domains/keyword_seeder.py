@@ -273,7 +273,7 @@ def generate_keywords_for_domain(domain, count=DEFAULT_KEYWORD_COUNT):
     generated again — while a failed domain creation is not.
     """
     from keywords.models import Keyword, SecondaryKeyword
-    from .views import get_openai_client
+    from .views import get_openai_client, create_with_free_fallback
 
     existing = set(
         k.lower() for k in Keyword.objects.filter(domain=domain).values_list('keyword', flat=True)
@@ -285,8 +285,8 @@ def generate_keywords_for_domain(domain, count=DEFAULT_KEYWORD_COUNT):
     try:
         client = get_openai_client()
         site_text = _fetch_site_excerpt(domain)
-        response = client.chat.completions.create(
-            model=getattr(settings, "OPENROUTER_INTERNAL_MODEL", "openai/gpt-5-mini"),
+        response = create_with_free_fallback(
+            client,
             messages=[
                 {"role": "system", "content": "You are an expert SEO keyword researcher. Always respond with valid JSON only."},
                 {"role": "user", "content": _build_prompt(domain, int(count), site_text)},

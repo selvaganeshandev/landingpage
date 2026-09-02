@@ -876,6 +876,31 @@ const ContentEditor = () => {
     }
   }, [content, loading]);
 
+  // Guaranteed re-apply of the humanised content to the editor when humanisation
+  // finishes. The poller sets the editor DOM directly, but a re-render or a brief
+  // unmount can race and leave the screen showing the pre-humanise text. This
+  // effect fires only on the transition to 'completed' (keyed on humaniseStatus,
+  // NOT content, so it can never fire on a keystroke and revert an edit), and it
+  // retries a few animation frames so it wins over a late render. It only writes
+  // when the DOM differs from `content`, so it is a no-op once the editor already
+  // shows the humanised result.
+  useEffect(() => {
+    if (humaniseStatus !== 'completed') return;
+    let tries = 0;
+    let raf = 0;
+    const apply = () => {
+      if (editorRef.current && content && editorRef.current.innerHTML !== content) {
+        editorRef.current.innerHTML = content;
+        try { updateMetrics(content); } catch { /* metrics are best-effort */ }
+      }
+      tries += 1;
+      if (tries < 5) raf = requestAnimationFrame(apply);
+    };
+    raf = requestAnimationFrame(apply);
+    return () => cancelAnimationFrame(raf);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [humaniseStatus]);
+
   // Auto-resize title textarea when title changes
   useEffect(() => {
     if (titleRef.current && title) {
@@ -2005,12 +2030,12 @@ const ContentEditor = () => {
     // throwing, which surroundContents would do on exactly these matches.
     const matched = range.extractContents();
 
-    // The anchor text is the URL, not the keyword it replaced, so an editor
-    // adding many links can see at a glance where each one points. The words
-    // it displaced are kept on the element: without them, removing the link
-    // would leave a bare URL stranded in the sentence.
+    // Show the matched WORDS as the clickable link text (readable hypertext),
+    // not the raw URL. Appending the fragment preserves any inline markup
+    // (e.g. <strong>) inside the phrase. The displaced text is also kept on
+    // data-anchor-text so unlinking restores it cleanly.
     anchor.setAttribute('data-anchor-text', matched.textContent || '');
-    anchor.textContent = href;
+    anchor.appendChild(matched);
 
     range.insertNode(anchor);
     pruneEmptyInlineTags(entry.paragraph);
@@ -2340,6 +2365,28 @@ const ContentEditor = () => {
   };
 
   // Formatting functions
+  // Unwrap every <a> in the article, keeping the visible text. Lets the user
+  // strip links from an article generated before link-free generation shipped,
+  // without regenerating. Only touches <a> tags — text, tables and images
+  // inside a link are preserved.
+  const handleRemoveAllLinks = () => {
+    if (!editorRef.current) return;
+    const anchors = editorRef.current.querySelectorAll("a");
+    if (anchors.length === 0) {
+      toast({ title: "No links found", description: "This article has no links to remove." });
+      return;
+    }
+    anchors.forEach((a) => {
+      const parent = a.parentNode;
+      if (!parent) return;
+      while (a.firstChild) parent.insertBefore(a.firstChild, a);
+      parent.removeChild(a);
+    });
+    editorRef.current.normalize();
+    handleContentChange();
+    toast({ title: "Links removed", description: `Removed ${anchors.length} link(s) from the article.` });
+  };
+
   const execCommand = (command: string, value?: string) => {
     // Use custom undo/redo handlers
     if (command === 'undo') {
@@ -3003,6 +3050,14 @@ const ContentEditor = () => {
                 title="Insert Link"
               >
                 <Link className="h-4 w-4" />
+              </Button>
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={handleRemoveAllLinks}
+                title="Remove all links"
+              >
+                <Unlink className="h-4 w-4" />
               </Button>
               <Button
                 variant="ghost"

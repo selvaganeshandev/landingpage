@@ -152,6 +152,9 @@ export default function OrganizationSettings() {
   const [isUpdatingMember, setIsUpdatingMember] = useState<number | null>(null);
   // Confirm dialogs
   const [confirmDomainId, setConfirmDomainId] = useState<number | null>(null);
+  // "Track Prompts" per-domain refresh (confirm dialog target + in-flight flag)
+  const [trackPromptsDomain, setTrackPromptsDomain] = useState<{ id: number; name: string } | null>(null);
+  const [trackingPrompts, setTrackingPrompts] = useState(false);
   const [confirmMemberId, setConfirmMemberId] = useState<number | null>(null);
   const [confirmInvitationId, setConfirmInvitationId] = useState<string | null>(null);
 
@@ -1222,6 +1225,37 @@ export default function OrganizationSettings() {
     }
   };
 
+  // Kick off a re-run of the selected domain's prompts (after the user confirms
+  // in the token-cost dialog). Never throws to the UI: any failure is toasted.
+  const handleTrackPromptsConfirmed = async () => {
+    if (!trackPromptsDomain) return;
+    setTrackingPrompts(true);
+    try {
+      const res: any = await apiClient.refreshDomainPrompts(trackPromptsDomain.id);
+      if (res?.success) {
+        toast({
+          title: "Prompt tracking started",
+          description: `Re-running ${res.prompts_count ?? ""} prompt(s) for "${trackPromptsDomain.name}". This can take a few minutes.`,
+        });
+      } else {
+        toast({
+          title: "Couldn't start tracking",
+          description: res?.error || "Please try again.",
+          variant: "destructive",
+        });
+      }
+    } catch (e: any) {
+      toast({
+        title: "Error",
+        description: e?.message || "Failed to start prompt tracking.",
+        variant: "destructive",
+      });
+    } finally {
+      setTrackingPrompts(false);
+      setTrackPromptsDomain(null);
+    }
+  };
+
   const handleRemoveDomainConfirmed = async (id: number) => {
     try {
       await apiClient.deleteDomain(id);
@@ -1675,6 +1709,21 @@ export default function OrganizationSettings() {
                             <span className="text-primary font-medium text-xs">Run</span>
                           </button>
                         ) : null
+                      )}
+
+                      {/* Track Prompts — per-domain prompt refresh (costs tokens; confirmed first) */}
+                      {!isTeamMember && (
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          className="gap-1.5 h-8"
+                          disabled={isProcessing}
+                          onClick={() => setTrackPromptsDomain({ id: domain.id, name: domain.name })}
+                          title="Re-run this domain's prompts across all platforms (costs tokens)"
+                        >
+                          <RefreshCw className="h-3.5 w-3.5" />
+                          Track Prompts
+                        </Button>
                       )}
 
                       {/* Status Badge - Second (hidden for team members) */}
@@ -2889,6 +2938,29 @@ export default function OrganizationSettings() {
               }}
             >
               Delete
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Confirm Track Prompts — warns about time + token cost, Proceed / Cancel */}
+      <Dialog open={trackPromptsDomain !== null} onOpenChange={(open) => !open && !trackingPrompts && setTrackPromptsDomain(null)}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Track prompts for "{trackPromptsDomain?.name}"?</DialogTitle>
+            <DialogDescription>
+              This re-runs ALL of this domain's prompts across ChatGPT, Claude and
+              Perplexity to refresh their mention data. It takes a few minutes and
+              costs OpenRouter tokens — every prompt is re-checked on every platform.
+              Proceed only if that's OK.
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setTrackPromptsDomain(null)} disabled={trackingPrompts}>
+              Cancel
+            </Button>
+            <Button onClick={handleTrackPromptsConfirmed} disabled={trackingPrompts}>
+              {trackingPrompts ? (<><Loader2 className="h-4 w-4 mr-2 animate-spin" />Starting...</>) : "Proceed"}
             </Button>
           </DialogFooter>
         </DialogContent>

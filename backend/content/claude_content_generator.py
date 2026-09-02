@@ -227,7 +227,10 @@ class ClaudeContentGenerator:
         tokens = int(upper * 2.5) + 1500
         # Floor 2048 for tiny requests; cap at 24576 for very large ones
         # (still well within Sonnet 4.5's 64K output limit).
-        return max(2048, min(tokens, 24576))
+        # Ceiling is configurable via CONTENT_MAX_TOKENS (default 64000,
+        # the model's max output); falls back to the default if unset.
+        cap = getattr(settings, 'CONTENT_MAX_TOKENS', 64000)
+        return max(2048, min(tokens, cap))
 
     @classmethod
     def _calculate_outline_max_tokens(cls, word_count, extended=False):
@@ -2084,6 +2087,25 @@ Now extract ONLY the relevant portions. If nothing is relevant, return exactly: 
             return ''
 
     @staticmethod
+    def _strip_model_links(html):
+        """Remove any <a> hyperlinks the model added on its own, keeping their
+        visible text. Runs just before the user's requested anchor links are
+        inserted, so the finished article contains ONLY links the user asked
+        for — never a URL the model invented. Tables, images, headings and all
+        other markup are left untouched. Guarded: returns the original html on
+        any problem, so it can never break generation."""
+        if not html or '<a' not in html.lower():
+            return html
+        try:
+            from bs4 import BeautifulSoup
+            soup = BeautifulSoup(html, 'html.parser')
+            for a in soup.find_all('a'):
+                a.unwrap()  # drop the <a> wrapper, keep its text/children
+            return str(soup)
+        except Exception:
+            return html
+
+    @staticmethod
     def _insert_anchor_links(html, anchor_links):
         """Wrap the FIRST plain-text occurrence of each requested anchor phrase
         in a real <a href> link.
@@ -2164,9 +2186,15 @@ Now extract ONLY the relevant portions. If nothing is relevant, return exactly: 
     def _format_anchor_links_for_prompt(anchor_links):
         """Render the anchor phrases as a short instruction so the model works
         them into the copy, giving _insert_anchor_links a phrase to link.
-        Returns '' when there is nothing to add."""
+        When no valid links are provided, instruct the model to add NO links."""
+        no_links = (
+            chr(10) + chr(10) + "**No hyperlinks:** Do NOT add any hyperlinks or "
+            "<a> tags to the article. Write plain text only - do not link to any "
+            "sources, brands or pages. Links are added separately only when "
+            "explicitly provided by the user."
+        )
         if not anchor_links:
-            return ''
+            return no_links
         phrases = []
         for pair in anchor_links:
             if not isinstance(pair, dict):
@@ -2176,13 +2204,13 @@ Now extract ONLY the relevant portions. If nothing is relevant, return exactly: 
             if anchor and url:
                 phrases.append(anchor)
         if not phrases:
-            return ''
+            return no_links
         listed = '; '.join(f'"{p}"' for p in phrases)
         return (
-            "\n\n**Required anchor phrases:** Work each of these exact phrases "
-            f"naturally into the body text, once each: {listed}. Write them as "
-            "plain text (do NOT add markdown or HTML links yourself) — they will "
-            "be turned into links automatically afterwards."
+            chr(10) + chr(10) + "**Required anchor phrases:** Work each of these "
+            f"exact phrases naturally into the body text, once each: {listed}. "
+            "Write them as plain text (do NOT add markdown or HTML links "
+            "yourself) - they will be turned into links automatically afterwards."
         )
 
     def generate_content(self, params):
@@ -2333,7 +2361,9 @@ Now extract ONLY the relevant portions. If nothing is relevant, return exactly: 
             total_completion_tokens += extra_tokens
             content_html = self._enforce_word_count_limit(content_html, word_count)
 
-            # Insert the requested anchor-text links (best-effort, never fails).
+            # Remove any links the model invented on its own, then insert ONLY
+            # the anchor links the user asked for (both best-effort, never fail).
+            content_html = self._strip_model_links(content_html)
             content_html = self._insert_anchor_links(content_html, params.get('anchor_links'))
 
             # Calculate generation time
@@ -2840,6 +2870,11 @@ Return ONLY the regenerated HTML content for this specific section."""
         'z-ai/glm-5.2:free',
     ]
 
+    # Free models have much smaller output limits than the paid model, so a
+    # large max_tokens (now up to 64000 for the paid model) is clamped to this
+    # on the free fallback attempts to avoid an over-limit error.
+    _FREE_MAX_TOKENS = 8192
+
     def _create_with_fallback(self, **kwargs):
         """Try the configured (paid) model FIRST for best quality; if it fails
         — e.g. the account is out of credits (402) — fall back to the free
@@ -2858,10 +2893,14 @@ Return ONLY the regenerated HTML content for this specific section."""
         except Exception as e:
             last_err = e
             logger.warning("Paid model %s unavailable (%s); falling back to free models", self.model, e)
-        # 2. Free models fallback.
+        # 2. Free models fallback (clamp output to the free-model ceiling).
+        free_kwargs = dict(kwargs)
+        free_ceiling = getattr(settings, 'CONTENT_FREE_MAX_TOKENS', self._FREE_MAX_TOKENS)
+        if int(free_kwargs.get('max_tokens', 0) or 0) > free_ceiling:
+            free_kwargs['max_tokens'] = free_ceiling
         for model in self._FREE_MODELS:
             try:
-                resp = self.client.messages.create(model=model, max_retries=2, **kwargs)
+                resp = self.client.messages.create(model=model, max_retries=2, **free_kwargs)
                 if getattr(resp, 'content', None) and (resp.content[0].text or '').strip():
                     return resp
                 last_err = Exception(f"{model} returned empty content")
@@ -3348,13 +3387,13 @@ IMPORTANT:
         # Size the output budget from the effective upper bound (the edited
         # outline's tight range when present, else the label range).
         if effective_range:
-            max_tokens = max(2048, min(int(upper_limit * 2.5) + 1500, 24576))
+            _cap = getattr(settings, 'CONTENT_MAX_TOKENS', 64000)
+            max_tokens = max(2048, min(int(upper_limit * 2.5) + 1500, _cap))
         else:
             max_tokens = self._calculate_max_tokens(requested_word_count)
 
         try:
-            response = self.client.messages.create(
-                model=self.model,
+            response = self._create_with_fallback(
                 max_tokens=max_tokens,
                 temperature=0.7,
                 system=system_prompt,
@@ -3464,7 +3503,9 @@ IMPORTANT:
                 upper_override=(upper_limit if effective_range else None)
             )
 
-            # Insert the requested anchor-text links (best-effort, never fails).
+            # Remove any links the model invented on its own, then insert ONLY
+            # the anchor links the user asked for (both best-effort, never fail).
+            content_html = self._strip_model_links(content_html)
             content_html = self._insert_anchor_links(content_html, params.get('anchor_links'))
 
             generation_time = time.time() - start_time
@@ -3578,8 +3619,7 @@ Rewritten text:"""
         last_error = None
         for attempt in range(max_retries):
             try:
-                response = self.client.messages.create(
-                    model=self.model,
+                response = self._create_with_fallback(
                     max_tokens=2048,
                     temperature=0.7,
                     system=system_prompt,

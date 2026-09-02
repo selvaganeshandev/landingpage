@@ -443,5 +443,22 @@ CHAT_TOOLS = [
                 "properties": {}
             }
         }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "explore_website",
+            "description": "Fetch and read the live content of a public web page or website URL so you can answer questions about it, summarise it, compare it, or analyse a competitor's site. Use this whenever the user asks you to look at, open, read, visit, check, explore, or analyse a specific website or URL.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "url": {
+                        "type": "string",
+                        "description": "The full URL to fetch, including https:// (for example https://example.com/about)."
+                    }
+                },
+                "required": ["url"]
+            }
+        }
     }
 ]

@@ -2553,6 +2553,16 @@ export const apiClient = {
   // Claude and Perplexity bills to this one account.
   getOpenRouterBalance: () => apiRequest('/auth/organization/openrouter/balance/'),
 
+  // Re-run (refresh) ALL of a domain's prompts on demand — the "Track Prompts"
+  // action in Organization Settings. Hits the engine; costs tokens (each prompt
+  // is re-checked on every platform), so the UI confirms before calling this.
+  refreshDomainPrompts: (domainId: number) =>
+    apiRequest('/api/prompts/refresh-domain/', {
+      method: 'POST',
+      body: JSON.stringify({ domain_id: domainId }),
+      useEngine: true,
+    }),
+
   getDataForSeoCredentials: () => apiRequest('/auth/organization/dataforseo/'),
 
   saveDataForSeoCredentials: (data: { login: string; password: string }) =>

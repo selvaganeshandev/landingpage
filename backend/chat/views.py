@@ -280,12 +280,36 @@ Remember: You're helping users improve their visibility in AI-generated response
             elif function_name == "get_domain_summary":
                 return ChatbotService.get_domain_summary(domain)
 
+            elif function_name == "explore_website":
+                return self._explore_website(arguments)
+
             else:
                 return {"error": f"Unknown function: {function_name}"}
 
         except Exception as e:
             logger.error(f"Error executing function {function_name}: {str(e)}")
             return {"error": f"Failed to execute {function_name}: {str(e)}"}
+
+    def _explore_website(self, arguments):
+        """Read a live web page for the chat agent via the DataBlue scrape service.
+
+        Fully isolated and additive: never raises, always returns a dict, and any
+        failure (missing key, bad URL, unreachable site) degrades to an ``error``
+        message the model can relay instead of breaking the conversation.
+        """
+        url = (arguments or {}).get('url', '')
+        if isinstance(url, str):
+            url = url.strip()
+        if not url:
+            return {"error": "No URL was provided to explore."}
+        if not url.lower().startswith(("http://", "https://")):
+            url = "https://" + url
+        try:
+            from misinformation.services.datablue_scrape import scrape_content
+            return scrape_content(url)
+        except Exception as e:
+            logger.error(f"explore_website failed for {url}: {e}")
+            return {"error": f"Could not explore the website: {e}"}
 
     def _create_monitoring_rule(self, domain, user, arguments):
         """Create a new monitoring rule"""
