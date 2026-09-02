@@ -47,15 +47,51 @@ class _ApiKeyPassthroughMiddleware:
 
     Every request must carry a Promptmaxx service API key
     (Authorization: Bearer pmxk_... or Api-Key pmxk_..., minted in
-    Settings > API keys). The key is NOT validated here — it is stored in a
-    request-scoped contextvar and every backend call of the request
-    authenticates with it, so Promptmaxx itself is the authority: an
-    invalid/revoked key fails there with 401, org scoping and the
-    client-role read-only rule apply server-side.
+    Settings > API keys). The key IS validated here, against the backend's
+    GET /v1/me (cached in-process), so a bad key is a transport-level 401 —
+    initialize never succeeds and no tool call reports a "successful"
+    failure. Org scoping and the client-role read-only rule still apply
+    server-side on every data call, which authenticates with this same key.
+
+    Fail-open on backend outage: if /v1/me is unreachable the request goes
+    through and the data call surfaces the real error — an API blip must
+    not 401 every valid key.
     """
 
-    def __init__(self, app):
+    # key -> (valid, monotonic expiry). Valid keys re-checked every 5 min
+    # (revocation lag ceiling); invalid ones every 30s (a just-minted key).
+    _TTL_OK = 300.0
+    _TTL_BAD = 30.0
+
+    def __init__(self, app, base_url: str):
         self.app = app
+        self.base_url = base_url.rstrip("/")
+        self._cache: dict[str, tuple[bool, float]] = {}
+
+    async def _key_is_valid(self, token: str) -> bool:
+        import time
+
+        import httpx
+
+        now = time.monotonic()
+        hit = self._cache.get(token)
+        if hit and hit[1] > now:
+            return hit[0]
+        try:
+            async with httpx.AsyncClient(timeout=10.0) as http:
+                resp = await http.get(
+                    f"{self.base_url}/v1/me",
+                    headers={"Authorization": f"Api-Key {token}"},
+                )
+        except httpx.HTTPError:
+            return True  # fail open — see class docstring
+        if resp.status_code == 429:
+            return True  # rate-limited probe proves nothing about the key
+        ok = resp.status_code == 200
+        if len(self._cache) > 1024:
+            self._cache = {k: v for k, v in self._cache.items() if v[1] > now}
+        self._cache[token] = (ok, now + (self._TTL_OK if ok else self._TTL_BAD))
+        return ok
 
     async def __call__(self, scope, receive, send):
         if scope["type"] != "http":
@@ -81,6 +117,18 @@ class _ApiKeyPassthroughMiddleware:
             await send({"type": "http.response.body",
                         "body": b'{"error": "missing Promptmaxx service API key (pmxk_...)"}'})
             return
+        if not await self._key_is_valid(token):
+            import logging
+            logging.getLogger(__name__).warning(
+                "MCP HTTP auth denied (invalid service key) from %s", scope.get("client"))
+            await send({
+                "type": "http.response.start", "status": 401,
+                "headers": [(b"content-type", b"application/json"),
+                            (b"www-authenticate", b"Bearer")],
+            })
+            await send({"type": "http.response.body",
+                        "body": b'{"error": "Promptmaxx service API key rejected (invalid, revoked, or expired)"}'})
+            return
         from .client import current_api_key
         ctx_token = current_api_key.set(token)
         try:
@@ -89,11 +137,12 @@ class _ApiKeyPassthroughMiddleware:
             current_api_key.reset(ctx_token)
 
 
-def _serve_http(mcp: MCPServer, host: str, port: int) -> None:
+def _serve_http(mcp: MCPServer, host: str, port: int, base_url: str) -> None:
     import uvicorn
 
     app = mcp.streamable_http_app()
-    uvicorn.run(_ApiKeyPassthroughMiddleware(app), host=host, port=port, log_level="info")
+    uvicorn.run(_ApiKeyPassthroughMiddleware(app, base_url),
+                host=host, port=port, log_level="info")
 
 
 def main() -> None:
@@ -112,7 +161,7 @@ def main() -> None:
     config = load_config(require_credentials=not use_http)
     mcp = create_server(config)
     if use_http:
-        _serve_http(mcp, config.http_host, config.http_port)
+        _serve_http(mcp, config.http_host, config.http_port, config.base_url)
     else:
         mcp.run()
 
