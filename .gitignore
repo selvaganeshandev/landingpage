@@ -132,3 +132,6 @@ rankmaxx/
 
 # Generated images written by the content editor
 backend/media/
+
+# Claude Code per-machine local settings (never commit — may hold secrets)
+.claude/settings.local.json
