@@ -86,6 +86,45 @@ Host promptmaxx
 
 Then simply: `ssh promptmaxx`
 
+## Granting access to a new person
+
+You have `root` on `64.227.190.42`, so you can add anyone's key yourself — no
+external provisioning needed.
+
+1. **They generate a key** on their machine and send you the **public** half
+   only (never the private key):
+
+   ```bash
+   ssh-keygen -t ed25519 -f ~/.ssh/llm_monitor
+   # then they send you ~/.ssh/llm_monitor.pub
+   ```
+
+2. **You (as root) append their public key** to the server's authorized keys:
+
+   ```bash
+   ssh promptmaxx 'echo "<paste their llm_monitor.pub line here>" >> /root/.ssh/authorized_keys'
+   ```
+
+3. **They add the `Host promptmaxx` block** to their own `~/.ssh/config` (same
+   alias as above, but `IdentityFile` points at *their* `~/.ssh/llm_monitor`):
+
+   ```
+   Host promptmaxx
+       HostName 64.227.190.42
+       User root
+       IdentityFile ~/.ssh/llm_monitor
+       IdentitiesOnly yes
+   ```
+
+4. **They confirm access:**
+
+   ```bash
+   ssh promptmaxx 'whoami; hostname'   # expect: root / LLM-Monitor-Product
+   ```
+
+Only the `.pub` (public) file is ever shared or pasted — the private
+`~/.ssh/llm_monitor` never leaves the owner's machine.
+
 ## What is on the server
 
 Deploy root: **`/root/python/v3.12/llm-monitor`** — the same repo tree as local
