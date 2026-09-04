@@ -172,6 +172,10 @@ def generate_content(request):
             'additional_instructions': validated_data.get('additional_instructions', ''),
             'brand_values': validated_data.get('brand_values', ''),
             'reference_repository_context': reference_repository_context,
+            # Domain's OWN stored profile → grounds content in this client's real
+            # specifics instead of generic filler. Empty for a bare domain, in
+            # which case generation is unchanged.
+            'brand_profile': _build_brand_profile(domain),
         }
 
         # Enrich reference URLs with actual fetched content to prevent hallucination
@@ -445,6 +449,10 @@ def generate_content_from_outline(request):
             'brand_values': validated_data.get('brand_values', ''),
             'references': validated_data.get('references', []),
             'reference_repository_context': reference_repository_context,
+            # Domain's OWN stored profile → grounds content in this client's real
+            # specifics instead of generic filler. Empty for a bare domain, in
+            # which case generation is unchanged.
+            'brand_profile': _build_brand_profile(domain),
         }
 
         # Enrich reference URLs with actual fetched content to prevent hallucination
@@ -605,6 +613,69 @@ _HUMANISE_POOL = ThreadPoolExecutor(
 )
 
 
+def _build_brand_profile(domain):
+    """Assemble a compact, human-readable brand-context block from the domain's
+    OWN stored fields, so generated content is grounded in THIS client's real
+    specifics instead of generic filler. Works for any industry, because it just
+    reflects whatever the domain has stored.
+
+    Fully defensive and additive:
+      - every field is optional (most domains predate some of them),
+      - JSON list/dict fields are flattened safely,
+      - returns '' when the domain has nothing filled, in which case the
+        generator behaves EXACTLY as before (no behaviour change, no error).
+    Never raises — any problem just yields a shorter/empty profile.
+    """
+    if domain is None:
+        return ''
+
+    def _clean_text(val):
+        try:
+            s = str(val or '').strip()
+            return s
+        except Exception:
+            return ''
+
+    def _clean_list(val):
+        # JSON fields may be a list, a dict, a string, or None.
+        try:
+            if not val:
+                return ''
+            if isinstance(val, (list, tuple)):
+                items = [str(x).strip() for x in val if str(x).strip()]
+                return ', '.join(items)
+            if isinstance(val, dict):
+                items = [str(x).strip() for x in val.values() if str(x).strip()]
+                return ', '.join(items)
+            return str(val).strip()
+        except Exception:
+            return ''
+
+    lines = []
+    try:
+        pairs = [
+            ('About the brand', _clean_text(getattr(domain, 'short_description', ''))),
+            ('Industry / niche', _clean_list(getattr(domain, 'niches', None))),
+            ('Business model', _clean_text(getattr(domain, 'business_model', ''))),
+            ('Products / services', _clean_list(getattr(domain, 'offering_categories', None))),
+            ('Regions served', _clean_list(getattr(domain, 'regions_served', None))),
+            ('Price positioning', _clean_text(getattr(domain, 'price_positioning', ''))),
+            ('Brand values', _clean_text(getattr(domain, 'brand_values', ''))),
+            ('Target audience', _clean_text(getattr(domain, 'target_audience', ''))),
+            ('Use cases', _clean_list(getattr(domain, 'use_cases', None))),
+            ('Buying criteria', _clean_list(getattr(domain, 'buying_criteria', None))),
+            ('Why customers choose them', _clean_list(getattr(domain, 'differentiators', None))),
+            ('Common objections to address', _clean_list(getattr(domain, 'common_objections', None))),
+        ]
+        for label, value in pairs:
+            if value:
+                lines.append(f"- {label}: {value}")
+    except Exception:
+        return ''
+
+    return chr(10).join(lines)
+
+
 def _humanise_human_score(text):
     """Return the AI-detector's human-likeness score (0-100) for ``text``, or
     ``None`` when scoring is unavailable for ANY reason: no Hugging Face key,
@@ -731,20 +802,40 @@ def _run_humanise_in_background(content_id):
         #   - each refine goes through _pass_or_keep (validation + shrink guard),
         #   - any detector hiccup mid-loop just stops with the best version.
         # It runs on the still-frozen HTML so tables/images stay protected.
-        HUMAN_SCORE_TARGET = 70.0
-        MAX_SCORE_REFINES = 2
+        # Raised from 70/2 to 85/4 to push harder against the AI-detector.
+        # Configurable per environment (cost/quality trade-off) without a deploy.
+        # Still fully guarded: the loop keeps the BEST-scoring version and never
+        # fails the job, so a higher target can only ever help or no-op.
+        HUMAN_SCORE_TARGET = config('HUMANISE_SCORE_TARGET', default=85.0, cast=float)
+        MAX_SCORE_REFINES = config('HUMANISE_MAX_REFINES', default=4, cast=int)
+        # Multi-model: rotate each guarded refine through a DIFFERENT model
+        # (GPT / Gemini) instead of always Claude. Passes 1-3 were done by the
+        # paid Claude model, so a different "brain" here breaks the single-model
+        # writing pattern detectors key on. Each model still uses the paid-first
+        # → free-fallback path inside refine_humanised_content, so an unavailable
+        # model can never fail the job — it just falls back. Guarded getattr so a
+        # missing helper (older generator) simply means no rotation.
+        try:
+            refine_models = generator._humanise_refine_models()
+        except Exception:
+            refine_models = []
         best_html = final_html
         best_score = _humanise_human_score(_tag_re.sub(' ', best_html or ''))
         if best_score is not None and best_score < HUMAN_SCORE_TARGET:
             logger.info(
                 "Humanisation score %.1f%% below target %.0f%% for content %s; "
-                "running up to %d guarded refine(s)",
+                "running up to %d guarded refine(s), rotating models %s",
                 best_score, HUMAN_SCORE_TARGET, content_id, MAX_SCORE_REFINES,
+                refine_models or ['(configured model)'],
             )
             for i in range(MAX_SCORE_REFINES):
+                # Pick the model for this pass (rotates); None → configured model.
+                pass_model = refine_models[i % len(refine_models)] if refine_models else None
                 candidate = _pass_or_keep(
-                    f"Score-refine {i + 1}", best_html,
-                    lambda h: generator.refine_humanised_content(h),
+                    f"Score-refine {i + 1}"
+                    + (f" [{pass_model}]" if pass_model else ""),
+                    best_html,
+                    lambda h, m=pass_model: generator.refine_humanised_content(h, model=m),
                 )
                 cand_score = _humanise_human_score(_tag_re.sub(' ', candidate or ''))
                 if cand_score is None:
@@ -757,6 +848,36 @@ def _run_humanise_in_background(content_id):
 
         # Restore the frozen tables/images verbatim before saving.
         final_html = generator._restore_protected(final_html, frozen_blocks)
+
+        # Match the selected word-count label. Humanisation tends to SHORTEN the
+        # article (it cuts sentences to 8-10 words, reduces 3-item lists to 2,
+        # merges paragraphs), so a piece generated at, say, 800-1000 words can
+        # come out ~600. The prompt now asks the humaniser to preserve length;
+        # this is the belt-and-braces backstop: if the humanised article still
+        # dropped below the label's minimum, expand it back by deepening the
+        # existing sections (no new structure, no invented facts). Runs on the
+        # RESTORED html so tables/images are preserved by the expander's rules.
+        # Fully guarded: _ensure_min_word_count never raises and returns the best
+        # version on any failure, so this can only help or no-op — never break.
+        try:
+            target_wc = int(getattr(content_obj, 'word_count', 0) or 0)
+            if target_wc > 0:
+                before_words = len(_tag_re.sub(' ', final_html or '').split())
+                final_html, _restore_tokens = generator._ensure_min_word_count(
+                    final_html, target_wc
+                )
+                after_words = len(_tag_re.sub(' ', final_html or '').split())
+                if after_words != before_words:
+                    logger.info(
+                        "Post-humanise length restore for content %s: %d -> %d "
+                        "words (label target %d)",
+                        content_id, before_words, after_words, target_wc,
+                    )
+        except Exception as _wc_err:
+            logger.warning(
+                "Post-humanise word-count restore skipped for %s: %s",
+                content_id, _wc_err,
+            )
 
         content_obj.content_html = final_html
         content_obj.humanise_status = 'completed'

@@ -112,6 +112,10 @@ const BulkContentUpload = () => {
 
   // Upload state
   const [selectedFiles, setSelectedFiles] = useState<File[]>([]);
+  // How many article sections the downloaded template ships with. Default 5 —
+  // creating a full 10-article sheet is time-consuming, and fewer are usually
+  // wanted. The user can still pick more. The backend accepts any count (max 50).
+  const [templateCount, setTemplateCount] = useState(5);
   // When multiple files are chosen, combine them all into ONE batch (else each
   // file becomes its own batch). Defaults off so behaviour matches today.
   const [combineIntoOne, setCombineIntoOne] = useState(false);
@@ -214,8 +218,8 @@ const BulkContentUpload = () => {
 
   const handleDownloadTemplate = async () => {
     try {
-      await apiClient.downloadBulkUploadTemplate(selectedDomain?.id);
-      toast({ title: "Template downloaded", description: "Fill in the template and upload it back." });
+      await apiClient.downloadBulkUploadTemplate(selectedDomain?.id, templateCount);
+      toast({ title: "Template downloaded", description: `Fill in up to ${templateCount} article(s) and upload it back.` });
     } catch {
       toast({ title: "Download failed", variant: "destructive" });
     }
@@ -223,8 +227,8 @@ const BulkContentUpload = () => {
 
   const handleDownloadDocxTemplate = async () => {
     try {
-      await apiClient.downloadBulkUploadDocxTemplate(selectedDomain?.id);
-      toast({ title: "Template downloaded", description: "Fill in one table per brief and upload it back." });
+      await apiClient.downloadBulkUploadDocxTemplate(selectedDomain?.id, templateCount);
+      toast({ title: "Template downloaded", description: `Fill in up to ${templateCount} article(s) and upload it back.` });
     } catch {
       toast({ title: "Download failed", variant: "destructive" });
     }
@@ -474,7 +478,24 @@ const BulkContentUpload = () => {
               <p className="text-xs text-muted-foreground">Fill in the Excel or Word template and upload to auto-generate content</p>
             </div>
           </div>
-          <DropdownMenu>
+          <div className="flex items-center gap-2">
+            <label className="flex items-center gap-1.5 text-xs text-muted-foreground">
+              Articles
+              <select
+                value={templateCount}
+                onChange={(e) => setTemplateCount(Number(e.target.value))}
+                className="h-8 rounded-md border border-input bg-background px-2 text-sm text-foreground focus:outline-none focus:ring-1 focus:ring-ring"
+                aria-label="Number of articles in the template"
+              >
+                <option value={1}>1</option>
+                <option value={3}>3</option>
+                <option value={5}>5</option>
+                <option value={10}>10</option>
+                <option value={15}>15</option>
+                <option value={20}>20</option>
+              </select>
+            </label>
+            <DropdownMenu>
             <DropdownMenuTrigger asChild>
               <Button variant="outline" size="sm">
                 <Download className="h-4 w-4 mr-2" />
@@ -499,6 +520,7 @@ const BulkContentUpload = () => {
               </DropdownMenuItem>
             </DropdownMenuContent>
           </DropdownMenu>
+          </div>
         </div>
 
         {/* Row 2: Drop zone (100px height) */}

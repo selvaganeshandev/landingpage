@@ -51,7 +51,6 @@ import {
   Play,
   Wand2,
   Undo2,
-  CircleDashed,
   FileText
 } from "lucide-react";
 import {
@@ -439,6 +438,38 @@ const ContentEditor = () => {
     }
   };
 
+  // Remove keyword-highlight markup from an HTML string, returning the clean
+  // underlying HTML. Used to keep originalContentRef in sync with edits made
+  // WHILE a keyword is highlighted: the live editor HTML then contains the
+  // temporary <mark> wrappers (and the bare <span> we wrap them in), which must
+  // not be baked into the saved/snapshot content. Unwraps both, keeping text.
+  // Fully defensive — any parse issue just returns the input unchanged.
+  const stripKeywordHighlights = (html: string): string => {
+    try {
+      if (!html || html.indexOf('keyword-highlight') === -1) return html;
+      const tmp = document.createElement('div');
+      tmp.innerHTML = html;
+      // Unwrap the <mark class="keyword-highlight"> tags, keeping their text.
+      tmp.querySelectorAll('mark.keyword-highlight').forEach((m) => {
+        const parent = m.parentNode;
+        if (!parent) return;
+        while (m.firstChild) parent.insertBefore(m.firstChild, m);
+        parent.removeChild(m);
+      });
+      // Unwrap the bare wrapper <span> we added during highlighting (tagged so
+      // we never touch a legitimate span in the content).
+      tmp.querySelectorAll('span[data-kw-highlight-wrap]').forEach((s) => {
+        const parent = s.parentNode;
+        if (!parent) return;
+        while (s.firstChild) parent.insertBefore(s.firstChild, s);
+        parent.removeChild(s);
+      });
+      return tmp.innerHTML;
+    } catch {
+      return html;
+    }
+  };
+
   // Highlight keyword in editor
   const highlightKeywordInEditor = (keyword: string | null) => {
     if (!editorRef.current) return;
@@ -479,6 +510,9 @@ const ContentEditor = () => {
       const text = textNode.textContent || '';
       if (regex.test(text)) {
         const span = document.createElement('span');
+        // Tag the wrapper so stripKeywordHighlights can unwrap it unambiguously
+        // (and never touch a real span in the content).
+        span.setAttribute('data-kw-highlight-wrap', 'true');
         span.innerHTML = text.replace(regex, '<mark class="keyword-highlight">$1</mark>');
         textNode.parentNode?.replaceChild(span, textNode);
       }
@@ -1244,10 +1278,15 @@ const ContentEditor = () => {
         findLinkOpportunities(html, internalLinks);
       }
 
-      // Update original content ref when user edits (only if no keyword is selected)
-      if (!selectedKeyword) {
-        originalContentRef.current = html;
-      }
+      // Keep the snapshot in sync with EVERY edit, so toggling a keyword
+      // highlight never rolls the content back to a pre-edit state (which used
+      // to silently discard paragraph edits made while a keyword was active).
+      // When a keyword is highlighted the live HTML contains temporary <mark>
+      // wrappers — store the cleaned version so the highlight markup is never
+      // baked into the snapshot that the un-highlight path restores.
+      originalContentRef.current = selectedKeyword
+        ? stripKeywordHighlights(html)
+        : html;
 
       // Auto-save: mark dirty and schedule save after 5 seconds of inactivity
       // (Issue 3: content not saving / auto-undoing)
@@ -1265,11 +1304,14 @@ const ContentEditor = () => {
           if (id && editorRef.current) {
             try {
               setAutoSaveStatus('saving');
+              // Strip any active keyword-highlight markup so the temporary
+              // <mark> wrappers are never persisted into the saved article.
+              const cleanHtml = stripKeywordHighlights(editorRef.current.innerHTML);
               await apiClient.updateGeneratedContent(parseInt(id), {
                 title,
-                content_html: editorRef.current.innerHTML
+                content_html: cleanHtml
               });
-              lastSavedContentRef.current = editorRef.current.innerHTML;
+              lastSavedContentRef.current = cleanHtml;
               setIsDirty(false);
               setAutoSaveStatus('saved');
             } catch (err) {
@@ -1330,7 +1372,7 @@ const ContentEditor = () => {
 
   // AI Detection function
   const handleAiDetection = async () => {
-    const currentContent = editorRef.current?.innerHTML || content;
+    const currentContent = stripKeywordHighlights(editorRef.current?.innerHTML || content);
 
     if (!currentContent || currentContent.length < 50) {
       toast({
@@ -1671,7 +1713,7 @@ const ContentEditor = () => {
   const handleHumanise = async () => {
     if (!id) return;
 
-    const currentContent = editorRef.current?.innerHTML || content;
+    const currentContent = stripKeywordHighlights(editorRef.current?.innerHTML || content);
     if (!currentContent || currentContent.length < 50) {
       toast({
         title: "Not enough content",
@@ -2546,7 +2588,7 @@ const ContentEditor = () => {
       setSaving(true);
 
       // Get the latest content directly from the editor
-      const currentContent = editorRef.current?.innerHTML || content;
+      const currentContent = stripKeywordHighlights(editorRef.current?.innerHTML || content);
 
       await apiClient.updateGeneratedContent(parseInt(id), {
         title,
@@ -2626,7 +2668,7 @@ const ContentEditor = () => {
       setSaving(true);
 
       // Get latest content
-      const currentContent = editorRef.current?.innerHTML || content;
+      const currentContent = stripKeywordHighlights(editorRef.current?.innerHTML || content);
 
       await apiClient.updateGeneratedContent(parseInt(id), {
         title,
@@ -2786,7 +2828,7 @@ const ContentEditor = () => {
     if (!id) return;
 
     // Save content first to ensure latest version is in database
-    const currentContent = editorRef.current?.innerHTML || content;
+    const currentContent = stripKeywordHighlights(editorRef.current?.innerHTML || content);
     const currentTitle = title;
 
     try {
@@ -4869,38 +4911,19 @@ const ContentEditor = () => {
               Humanising Content
             </DialogTitle>
           </DialogHeader>
-          <div className="space-y-1.5 max-h-[400px] overflow-y-auto py-2">
-            {HUMANISE_RULES.map((rule, index) => {
-              const isCompleted = index < humaniseChecklistProgress;
-              const isActive = index === humaniseChecklistProgress && humaniseStatus === 'processing';
-              const isDone = humaniseChecklistProgress >= HUMANISE_RULES.length;
-
-              return (
-                <div
-                  key={index}
-                  className={`flex items-center gap-2.5 px-3 py-1.5 rounded-md transition-colors ${
-                    isCompleted ? 'bg-green-50 dark:bg-green-950/30' :
-                    isActive ? 'bg-blue-50 dark:bg-blue-950/30' :
-                    ''
-                  }`}
-                >
-                  {isCompleted || isDone ? (
-                    <CheckCircle className="h-4 w-4 text-green-500 flex-shrink-0" />
-                  ) : isActive ? (
-                    <Loader2 className="h-4 w-4 text-blue-500 animate-spin flex-shrink-0" />
-                  ) : (
-                    <CircleDashed className="h-4 w-4 text-muted-foreground/40 flex-shrink-0" />
-                  )}
-                  <span className={`text-sm ${
-                    isCompleted || isDone ? 'text-green-700 dark:text-green-400' :
-                    isActive ? 'text-blue-700 dark:text-blue-400 font-medium' :
-                    'text-muted-foreground/60'
-                  }`}>
-                    {rule}
-                  </span>
-                </div>
-              );
-            })}
+          {/* Simple in-process indicator on a single line (the detailed
+              step-checklist is intentionally hidden). */}
+          <div className="flex items-center justify-center gap-2 py-6">
+            {humaniseChecklistProgress >= HUMANISE_RULES.length ? (
+              <CheckCircle className="h-5 w-5 text-green-500 flex-shrink-0" />
+            ) : (
+              <Loader2 className="h-5 w-5 animate-spin text-primary flex-shrink-0" />
+            )}
+            <span className="text-sm font-medium text-muted-foreground">
+              {humaniseChecklistProgress >= HUMANISE_RULES.length
+                ? 'Humanisation complete!'
+                : 'Humanising content, loading...'}
+            </span>
           </div>
           {humaniseChecklistProgress >= HUMANISE_RULES.length && (
             <div className="flex items-center gap-2 pt-2 border-t">

@@ -321,6 +321,20 @@ IMAGE_RENDER_MODEL = config('IMAGE_RENDER_MODEL', default='google/gemini-2.5-fla
 CONTENT_MAX_TOKENS = config('CONTENT_MAX_TOKENS', default=64000, cast=int)
 CONTENT_FREE_MAX_TOKENS = config('CONTENT_FREE_MAX_TOKENS', default=8192, cast=int)
 
+# Multi-model humanisation. The guarded score-refine loop rotates each refine
+# pass through these models (comma-separated slugs) instead of always using the
+# paid Claude model — a different model per pass breaks the single-model writing
+# pattern that AI detectors key on. Empty/unset uses the generator's built-in
+# default (gpt-5-mini, gemini-2.5-flash). Every model still uses the paid-first
+# → free-fallback path, so an unavailable slug never fails the job.
+HUMANISE_REFINE_MODELS = config('HUMANISE_REFINE_MODELS', default='')
+
+# Stronger-humanisation layer. When True (default) the Pass-1 humanise prompt
+# gains extra natural-voice rules (contractions, varied openings, concreteness)
+# chosen to NOT conflict with the existing rules. Set False to revert to the
+# exact original prompt if it ever hurts tone — no code change, no deploy.
+HUMANISE_STRONG_MODE = config('HUMANISE_STRONG_MODE', default=True, cast=bool)
+
 # Google Gemini API Configuration (for AI-powered features)
 GOOGLE_GEMINI_API_KEY = config('GOOGLE_GEMINI_API_KEY', default=None)
 # Gemini model name — single source of truth so a model retirement (Google returns

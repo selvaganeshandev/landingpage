@@ -3,6 +3,7 @@ import { useNavigate } from "react-router-dom";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
+import { InfoHint } from "@/components/InfoHint";
 import { Progress } from "@/components/ui/progress";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { TimeFilter } from "@/components/TimeFilter";
@@ -1801,6 +1802,16 @@ const Competitors = () => {
                       <div>
                         <div className="flex items-center gap-2 mb-1">
                           <h3 className="text-xl font-semibold font-inter">{competitor.name}</h3>
+                          <InfoHint label={`About ${competitor.name}`}>
+                            <p className="text-sm font-medium mb-1">{competitor.name}</p>
+                            <p className="text-xs text-muted-foreground">
+                              How this competitor appears across AI answers for your domain:
+                              <strong> Mentions</strong> = times it was named,
+                              <strong> Citations</strong> = times its site was linked,
+                              plus its <strong>Visibility</strong> and average <strong>Position</strong>.
+                              Competitor figures are currently measured on Perplexity.
+                            </p>
+                          </InfoHint>
                         </div>
                         <a
                           href={competitor.url.startsWith('http') ? competitor.url : `https://${competitor.url}`}
@@ -1984,7 +1995,19 @@ const Competitors = () => {
               <Card className="p-6 shadow-elegant border border-border backdrop-blur-sm bg-card/80 flex flex-col">
                 <div className="space-y-1 mb-6">
                   <div className="flex items-center justify-between">
-                    <h3 className="text-lg font-semibold font-inter">Competitive Strength Analysis</h3>
+                    <div className="flex items-center gap-2">
+                      <h3 className="text-lg font-semibold font-inter">Competitive Strength Analysis</h3>
+                      <InfoHint label="Radar metrics explained">
+                        <p className="text-sm font-medium mb-1">Radar metrics</p>
+                        <ul className="text-xs text-muted-foreground space-y-0.5">
+                          <li><strong>Visibility</strong> — how prominently the brand shows up in AI answers (0–100)</li>
+                          <li><strong>Sentiment</strong> — how positive the mentions are</li>
+                          <li><strong>Position</strong> — how early/high the brand is named (higher = better rank)</li>
+                          <li><strong>Coverage</strong> — % of tracked questions where the brand appeared</li>
+                          <li><strong>Growth</strong> — change vs the previous 30 days</li>
+                        </ul>
+                      </InfoHint>
+                    </div>
                     {isLoadingAnalysis && (
                       <span className="text-xs text-muted-foreground">Loading...</span>
                     )}

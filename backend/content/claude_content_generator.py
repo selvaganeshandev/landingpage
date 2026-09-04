@@ -2581,6 +2581,11 @@ LIST FORMATTING — USE <ul> / <ol> WHEREVER THEY IMPROVE SCANNABILITY:
                 user_prompt += f"""- Topics/Themes to AVOID: {topics_to_avoid}
 """
 
+        # Domain's own stored brand profile → makes content specific to THIS
+        # client (any industry). Appended only when the domain has a profile;
+        # empty profile = unchanged prompt.
+        user_prompt += self._brand_context_block(params.get('brand_profile', ''))
+
         # additional_instructions are added at the end of the prompt with priority framing
         # (see below, after structure guidelines) so they override defaults
 
@@ -2875,24 +2880,119 @@ Return ONLY the regenerated HTML content for this specific section."""
     # on the free fallback attempts to avoid an over-limit error.
     _FREE_MAX_TOKENS = 8192
 
-    def _create_with_fallback(self, **kwargs):
+    # Multi-model humanisation: the score-refine loop rotates the refine passes
+    # through these models (in order) instead of always using the paid Claude
+    # model. Running a DIFFERENT model on each pass breaks any single model's
+    # writing pattern, which is what AI detectors key on. Each entry still goes
+    # through the paid-first → free-fallback path, so an unavailable model never
+    # errors the job. Overridable via the HUMANISE_REFINE_MODELS setting
+    # (comma-separated slugs); empty/unset → this default. The configured paid
+    # model (self.model) is always used for the first refine, then these rotate.
+    _HUMANISE_REFINE_MODELS_DEFAULT = [
+        'openai/gpt-5-mini',
+        'google/gemini-2.5-flash',
+    ]
+
+    def _humanise_refine_models(self):
+        """Resolve the refine-model rotation list from settings, else default.
+        Never raises; a bad/empty setting falls back to the default list."""
+        raw = getattr(settings, 'HUMANISE_REFINE_MODELS', '') or ''
+        models = [m.strip() for m in str(raw).split(',') if m.strip()]
+        return models or list(self._HUMANISE_REFINE_MODELS_DEFAULT)
+
+    # Stronger-humanisation layer: extra natural-voice rules (contractions,
+    # varied openings, concreteness) appended to the Pass-1 prompt. These are
+    # deliberately chosen to NOT conflict with the existing rules — they defer
+    # to the sentence-length pattern, banned words, no-question and protective
+    # rules. On by default (the user wants a stronger anti-detection result);
+    # set HUMANISE_STRONG_MODE=False in the environment to revert to the exact
+    # original prompt if it ever hurts tone. Fully reversible, no code change.
+    _STRONG_HUMANISER_BLOCK = (
+        "=== STRONGER HUMANISATION LAYER (natural human voice) ===" + chr(10)
+        + "Apply these ON TOP of the rules above. They must NEVER override the "
+        "protective rules (17-19), the sentence-length pattern (rule 2), the "
+        "banned words (rule 7), the one-idea/no-semicolon rule (11), or the "
+        "no-rhetorical-question rule (10). If any conflict arises, the rules "
+        "above always win." + chr(10) + chr(10)
+        + "A. CONTRACTIONS: Use everyday contractions where a person naturally "
+        "would, it's, you'll, you're, don't, doesn't, won't, that's, there's, "
+        "they're, isn't. Aim for a natural amount (roughly one every 2 to 3 "
+        "sentences), not every sentence, and never inside a fixed phrase or a "
+        "target keyword. This is the single strongest human signal, so do not "
+        "skip it." + chr(10)
+        + "B. VARIED OPENINGS: No two back-to-back sentences may begin with the "
+        "same word or the same structure. Rotate how sentences start (the "
+        "subject, a short lead-in like 'In practice' or 'For most players', a "
+        "time or place phrase). Stay within the no -ing-start ban from rule 7." + chr(10)
+        + "C. CONCRETE OVER GENERIC: Prefer a specific, slightly unexpected word "
+        "to a bland one (for example 'a quick five-minute round' rather than 'a "
+        "short session'). Concrete detail reads human and raises unpredictability, "
+        "which is what detectors miss." + chr(10)
+        + "D. LIGHT NATURAL ASIDES: At most once per major section, add a brief "
+        "natural remark a knowledgeable writer would drop in, kept factual, "
+        "professional, and within the sentence-length pattern. Do NOT add filler, "
+        "hype, clichés (rule 9), or questions (rule 10)." + chr(10)
+        + "E. TONE: Stay professional and on-topic throughout. Natural, never "
+        "casual-sloppy. Never trade clarity or accuracy for voice."
+    )
+
+    def _strong_humaniser_enabled(self):
+        """Whether the stronger-humanisation layer is active. Default True;
+        set HUMANISE_STRONG_MODE=False to revert. Never raises."""
+        try:
+            return bool(getattr(settings, 'HUMANISE_STRONG_MODE', True))
+        except Exception:
+            return True
+
+    @staticmethod
+    def _brand_context_block(brand_profile):
+        """Format the domain's stored brand profile as a prompt block that tells
+        the model to write SPECIFICALLY for this client, not generically. Returns
+        '' for an empty profile, so callers can append unconditionally without
+        changing behaviour when a domain has no profile."""
+        profile = str(brand_profile or '').strip()
+        if not profile:
+            return ''
+        return (
+            chr(10)
+            + "=== BRAND CONTEXT — write specifically for THIS client ==="
+            + chr(10)
+            + "Ground the article in the real brand details below. Reference "
+            "concrete specifics from this profile (its actual offerings, "
+            "audience, region, price positioning and differentiators) instead "
+            "of generic, could-be-anyone statements. Do NOT invent facts that "
+            "contradict this profile; where a detail is missing, stay accurate "
+            "and write around it rather than fabricating."
+            + chr(10)
+            + profile
+            + chr(10)
+        )
+
+    def _create_with_fallback(self, primary_model=None, **kwargs):
         """Try the configured (paid) model FIRST for best quality; if it fails
         — e.g. the account is out of credits (402) — fall back to the free
         models so the feature still works. Returns the first response that has
         content. Raises only if every model is unavailable.
 
         This is what makes a funded OpenRouter key give full paid quality while
-        a $0 balance still works on free models instead of erroring."""
+        a $0 balance still works on free models instead of erroring.
+
+        `primary_model` optionally overrides the paid model for THIS call only
+        (used for multi-model humanisation, where different refine passes run
+        through different models to break any single model's writing pattern).
+        The free-model fallback is unchanged, so the feature never errors even
+        if the chosen primary model is unavailable."""
         last_err = None
+        model_to_use = primary_model or self.model
         # 1. Paid / configured model first.
         try:
-            resp = self.client.messages.create(model=self.model, **kwargs)
+            resp = self.client.messages.create(model=model_to_use, **kwargs)
             if getattr(resp, 'content', None) and (resp.content[0].text or '').strip():
                 return resp
-            last_err = Exception(f"{self.model} returned empty content")
+            last_err = Exception(f"{model_to_use} returned empty content")
         except Exception as e:
             last_err = e
-            logger.warning("Paid model %s unavailable (%s); falling back to free models", self.model, e)
+            logger.warning("Paid model %s unavailable (%s); falling back to free models", model_to_use, e)
         # 2. Free models fallback (clamp output to the free-model ceiling).
         free_kwargs = dict(kwargs)
         free_ceiling = getattr(settings, 'CONTENT_FREE_MAX_TOKENS', self._FREE_MAX_TOKENS)
@@ -3256,6 +3356,11 @@ LIST FORMATTING — USE <ul> / <ol> WHEREVER THEY IMPROVE SCANNABILITY:
         if brand_values:
             user_prompt += f"""**Brand Values:** {brand_values}
 """
+
+        # Domain's own stored brand profile → makes content specific to THIS
+        # client (any industry). Appended only when the domain has a profile;
+        # empty profile = unchanged prompt.
+        user_prompt += self._brand_context_block(params.get('brand_profile', ''))
 
         # Add reference repository context if available
         reference_repository_context = params.get('reference_repository_context', '')
@@ -3853,8 +3958,23 @@ PROTECTIVE RULES (MUST NOT violate):
 17. Preserve ALL HTML structure exactly (headings h2-h5, tables, lists, images, divs, spans, blockquotes).
 18. Preserve ALL hyperlinks (<a> tags) with their exact href attribute, anchor text, and all attributes (rel, target, etc.).
 19. Preserve ALL keyword placements; do not remove or rephrase target keywords.
+20. LENGTH PRESERVATION (CRITICAL): Keep the article the SAME overall length as the input — the final word count must stay within 5% of the original. Several rules above REMOVE words (shortening sentences to 8-10 words, cutting 3-item lists to 2, merging paragraphs). Every time you cut words, you MUST balance it by ADDING equal depth nearby — a concrete detail, a short example, or a clarifying clause on a point already made (never filler, repetition, or invented facts). The output must NEVER be materially shorter than the input. If in doubt, err slightly longer, not shorter.
 
 Return ONLY the transformed HTML content. Do not add any explanations, comments, or markdown code blocks."""
+
+        # Stronger-humanisation layer (tunable, on by default). Appended so it
+        # sits AFTER the "Return ONLY..." line is logically still the last
+        # instruction — we insert it before that final directive by rebuilding.
+        if self._strong_humaniser_enabled():
+            marker = "Return ONLY the transformed HTML content."
+            if marker in system_prompt:
+                system_prompt = system_prompt.replace(
+                    marker,
+                    self._STRONG_HUMANISER_BLOCK + chr(10) + chr(10) + marker,
+                    1,
+                )
+            else:  # defensive: never lose the block if the marker moves
+                system_prompt = system_prompt + chr(10) + chr(10) + self._STRONG_HUMANISER_BLOCK
 
         user_prompt = f"""Apply all humanisation rules to the following HTML content. Return ONLY the transformed HTML.
 
@@ -3912,7 +4032,7 @@ The content may contain locked placeholders written as HTML comments, e.g. <!--P
 
         raise Exception(f"Claude API error during humanisation after {max_retries} retries: {str(last_error)}")
 
-    def refine_humanised_content(self, content_html, max_retries=3):
+    def refine_humanised_content(self, content_html, max_retries=3, model=None):
         """
         Pass 2: Focused refinement that fixes the 5 rules that consistently
         fail in the first humanisation pass.
@@ -3924,6 +4044,10 @@ The content may contain locked placeholders written as HTML comments, e.g. <!--P
         Args:
             content_html (str): The humanised HTML from Pass 1
             max_retries (int): Maximum number of retries for transient errors
+            model (str|None): Optional model override for THIS pass. Used by the
+                multi-model humanise loop so a different model refines each pass
+                (breaks any single model's writing pattern). None = configured
+                paid model. Free-model fallback still applies, so it never errors.
 
         Returns:
             str: The refined HTML content
@@ -3995,6 +4119,7 @@ Check the LAST sentence of every section/subsection. If it states a fact without
 - Preserve ALL hyperlinks (<a> tags) with exact href, anchor text, and attributes.
 - Preserve ALL keyword placements. Do not remove target keywords.
 - Do NOT change meaning or tone. Only fix the issues above.
+- LENGTH: Keep the article the SAME overall length as the input (within 5%). Do NOT let the total word count drop. These are surgical fixes, not a trim — if a fix removes words, compensate with a nearby concrete detail so the length holds. Never return a materially shorter article.
 
 Return ONLY the fixed HTML. No explanations, no markdown code blocks."""
 
@@ -4024,6 +4149,7 @@ Any HTML comment like <!--PMX_FROZEN_0--> is a locked placeholder — reproduce 
         for attempt in range(max_retries):
             try:
                 response = self._create_with_fallback(
+                    primary_model=model,
                     max_tokens=_output_ceiling(content_html),
                     temperature=0.1,
                     system=system_prompt,

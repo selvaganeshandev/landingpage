@@ -86,6 +86,12 @@ ARTICLE_LABELS = {
     'brief': 'idea',
     'target keywords': 'keywords',
     'keywords': 'keywords',
+    'primary keywords': 'primary_keywords',
+    'primary keyword': 'primary_keywords',
+    'secondary keywords': 'secondary_keywords',
+    'secondary keyword': 'secondary_keywords',
+    'anchor text': 'anchor_text',
+    'anchor texts': 'anchor_text',
     'article type': 'article_type',
     'content type': 'article_type',
     'type': 'article_type',
@@ -120,6 +126,9 @@ ARTICLE_BARE_LABELS = frozenset({
     'title',
     'describe your idea',
     'target keywords',
+    'primary keywords',
+    'secondary keywords',
+    'anchor text',
     'article type',
     'target country',
     'tone',
@@ -289,16 +298,23 @@ def _add_article(document, number, type_map, defaults=None):
     document.add_heading(f'Create Article #{number}', level=1)
 
     intro = document.add_paragraph()
-    _grey(intro, 'Only the first three questions are required.')
+    _grey(intro, 'Only Title and Primary keywords are required. Everything else is optional.')
 
     _question(document, 'Title', 'a working title is fine')
     _write_line(document)
 
     _question(document, 'Describe your idea',
-              'what should it cover, and who is it for?')
+              'optional — what should it cover, and who is it for?')
     _write_line(document)
 
-    _question(document, 'Target keywords', 'separate them with commas')
+    _question(document, 'Primary keywords', 'the main 1-2 keywords, separated by commas')
+    _write_line(document)
+
+    _question(document, 'Secondary keywords', 'optional supporting keywords, separated by commas')
+    _write_line(document)
+
+    _question(document, 'Anchor text',
+              'optional; phrases to weave in as link text, one per line')
     _write_line(document)
 
     _question(document, 'Article type',
@@ -311,24 +327,12 @@ def _add_article(document, number, type_map, defaults=None):
             _add_checkbox(option)
             option.add_run(f'  {content_type}')
 
-    _question(document, 'Target country', 'pre-filled from your default; change if this article differs')
-    _write_line(document, defaults.get('country', ''))
-
-    _question(document, 'Tone', 'pre-filled from your default; change if this article differs')
-    _write_line(document, defaults.get('tone', ''))
-
-    _question(document, 'Approximate length',
-              'pre-filled from your default; change if this article differs')
-    _write_line(document, str(defaults.get('word_count', '') or ''))
-
-    _question(document, 'Any links we should read?',
-              'one per line; add "- what it covers" after a link if useful')
-    _write_line(document)
-
-    _question(document, 'Anything else?',
-              'points to include, things to avoid, anything at all')
-    last = _write_line(document)
-    last.paragraph_format.space_after = Pt(20)
+    # Target country, tone, approximate length, reference links and extra notes
+    # are set once in the "Your defaults" block above and apply to every article,
+    # so they are no longer repeated per-article. (The parser still reads these
+    # labels from older documents that include them, so nothing breaks.)
+    spacer = document.add_paragraph()
+    spacer.paragraph_format.space_after = Pt(20)
 
 
 def _build_defaults(domain, country_map):
@@ -659,6 +663,22 @@ def _iter_article_blocks(lines, type_index):
         yield current
 
 
+def _merge_keyword_fields(*fields):
+    """Combine several comma-separated keyword strings into one, in the order
+    given (so primary keywords come first and are treated as primary by the
+    generator), de-duplicated case-insensitively with original order preserved.
+    Empty fields are ignored."""
+    seen = set()
+    out = []
+    for field in fields:
+        for raw in (field or '').split(','):
+            kw = raw.strip()
+            if kw and kw.lower() not in seen:
+                seen.add(kw.lower())
+                out.append(kw)
+    return ', '.join(out)
+
+
 def parse_docx_briefs(uploaded_file, *, type_map, country_map,
                       language_map=None, audience_map=None):
     """
@@ -694,7 +714,8 @@ def parse_docx_briefs(uploaded_file, *, type_map, country_map,
     # defaults in every template block, so they are no longer a signal that a
     # block was used. Decide "did the user actually fill this article?" from the
     # content fields only, so untouched blocks (defaults only) are still skipped.
-    _CONTENT_KEYS = ('title', 'idea', 'keywords', 'article_type', 'extra', 'reference_urls')
+    _CONTENT_KEYS = ('title', 'idea', 'keywords', 'primary_keywords',
+                     'secondary_keywords', 'article_type', 'extra', 'reference_urls')
     for number, values in enumerate(_iter_article_blocks(lines, type_index), start=1):
         if not any((values.get(k) or '').strip() for k in _CONTENT_KEYS):
             continue
@@ -711,17 +732,30 @@ def parse_docx_briefs(uploaded_file, *, type_map, country_map,
             break
 
         title = values.get('title', '').strip()
-        keywords = values.get('keywords', '').strip()
         chosen_type = values.get('article_type', '').strip()
         idea = values.get('idea', '').strip()
         extra = values.get('extra', '').strip()
+
+        # Keywords: merge Primary + Secondary (primary first, so the generator
+        # treats it as the primary keyword) and fall back to the legacy
+        # "Target keywords" field so documents made from the old template still
+        # parse. All three are folded together, de-duplicated.
+        primary_kw = values.get('primary_keywords', '').strip()
+        secondary_kw = values.get('secondary_keywords', '').strip()
+        legacy_kw = values.get('keywords', '').strip()
+        keywords = _merge_keyword_fields(primary_kw, secondary_kw, legacy_kw)
+
+        # Anchor text: optional phrases to weave in (usable later as link text).
+        # Folded into the article's instructions so no new model field/migration
+        # is needed and the existing generation pipeline uses it as-is.
+        anchor_text = values.get('anchor_text', '').strip()
 
         article_errors = []
 
         if not title:
             article_errors.append('Please add a Title')
         if not keywords:
-            article_errors.append('Please add at least one target keyword')
+            article_errors.append('Please add at least one primary keyword')
 
         if not chosen_type:
             article_errors.append(
@@ -756,7 +790,21 @@ def parse_docx_briefs(uploaded_file, *, type_map, country_map,
         country = values.get('country', '').strip() or default_for('country', '')
         tone = values.get('tone', '').strip() or default_for('tone', 'professional')
 
-        instructions = '\n\n'.join(part for part in (idea, extra) if part)
+        anchor_note = ''
+        if anchor_text:
+            # Present the anchor phrases (one per line) as a clear instruction so
+            # the writer weaves them in naturally as link/emphasis text.
+            phrases = ', '.join(
+                p.strip() for p in re.split(r'[\r\n]+', anchor_text) if p.strip()
+            )
+            if phrases:
+                anchor_note = (
+                    'Weave these anchor-text phrases into the content naturally, '
+                    'used as link text where a link fits: ' + phrases
+                )
+        instructions = '\n\n'.join(
+            part for part in (idea, extra, anchor_note) if part
+        )
         reference_urls, reference_notes = _split_references(
             values.get('reference_urls', ''))
 

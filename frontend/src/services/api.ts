@@ -2064,11 +2064,13 @@ export const apiClient = {
     }),
 
   // ===== Bulk Content Upload =====
-  downloadBulkUploadTemplate: async (domainId?: number) => {
+  downloadBulkUploadTemplate: async (domainId?: number, count?: number) => {
     const token = getAuthToken();
-    const url = domainId
-      ? `${API_BASE_URL}/content/bulk-upload/template/?domain_id=${domainId}`
-      : `${API_BASE_URL}/content/bulk-upload/template/`;
+    const params = new URLSearchParams();
+    if (domainId) params.set('domain_id', String(domainId));
+    if (count && count > 0) params.set('count', String(count));
+    const qs = params.toString();
+    const url = `${API_BASE_URL}/content/bulk-upload/template/${qs ? `?${qs}` : ''}`;
     const response = await fetch(url, {
       headers: {
         ...(token ? { 'Authorization': `Bearer ${token}` } : {}),
@@ -2086,11 +2088,13 @@ export const apiClient = {
     document.body.removeChild(a);
   },
 
-  downloadBulkUploadDocxTemplate: async (domainId?: number) => {
+  downloadBulkUploadDocxTemplate: async (domainId?: number, count?: number) => {
     const token = getAuthToken();
-    const url = domainId
-      ? `${API_BASE_URL}/content/bulk-upload/template-docx/?domain_id=${domainId}`
-      : `${API_BASE_URL}/content/bulk-upload/template-docx/`;
+    const params = new URLSearchParams();
+    if (domainId) params.set('domain_id', String(domainId));
+    if (count && count > 0) params.set('count', String(count));
+    const qs = params.toString();
+    const url = `${API_BASE_URL}/content/bulk-upload/template-docx/${qs ? `?${qs}` : ''}`;
     const response = await fetch(url, {
       headers: {
         ...(token ? { 'Authorization': `Bearer ${token}` } : {}),
