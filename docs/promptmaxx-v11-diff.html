@@ -1,0 +1,307 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="description" content="Feature diff of the Promptmaxx v11 prototype against the shipped app.">
+  <style>
+    :root { color-scheme: light dark; }
+    html { -webkit-text-size-adjust: 100%; }
+    body { margin: 0; }
+    img { max-width: 100%; }
+    [hidden] { display: none !important; }
+  </style>
+  <title>Promptmaxx v11 Diff</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wght@500;600;700&family=Source+Serif+4:opsz,wght@8..60,400;8..60,600&family=JetBrains+Mono:wght@400;700&display=swap">
+
+  <style>
+    :root {
+      --ground:#FBFAFD; --surface:#FFFFFF; --surface-2:#F3F1F9;
+      --ink:#1A1726; --ink-2:#423D57; --muted:#6E6A85;
+      --rule:#E2DEEE; --rule-strong:#CFC9E4;
+      --brand:#6547FA; --brand-soft:#EDE9FE;
+      --ok:#1F7A52; --ok-soft:#E0F2E9;
+      --warn:#A8620C; --warn-soft:#FBEEDC;
+      --crit:#C0353A; --crit-soft:#FBE6E7;
+      --f-display:"Archivo","Helvetica Neue",Arial,sans-serif;
+      --f-body:"Source Serif 4",Georgia,serif;
+      --f-mono:"JetBrains Mono",ui-monospace,Consolas,monospace;
+    }
+    @media (prefers-color-scheme: dark) {
+      :root:not([data-theme="light"]) {
+        --ground:#121020; --surface:#1A1730; --surface-2:#221E3C;
+        --ink:#EFEDF8; --ink-2:#C3BDDB; --muted:#918BAE;
+        --rule:#2E2950; --rule-strong:#443D6E;
+        --brand:#9B85FF; --brand-soft:#241F45;
+        --ok:#5FCB97; --ok-soft:#17301F;
+        --warn:#E8AE5C; --warn-soft:#33260F;
+        --crit:#F0868A; --crit-soft:#35191B;
+      }
+    }
+    :root[data-theme="dark"] {
+      --ground:#121020; --surface:#1A1730; --surface-2:#221E3C;
+      --ink:#EFEDF8; --ink-2:#C3BDDB; --muted:#918BAE;
+      --rule:#2E2950; --rule-strong:#443D6E;
+      --brand:#9B85FF; --brand-soft:#241F45;
+      --ok:#5FCB97; --ok-soft:#17301F;
+      --warn:#E8AE5C; --warn-soft:#33260F;
+      --crit:#F0868A; --crit-soft:#35191B;
+    }
+
+    * { box-sizing: border-box; }
+    body {
+      background: var(--ground); color: var(--ink);
+      font-family: var(--f-body); font-size: 16px; line-height: 1.55;
+      -webkit-font-smoothing: antialiased;
+    }
+    .wrap { max-width: 980px; margin: 0 auto; padding: 0 24px 80px; }
+
+    .mast { padding: 44px 0 20px; border-bottom: 2px solid var(--ink); margin-bottom: 26px; }
+    .eyebrow {
+      font-family: var(--f-mono); font-size: 10.5px; font-weight: 700;
+      letter-spacing: .16em; text-transform: uppercase; color: var(--brand); margin: 0 0 14px;
+    }
+    h1 {
+      font-family: var(--f-display); font-weight: 700;
+      font-size: clamp(32px,5.4vw,54px); line-height: 1; letter-spacing: -.028em;
+      margin: 0 0 14px; text-wrap: balance;
+    }
+    .sub { font-size: 17px; color: var(--ink-2); margin: 0; max-width: 62ch; }
+
+    .board {
+      display: grid; grid-template-columns: repeat(auto-fit,minmax(140px,1fr));
+      gap: 1px; background: var(--rule); border: 1px solid var(--rule);
+      border-radius: 3px; overflow: hidden; margin-bottom: 44px;
+    }
+    .bx { background: var(--surface); padding: 15px 17px; display: flex; flex-direction: column; gap: 3px; }
+    .bx .n { font-family: var(--f-display); font-weight: 700; font-size: 30px; line-height: 1; font-variant-numeric: tabular-nums; }
+    .bx .l { font-family: var(--f-mono); font-size: 9.5px; letter-spacing: .09em; text-transform: uppercase; color: var(--muted); line-height: 1.4; }
+    .bx.a .n { color: var(--ok); } .bx.b .n { color: var(--brand); }
+    .bx.c .n { color: var(--ink-2); } .bx.d .n { color: var(--crit); }
+
+    section { margin-bottom: 48px; }
+    .sh { display: flex; align-items: baseline; gap: 12px; margin-bottom: 6px; flex-wrap: wrap; }
+    h2 { font-family: var(--f-display); font-weight: 600; font-size: 25px; letter-spacing: -.02em; margin: 0; }
+    .cnt {
+      font-family: var(--f-mono); font-size: 11px; font-weight: 700; letter-spacing: .05em;
+      padding: 3px 8px; border-radius: 2px; background: var(--surface-2); color: var(--muted);
+    }
+    .cnt.new { background: var(--ok-soft); color: var(--ok); }
+    .cnt.up  { background: var(--brand-soft); color: var(--brand); }
+    .cnt.out { background: var(--crit-soft); color: var(--crit); }
+    .oneline { color: var(--ink-2); margin: 0 0 18px; font-size: 16px; max-width: 66ch; }
+
+    /* shifts */
+    .shifts { display: flex; flex-direction: column; gap: 2px; margin-bottom: 8px; }
+    .shift {
+      display: grid; grid-template-columns: 1fr 1fr; gap: 0;
+      background: var(--surface); border: 1px solid var(--rule);
+    }
+    .shift:first-child { border-radius: 3px 3px 0 0; }
+    .shift:last-child { border-radius: 0 0 3px 3px; }
+    .shift + .shift { border-top: none; }
+    .shift .side { padding: 15px 18px; }
+    .shift .old { border-right: 1px solid var(--rule); background: var(--surface-2); }
+    .shift .lab {
+      font-family: var(--f-mono); font-size: 9.5px; font-weight: 700; letter-spacing: .11em;
+      text-transform: uppercase; margin-bottom: 5px; display: block;
+    }
+    .shift .old .lab { color: var(--muted); }
+    .shift .new .lab { color: var(--ok); }
+    .shift .ttl { font-family: var(--f-display); font-weight: 600; font-size: 15.5px; margin-bottom: 3px; }
+    .shift .txt { font-size: 14.5px; color: var(--ink-2); line-height: 1.45; }
+    .shift .old .txt { color: var(--muted); }
+
+    .scroller { overflow-x: auto; }
+    table { border-collapse: collapse; width: 100%; min-width: 620px; font-family: var(--f-display); font-size: 14.5px; line-height: 1.4; }
+    thead th {
+      font-family: var(--f-mono); font-size: 9.5px; font-weight: 700; letter-spacing: .1em;
+      text-transform: uppercase; color: var(--muted); text-align: left;
+      padding: 0 12px 8px 0; border-bottom: 1.5px solid var(--rule-strong); white-space: nowrap;
+    }
+    tbody td { padding: 10px 12px 10px 0; border-bottom: 1px solid var(--rule); vertical-align: top; color: var(--ink-2); }
+    tbody td:first-child { color: var(--ink); font-weight: 500; }
+    tbody tr:last-child td { border-bottom: none; }
+    tr.hot td:first-child { box-shadow: inset 3px 0 0 var(--ok); padding-left: 11px; }
+    tr.risk td:first-child { box-shadow: inset 3px 0 0 var(--crit); padding-left: 11px; }
+    tr.warn td:first-child { box-shadow: inset 3px 0 0 var(--warn); padding-left: 11px; }
+
+    .tag {
+      display: inline-block; font-family: var(--f-mono); font-size: 9.5px; font-weight: 700;
+      letter-spacing: .06em; text-transform: uppercase; padding: 3px 6px; border-radius: 2px; white-space: nowrap;
+    }
+    .t-gone { background: var(--crit-soft); color: var(--crit); }
+    .t-abs  { background: var(--warn-soft); color: var(--warn); }
+    .t-mod  { background: var(--surface-2); color: var(--muted); }
+
+    .chips { display: flex; flex-wrap: wrap; gap: 6px; margin: 0 0 8px; }
+    .chip {
+      font-family: var(--f-mono); font-size: 11.5px; color: var(--ink-2);
+      background: var(--surface); border: 1px solid var(--rule);
+      padding: 4px 9px; border-radius: 2px;
+    }
+
+    .note {
+      border-left: 3px solid var(--crit); background: var(--crit-soft);
+      padding: 14px 18px; border-radius: 0 3px 3px 0; margin: 20px 0 0; font-size: 15.5px;
+    }
+    .note .lbl {
+      font-family: var(--f-mono); font-size: 10px; font-weight: 700; letter-spacing: .12em;
+      text-transform: uppercase; color: var(--crit); display: block; margin-bottom: 5px;
+    }
+    .note p { margin: 0; }
+
+    .foot { border-top: 1px solid var(--rule); padding-top: 18px; font-size: 13.5px; color: var(--muted); }
+    .mono { font-family: var(--f-mono); font-size: 12.5px; }
+    b.hl { color: var(--ink); }
+
+    @media (max-width: 640px) {
+      .wrap { padding: 0 16px 64px; }
+      .shift { grid-template-columns: 1fr; }
+      .shift .old { border-right: none; border-bottom: 1px solid var(--rule); }
+    }
+    @media (prefers-reduced-motion: reduce) { * { animation: none !important; transition: none !important; } }
+  </style>
+</head>
+<body>
+
+<div class="wrap">
+
+  <header class="mast">
+    <p class="eyebrow">Prototype v11 vs the shipped app</p>
+    <h1>Promptmaxx v11 Diff</h1>
+    <p class="sub">Every screen in the v11 prototype mapped against what's actually running today. What's brand new, what got rebuilt, what carried over, and what quietly went missing.</p>
+  </header>
+
+  <div class="board">
+    <div class="bx a"><span class="n">12</span><span class="l">Brand new screens</span></div>
+    <div class="bx b"><span class="n">5</span><span class="l">Rebuilt</span></div>
+    <div class="bx c"><span class="n">24</span><span class="l">Carried over</span></div>
+    <div class="bx d"><span class="n">4</span><span class="l">Dropped or at risk</span></div>
+    <div class="bx c"><span class="n">6</span><span class="l">Structural shifts</span></div>
+  </div>
+
+  <!-- SHIFTS -->
+  <section>
+    <div class="sh"><h2>The six changes that actually matter</h2></div>
+    <p class="oneline">Screen counts undersell this. v11 isn't a reskin — it changes how the product measures, charges, and gets sold. These six shifts are the release.</p>
+
+    <div class="shifts">
+      <div class="shift">
+        <div class="side old"><span class="lab">Today</span><div class="ttl">Ask each AI once</div><div class="txt">One call per prompt per engine. <span class="mono">PromptAnalytics</span> is keyed on <span class="mono">(prompt, platform)</span> — no room for a second run.</div></div>
+        <div class="side new"><span class="lab">v11</span><div class="ttl">Ask 3–10 times, keep the ledger</div><div class="txt">3,591 runs across 399 variants, <b class="hl">averaging 9 runs each</b>. Variance flagged, confidence shown as dots, every number links back to the raw responses.</div></div>
+      </div>
+      <div class="shift">
+        <div class="side old"><span class="lab">Today</span><div class="ttl">Scattered metrics</div><div class="txt">Visibility, sentiment, share of voice — each on its own page, no single number, no target.</div></div>
+        <div class="side new"><span class="lab">v11</span><div class="ttl">One score, three pillars, twelve measures</div><div class="txt"><b class="hl">Findable · Cited · Chosen.</b> GEO score 0–100 with bands: Absent → Present → Preferred (51–75) → Default (76+). Every measure has a target and an evidence link.</div></div>
+      </div>
+      <div class="shift">
+        <div class="side old"><span class="lab">Today</span><div class="ttl">Dashboards only</div><div class="txt">You see the gap. Working out what to do about it is your problem.</div></div>
+        <div class="side new"><span class="lab">v11</span><div class="ttl">A sequenced plan with projected scores</div><div class="txt">Visibility Plan sorts every action into <b class="hl">Now / Next / Later</b> with owners, due dates and the score projected at each step (46 → 53 → 61 → 68).</div></div>
+      </div>
+      <div class="shift">
+        <div class="side old"><span class="lab">Today</span><div class="ttl">Signup required</div><div class="txt">Nothing to try before creating an account. No public surface.</div></div>
+        <div class="side new"><span class="lab">v11</span><div class="ttl">Free public audit as the front door</div><div class="txt">URL in → shareable report out, no login. Doubles as a <b class="hl">lead pipeline</b>: 312 audits, 38 claimed, 21 became projects.</div></div>
+      </div>
+      <div class="shift">
+        <div class="side old"><span class="lab">Today</span><div class="ttl">Seat and invoice billing</div><div class="txt">Billing page, invoice settings, invoice details.</div></div>
+        <div class="side new"><span class="lab">v11</span><div class="ttl">Credits, and a sharp pricing wedge</div><div class="txt">Credits meter crawls, scrapes, reports and drafts. <b class="hl">LLM calls are free on BYOK</b> — the stated attack on rivals who charge per run. Live burn rate and forecast.</div></div>
+      </div>
+      <div class="shift">
+        <div class="side old"><span class="lab">Today</span><div class="ttl">Agency features spread out</div><div class="txt">Clients, team permissions, project access and billing across four separate pages.</div></div>
+        <div class="side new"><span class="lab">v11</span><div class="ttl">One Settings, built for scale</div><div class="txt">Eight tabs. <b class="hl">66 projects, 12 seats</b>, per-project credit caps, white-label tab, 22 module-level permissions per role.</div></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- NEW -->
+  <section>
+    <div class="sh"><h2>Brand new</h2><span class="cnt new">12 screens</span></div>
+    <p class="oneline">Nothing in today's app corresponds to these.</p>
+    <div class="scroller">
+      <table>
+        <thead><tr><th style="width:22%">Screen</th><th style="width:42%">What it does</th><th>Standout detail</th></tr></thead>
+        <tbody>
+          <tr class="hot"><td>Audit Engine</td><td>Public URL-in / report-out audit, 3 screens: launcher, live run, public report</td><td>24 prompts × 6 engines + 50 keywords + 200-page crawl, ~3 min</td></tr>
+          <tr class="hot"><td>Visibility Health</td><td>The scoring model — Findable, Cited, Chosen</td><td>12 measures, each scored against a target; red ones become the plan</td></tr>
+          <tr class="hot"><td>Visibility Plan</td><td>Every gap's fix, sequenced with projected score</td><td>Now / Next / Later, owners, due dates, points gained</td></tr>
+          <tr class="hot"><td>Runs</td><td>The evidence ledger — every execution, engine and repeat</td><td>Per-run rows with latency, variance warnings, failure rate 1.4%</td></tr>
+          <tr><td>Brand Context</td><td>ICP, sales motion, ticket size, personas, reference docs</td><td>Versioned; 4 docs / 61 chunks indexed; per-persona mention rates</td></tr>
+          <tr><td>Brand Narrative</td><td>Not whether AI mentions you — how it describes you</td><td>Desired vs observed framing, contradictions flagged per engine</td></tr>
+          <tr><td>AI Visibility Report</td><td>Narrative client-ready report</td><td>Written in prose, not tiles: "Present, not yet Preferred"</td></tr>
+          <tr><td>Credits &amp; Usage</td><td>Credit balance, burn rate, cost per action</td><td>"Runs out in 19 days" forecasting</td></tr>
+          <tr><td>Schedules</td><td>Recurring runs on groups or single variants</td><td>Weekly credit forecast with over-spend warning (525/wk vs 125 allowance)</td></tr>
+          <tr><td>Connections</td><td>Everything read from or written to</td><td>GSC, GA4, WordPress, Slack, BYOK keys, <b class="hl">MCP server</b>, webhooks, dev API</td></tr>
+          <tr><td>Prompt Generator</td><td>Build a prompt group from four sources</td><td>AI · your site pages · content gaps · CSV, with review before adopting</td></tr>
+          <tr><td>What's New</td><td>In-app changelog with feature voting</td><td>Users upvote roadmap items</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <!-- REBUILT -->
+  <section>
+    <div class="sh"><h2>Rebuilt, not just restyled</h2><span class="cnt up">5 areas</span></div>
+    <div class="scroller">
+      <table>
+        <thead><tr><th style="width:20%">Area</th><th style="width:36%">Today</th><th>v11</th></tr></thead>
+        <tbody>
+          <tr><td>Automations</td><td>Automation Settings — a settings form</td><td>Recipe engine: trigger → condition → approval gate → action, with step-by-step run logs and a webhook endpoint</td></tr>
+          <tr><td>Settings</td><td>Split across Profile, Domain, Organization, Clients, Team Permissions, Billing</td><td>One screen, 8 tabs, 66 projects, white-label, per-project credit caps</td></tr>
+          <tr><td>Assistant</td><td>AI Copilot + Chat + floating copilot</td><td>One agent whose answers <b class="hl">cite the run ledger</b> — evidence-linked, not free-floating</td></tr>
+          <tr><td>Analysis run</td><td>Processing banner + scan dialog</td><td>Six-stage live screen with responses streaming in as executions complete</td></tr>
+          <tr><td>Prompt generation</td><td>A wizard component inside Prompts</td><td>Its own screen with four sources and a review step</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <!-- CARRIED -->
+  <section>
+    <div class="sh"><h2>Carried over</h2><span class="cnt">24 screens</span></div>
+    <p class="oneline">Same job as today, re-skinned into the new shell. Detail pages became modals — there are 22 of them.</p>
+    <div class="chips">
+      <span class="chip">Insights / Dashboard</span><span class="chip">Prompts</span><span class="chip">Topics</span>
+      <span class="chip">Mentions</span><span class="chip">Citations</span><span class="chip">Sources</span>
+      <span class="chip">Alerts</span><span class="chip">Sentiment</span><span class="chip">Share of Voice</span>
+      <span class="chip">Historical Trends</span><span class="chip">Traffic Attribution</span><span class="chip">Misinformation</span>
+      <span class="chip">Competitors</span><span class="chip">GEO Content Gaps</span><span class="chip">Content Planner</span>
+      <span class="chip">Content Editor</span><span class="chip">Reports</span><span class="chip">Keyword Rankings</span>
+      <span class="chip">Opportunities</span><span class="chip">Organic Reports</span><span class="chip">SEO Competitors</span>
+      <span class="chip">SEO Share of Voice</span><span class="chip">Backlinks</span><span class="chip">Onboarding</span>
+    </div>
+  </section>
+
+  <!-- DROPPED -->
+  <section>
+    <div class="sh"><h2>Gone, or not carried across</h2><span class="cnt out">4 to check</span></div>
+    <p class="oneline">These exist in the shipped app but have no home in v11. Some are deliberate consolidation; at least one looks like an oversight.</p>
+    <div class="scroller">
+      <table>
+        <thead><tr><th style="width:22%">Today</th><th style="width:14%">In v11</th><th>Read</th></tr></thead>
+        <tbody>
+          <tr class="risk"><td>Multilingual Monitoring</td><td><span class="tag t-gone">Absent</span></td><td><b class="hl">Zero mentions anywhere in the prototype.</b> This is a real capability we ship and one of the few things Pixis has no answer to. Losing it in a redesign would be a mistake — worth confirming it was intentional.</td></tr>
+          <tr class="warn"><td>AI Crawler</td><td><span class="tag t-abs">Absorbed</span></td><td>No standalone page, but bot access appears as a scored measure ("6 of 6") and the audit does a 200-page crawl. Folded in, not lost — though crawl frequency and discovery history have no home.</td></tr>
+          <tr class="warn"><td>Agent Analytics</td><td><span class="tag t-abs">Absorbed</span></td><td>Per-engine breakdowns are everywhere in v11, but model performance, behaviour patterns and referral pathways as a dedicated view are gone.</td></tr>
+          <tr class="warn"><td>Bulk Content Upload</td><td><span class="tag t-abs">Unclear</span></td><td>Barely referenced. The Prompt Generator takes CSV, but bulk <em>content</em> upload has no obvious equivalent.</td></tr>
+          <tr><td>Detail pages ×6</td><td><span class="tag t-mod">Now modals</span></td><td>Mention, Prompt, Prompt Insights, SEO Keyword, Opportunity and Content Gap detail views became modals. Deliberate and fine.</td></tr>
+          <tr><td>Auth flows ×5</td><td><span class="tag t-mod">N/A</span></td><td>Login, forgot/reset password, session expired, accept invitation — a prototype doesn't need them.</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <div class="note">
+      <span class="lbl">One thing to decide before build</span>
+      <p>Multilingual is the only genuine capability loss in this diff. Everything else is consolidation. Confirm whether it was dropped on purpose — if not, it needs a home before v11 is treated as the target design.</p>
+    </div>
+  </section>
+
+  <footer class="foot">
+    <p><strong>Method.</strong> All 46 screens extracted from <span class="mono">promptmaxx-v11.html</span> (371 KB, self-contained, no libraries) and mapped against the 54 pages in <span class="mono">frontend/src/pages</span> plus the backend apps and engine processors on branch <span class="mono">Selva-Ganeshan</span>. Numbers quoted are the prototype's own demo data. Note the file's internal title reads "complete prototype v3" while the filename says v11 — worth reconciling so nobody builds from the wrong copy.</p>
+  </footer>
+
+</div>
+
+</body>
+</html>

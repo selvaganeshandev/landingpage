@@ -1,0 +1,448 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="description" content="Plain-English guide to the 12 new features in the Promptmaxx v11 prototype.">
+  <style>
+    :root { color-scheme: light dark; }
+    html { -webkit-text-size-adjust: 100%; }
+    body { margin: 0; }
+    img { max-width: 100%; }
+    [hidden] { display: none !important; }
+  </style>
+  <title>Promptmaxx v11 Explained</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wght@500;600;700&family=Source+Serif+4:opsz,wght@8..60,400;8..60,600&family=JetBrains+Mono:wght@400;700&display=swap">
+
+  <style>
+    :root {
+      --ground:#FBFAFD; --surface:#FFFFFF; --surface-2:#F3F1F9;
+      --ink:#1A1726; --ink-2:#423D57; --muted:#6E6A85;
+      --rule:#E2DEEE; --rule-strong:#CFC9E4;
+      --brand:#6547FA; --brand-soft:#EDE9FE;
+      --ok:#1F7A52; --ok-soft:#E0F2E9;
+      --warn:#A8620C; --warn-soft:#FBEEDC;
+      --crit:#C0353A; --crit-soft:#FBE6E7;
+      --f-display:"Archivo","Helvetica Neue",Arial,sans-serif;
+      --f-body:"Source Serif 4",Georgia,serif;
+      --f-mono:"JetBrains Mono",ui-monospace,Consolas,monospace;
+    }
+    @media (prefers-color-scheme: dark) {
+      :root:not([data-theme="light"]) {
+        --ground:#121020; --surface:#1A1730; --surface-2:#221E3C;
+        --ink:#EFEDF8; --ink-2:#C3BDDB; --muted:#918BAE;
+        --rule:#2E2950; --rule-strong:#443D6E;
+        --brand:#9B85FF; --brand-soft:#241F45;
+        --ok:#5FCB97; --ok-soft:#17301F;
+        --warn:#E8AE5C; --warn-soft:#33260F;
+        --crit:#F0868A; --crit-soft:#35191B;
+      }
+    }
+    :root[data-theme="dark"] {
+      --ground:#121020; --surface:#1A1730; --surface-2:#221E3C;
+      --ink:#EFEDF8; --ink-2:#C3BDDB; --muted:#918BAE;
+      --rule:#2E2950; --rule-strong:#443D6E;
+      --brand:#9B85FF; --brand-soft:#241F45;
+      --ok:#5FCB97; --ok-soft:#17301F;
+      --warn:#E8AE5C; --warn-soft:#33260F;
+      --crit:#F0868A; --crit-soft:#35191B;
+    }
+
+    * { box-sizing: border-box; }
+    body {
+      background: var(--ground); color: var(--ink);
+      font-family: var(--f-body); font-size: 17px; line-height: 1.62;
+      -webkit-font-smoothing: antialiased;
+    }
+    .wrap { max-width: 900px; margin: 0 auto; padding: 0 24px 80px; }
+    .col { max-width: 68ch; }
+
+    .mast { padding: 46px 0 22px; border-bottom: 2px solid var(--ink); margin-bottom: 34px; }
+    .eyebrow {
+      font-family: var(--f-mono); font-size: 10.5px; font-weight: 700;
+      letter-spacing: .16em; text-transform: uppercase; color: var(--brand); margin: 0 0 14px;
+    }
+    h1 {
+      font-family: var(--f-display); font-weight: 700;
+      font-size: clamp(33px,5.4vw,54px); line-height: 1; letter-spacing: -.028em;
+      margin: 0 0 14px; text-wrap: balance;
+    }
+    .sub { font-size: 18px; color: var(--ink-2); margin: 0; max-width: 58ch; }
+
+    h2 {
+      font-family: var(--f-display); font-weight: 600; font-size: 27px;
+      letter-spacing: -.02em; margin: 0 0 8px; text-wrap: balance;
+    }
+    section { margin-bottom: 56px; }
+    .sechead { border-top: 1px solid var(--ink); padding-top: 14px; margin-bottom: 20px; }
+    .lead { font-size: 17px; color: var(--ink-2); margin: 0 0 20px; max-width: 64ch; }
+    p { margin: 0 0 15px; }
+    strong { font-weight: 600; color: var(--ink); }
+
+    /* engine meanings */
+    .meanings { display: flex; flex-direction: column; gap: 12px; margin-bottom: 8px; }
+    .mean {
+      background: var(--surface); border: 1px solid var(--rule);
+      border-left: 4px solid var(--brand); border-radius: 0 3px 3px 0; padding: 16px 20px;
+    }
+    .mean .k {
+      font-family: var(--f-mono); font-size: 10.5px; font-weight: 700;
+      letter-spacing: .1em; text-transform: uppercase; color: var(--brand); margin-bottom: 5px;
+    }
+    .mean .t { font-family: var(--f-display); font-weight: 600; font-size: 18px; margin-bottom: 5px; }
+    .mean p { margin: 0; font-size: 16px; color: var(--ink-2); }
+    .mean .ex {
+      margin-top: 8px; font-family: var(--f-mono); font-size: 12.5px;
+      color: var(--muted); background: var(--surface-2); padding: 7px 11px; border-radius: 3px;
+    }
+
+    /* pipeline steps */
+    .steps { display: flex; flex-direction: column; gap: 2px; margin: 22px 0 8px; }
+    .step {
+      display: grid; grid-template-columns: 90px 1fr; gap: 18px;
+      background: var(--surface); border: 1px solid var(--rule); padding: 16px 20px; align-items: start;
+    }
+    .step:first-child { border-radius: 3px 3px 0 0; }
+    .step:last-child { border-radius: 0 0 3px 3px; }
+    .step + .step { border-top: none; }
+    .step .nm {
+      font-family: var(--f-mono); font-size: 11px; font-weight: 700; letter-spacing: .1em;
+      text-transform: uppercase; color: var(--brand); padding-top: 3px;
+    }
+    .step .b { font-size: 16px; color: var(--ink-2); }
+    .step .b b { color: var(--ink); font-weight: 600; }
+
+    /* feature blocks */
+    .feat {
+      background: var(--surface); border: 1px solid var(--rule);
+      border-radius: 3px; padding: 22px 24px; margin-bottom: 16px;
+    }
+    .feat.big { border-color: var(--rule-strong); box-shadow: 0 1px 2px rgba(26,23,38,.05); }
+    .fh { display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; margin-bottom: 14px; }
+    .fh h3 { font-family: var(--f-display); font-weight: 600; font-size: 21px; margin: 0; letter-spacing: -.015em; }
+    .badge {
+      font-family: var(--f-mono); font-size: 9.5px; font-weight: 700; letter-spacing: .09em;
+      text-transform: uppercase; padding: 3px 7px; border-radius: 2px;
+      background: var(--ok-soft); color: var(--ok);
+    }
+    .qa { display: flex; flex-direction: column; gap: 13px; }
+    .q { display: grid; grid-template-columns: 92px 1fr; gap: 14px; align-items: start; }
+    .q .lbl {
+      font-family: var(--f-mono); font-size: 10px; font-weight: 700; letter-spacing: .1em;
+      text-transform: uppercase; color: var(--muted); padding-top: 4px;
+    }
+    .q .a { font-size: 16px; color: var(--ink-2); }
+    .q .a b { color: var(--ink); font-weight: 600; }
+    .q .a ol, .q .a ul { margin: 6px 0 0; padding-left: 20px; }
+    .q .a li { margin-bottom: 5px; }
+
+    .box {
+      background: var(--surface-2); border-radius: 3px; padding: 13px 16px;
+      margin-top: 10px; font-family: var(--f-mono); font-size: 12.5px;
+      color: var(--ink-2); line-height: 1.65;
+    }
+    .box b { color: var(--ink); }
+
+    /* job table */
+    .scroller { overflow-x: auto; }
+    table { border-collapse: collapse; width: 100%; min-width: 580px; font-family: var(--f-display); font-size: 14.5px; line-height: 1.45; }
+    thead th {
+      font-family: var(--f-mono); font-size: 9.5px; font-weight: 700; letter-spacing: .1em;
+      text-transform: uppercase; color: var(--muted); text-align: left;
+      padding: 0 12px 8px 0; border-bottom: 1.5px solid var(--rule-strong); white-space: nowrap;
+    }
+    tbody td { padding: 11px 12px 11px 0; border-bottom: 1px solid var(--rule); vertical-align: top; color: var(--ink-2); }
+    tbody td:first-child { color: var(--ink); font-weight: 500; }
+    tbody tr:last-child td { border-bottom: none; }
+    tr.newjob td:first-child { box-shadow: inset 3px 0 0 var(--ok); padding-left: 11px; }
+
+    .tag {
+      display: inline-block; font-family: var(--f-mono); font-size: 9.5px; font-weight: 700;
+      letter-spacing: .06em; text-transform: uppercase; padding: 3px 6px; border-radius: 2px; white-space: nowrap;
+    }
+    .t-new { background: var(--ok-soft); color: var(--ok); }
+    .t-has { background: var(--surface-2); color: var(--muted); }
+
+    .note {
+      border-left: 3px solid var(--brand); background: var(--brand-soft);
+      padding: 15px 19px; border-radius: 0 3px 3px 0; margin: 22px 0; font-size: 16px;
+    }
+    .note .lbl {
+      font-family: var(--f-mono); font-size: 10px; font-weight: 700; letter-spacing: .12em;
+      text-transform: uppercase; color: var(--brand); display: block; margin-bottom: 6px;
+    }
+    .note p { margin: 0; }
+
+    .foot { border-top: 1px solid var(--rule); padding-top: 18px; font-size: 14px; color: var(--muted); }
+    .mono { font-family: var(--f-mono); font-size: 12.5px; }
+
+    @media (max-width: 620px) {
+      body { font-size: 16px; }
+      .wrap { padding: 0 16px 64px; }
+      .step, .q { grid-template-columns: 1fr; gap: 5px; }
+    }
+    @media (prefers-reduced-motion: reduce) { * { animation: none !important; transition: none !important; } }
+  </style>
+</head>
+<body>
+
+<div class="wrap">
+
+  <header class="mast">
+    <p class="eyebrow">Plain-English guide to the v11 prototype</p>
+    <h1>Promptmaxx v11 Explained</h1>
+    <p class="sub">What is new, why it was added, and how each piece works. Plus the one word that confuses everyone — "engine" — and what our engine actually has to do.</p>
+  </header>
+
+  <!-- ENGINE -->
+  <section>
+    <div class="sechead"><h2>First: the word "engine"</h2></div>
+    <p class="lead col">This word is used for three completely different things in our product. Mixing them up makes everything else confusing, so here they are separated.</p>
+
+    <div class="meanings">
+      <div class="mean">
+        <div class="k">Meaning 1 · the chatbots</div>
+        <div class="t">AI engine</div>
+        <p>The AI chatbots we ask questions to. We use <strong>six</strong>. These are outside companies — we just send them a question and read the answer.</p>
+        <div class="ex">ChatGPT · Gemini · Claude · Perplexity · Grok · DeepSeek</div>
+      </div>
+      <div class="mean">
+        <div class="k">Meaning 2 · a feature name</div>
+        <div class="t">Audit Engine</div>
+        <p>The name of one new screen. It is a free tool: you type a website address, and it gives back a report. "Engine" here is just branding — it does not mean a separate system.</p>
+      </div>
+      <div class="mean">
+        <div class="k">Meaning 3 · our own code</div>
+        <div class="t">The <span class="mono">engine/</span> folder</div>
+        <p>Our own background worker. It is the part of our software that does the slow work: asking the six AI engines, reading their answers, crawling websites, and saving results. The website you click on is fast because the engine does the heavy work behind the scenes.</p>
+        <div class="ex">Our code → asks → the six AI engines</div>
+      </div>
+    </div>
+
+    <div class="note col">
+      <span class="lbl">Simple way to remember</span>
+      <p><strong>AI engines</strong> are outside. <strong>Our engine</strong> is inside. <strong>Audit Engine</strong> is just a feature name.</p>
+    </div>
+  </section>
+
+  <!-- WHAT ENGINE DOES -->
+  <section>
+    <div class="sechead"><h2>What our engine does — 5 steps</h2></div>
+    <p class="lead col">Every time we check one question, our engine runs these five steps in order. This is the heart of the whole product.</p>
+
+    <div class="steps">
+      <div class="step">
+        <span class="nm">1 · Ask</span>
+        <span class="b">Send the question to all six AI engines. <b>Ask each one several times, not once</b> — because AI gives a different answer each time you ask.</span>
+      </div>
+      <div class="step">
+        <span class="nm">2 · Read</span>
+        <span class="b">Read every answer. Find: was our brand named? In what position? Was our website linked? How were we described?</span>
+      </div>
+      <div class="step">
+        <span class="nm">3 · Weigh</span>
+        <span class="b">Turn all of that into one score out of 100, using fixed weights: <b>Placement 35% · Frequency 25% · Sourcing 25% · Framing 15%</b>.</span>
+      </div>
+      <div class="step">
+        <span class="nm">4 · Compare</span>
+        <span class="b">Note every other brand the AI named, and match them to the competitors the customer tracks.</span>
+      </div>
+      <div class="step">
+        <span class="nm">5 · Explain</span>
+        <span class="b">Say what changed since last time, why, and the two or three things worth doing about it.</span>
+      </div>
+    </div>
+
+    <div class="box col">
+      <b>Real example from the prototype:</b> one question, 12 runs across 4 AI engines → score <b>72/100</b> (Placement 28.0 + Frequency 19.5 + Sourcing 15.0 + Framing 9.5), up 5 points from the previous batch.
+    </div>
+  </section>
+
+  <!-- NEW FEATURES -->
+  <section>
+    <div class="sechead"><h2>What is newly added</h2></div>
+    <p class="lead col">Twelve new screens. Here is each one: what it is, why it was added, and how it works.</p>
+
+    <!-- 1 -->
+    <div class="feat big">
+      <div class="fh"><h3>1 · Audit Engine</h3><span class="badge">Biggest addition</span></div>
+      <div class="qa">
+        <div class="q"><span class="lbl">What</span><span class="a">A free public tool. Someone types a website address and gets a full report. <b>No login, no payment.</b></span></div>
+        <div class="q"><span class="lbl">Why</span><span class="a">Today nobody can try Promptmaxx without signing up. This lets strangers see their own score in 3 minutes — and it quietly becomes our sales list. In the demo: 312 audits ran, 38 people claimed theirs, 21 became paying projects.</span></div>
+        <div class="q"><span class="lbl">How</span><span class="a">Six stages, about 3 minutes:
+          <ol>
+            <li><b>Profile</b> — detect the brand, industry, and who its competitors are</li>
+            <li><b>Prompts</b> — write 24 buyer questions automatically</li>
+            <li><b>Engines</b> — ask all 6 AI engines (24 × 6 = 144 answers)</li>
+            <li><b>SERP + crawl</b> — check 50 Google keywords, crawl 200 pages</li>
+            <li><b>Score</b> — calculate the GEO score and SEO score</li>
+            <li><b>Publish</b> — create a shareable public link</li>
+          </ol>
+        </span></div>
+      </div>
+    </div>
+
+    <!-- 2 -->
+    <div class="feat big">
+      <div class="fh"><h3>2 · Runs</h3><span class="badge">Most important fix</span></div>
+      <div class="qa">
+        <div class="q"><span class="lbl">What</span><span class="a">A full record of every single time we asked an AI anything. One row per question, per AI, per repeat.</span></div>
+        <div class="q"><span class="lbl">Why</span><span class="a"><b>AI answers change every time you ask.</b> Today we ask once and report that as fact — which can be wrong. Asking many times and reporting the average is honest. It also lets us prove our numbers instead of asking customers to trust us.</span></div>
+        <div class="q"><span class="lbl">How</span><span class="a">Each question is asked <b>3 to 10 times</b> on each AI. Every run is saved with its answer, position and speed. If the answers disagree, the row is flagged <b>"variance"</b>. A confidence meter (●●●○) shows how reliable each number is.
+          <div class="box"><b>Why it matters, in one line:</b> ChatGPT said yes on run 1, yes on run 2, no on run 3. Ask once and you might report 100% or 0%. The truth is 67%.</div>
+        </span></div>
+      </div>
+    </div>
+
+    <!-- 3 -->
+    <div class="feat big">
+      <div class="fh"><h3>3 · Visibility Health</h3><span class="badge">The scoring system</span></div>
+      <div class="qa">
+        <div class="q"><span class="lbl">What</span><span class="a">One score out of 100, built from <b>3 questions and 12 measurements</b>.</span></div>
+        <div class="q"><span class="lbl">Why</span><span class="a">Today our numbers are spread across many pages with no single answer to "am I doing well?" Customers want one number, and a target to aim at.</span></div>
+        <div class="q"><span class="lbl">How</span><span class="a">Three pillars, four measures each:
+          <ul>
+            <li><b>Findable</b> — can the AI reach and read your site? (bot access, page structure, freshness, author signals)</li>
+            <li><b>Cited</b> — does the AI use your site as its source? (your citation share, competitor share, source age, wrong-info risk)</li>
+            <li><b>Chosen</b> — does the AI actually recommend you? (mention rate, position, engine coverage, on-brand wording)</li>
+          </ul>
+          Each measure has a target. Anything failing turns red, and red measures automatically become the plan.
+          <div class="box"><b>Score bands:</b> Absent → Present → <b>Preferred (51–75)</b> → <b>Default (76+)</b></div>
+        </span></div>
+      </div>
+    </div>
+
+    <!-- 4 -->
+    <div class="feat">
+      <div class="fh"><h3>4 · Visibility Plan</h3></div>
+      <div class="qa">
+        <div class="q"><span class="lbl">What</span><span class="a">A to-do list of fixes, in order, with the score you should reach after each one.</span></div>
+        <div class="q"><span class="lbl">Why</span><span class="a">A dashboard shows the problem but not the answer. Customers kept asking "so what do I do?" This answers it.</span></div>
+        <div class="q"><span class="lbl">How</span><span class="a">Tasks are sorted into <b>Now / Next / Later</b>, each with an owner, a due date and points gained. The demo shows 46 → 53 → 61 → 68. The list is generated automatically from the red measures in Visibility Health.</span></div>
+      </div>
+    </div>
+
+    <!-- 5 -->
+    <div class="feat">
+      <div class="fh"><h3>5 · Brand Context</h3></div>
+      <div class="qa">
+        <div class="q"><span class="lbl">What</span><span class="a">One place to describe the customer's business: who they sell to, how they sell, their price range, their buyer types, and their own documents.</span></div>
+        <div class="q"><span class="lbl">Why</span><span class="a">Right now our AI writes generic questions and generic content because it does not know the business. Give it context once and everything downstream gets better.</span></div>
+        <div class="q"><span class="lbl">How</span><span class="a">You fill in business type, sales style, ticket size and buyer personas, and upload documents (PDFs, Word files) which get indexed. Every prompt, gap and content suggestion is then generated against this. It is <b>versioned</b> — you can compare and restore old versions, and it warns you which groups a change will affect.</span></div>
+      </div>
+    </div>
+
+    <!-- 6 -->
+    <div class="feat">
+      <div class="fh"><h3>6 · Brand Narrative</h3></div>
+      <div class="qa">
+        <div class="q"><span class="lbl">What</span><span class="a">Not <em>whether</em> AI mentions you — <b>how it describes you</b>.</span></div>
+        <div class="q"><span class="lbl">Why</span><span class="a">Being mentioned badly is worse than not being mentioned. If AI keeps saying "stricter eligibility than most", that costs sales even though the mention counts look fine.</span></div>
+        <div class="q"><span class="lbl">How</span><span class="a">It compares what Brand Context says you want to be known for against what the AI actually says. Each line is marked <b>Aligned</b>, <b>Contradiction</b> or <b>Absent</b>. Contradictions can be turned into corrective content with one click.</span></div>
+      </div>
+    </div>
+
+    <!-- 7 -->
+    <div class="feat">
+      <div class="fh"><h3>7 · AI Visibility Report</h3></div>
+      <div class="qa">
+        <div class="q"><span class="lbl">What</span><span class="a">A client-ready report written in sentences, not charts.</span></div>
+        <div class="q"><span class="lbl">Why</span><span class="a">Agencies need something to hand a CMO. Screenshots of dashboards do not work in a board meeting.</span></div>
+        <div class="q"><span class="lbl">How</span><span class="a">Sections read like a document — "Present, not yet Preferred", "Can the engines reach and read you?", "Now, Next, Later". Every report ends with a <b>methodology note</b> stating exactly which AI models were used, on what date, how many times, and what the limits are.</span></div>
+      </div>
+    </div>
+
+    <!-- 8 -->
+    <div class="feat">
+      <div class="fh"><h3>8 · Credits &amp; Usage</h3></div>
+      <div class="qa">
+        <div class="q"><span class="lbl">What</span><span class="a">A meter showing what each action costs and what is left.</span></div>
+        <div class="q"><span class="lbl">Why</span><span class="a">Asking each question 3–10 times instead of once costs much more. Without a meter, costs run away. It is also a <b>pricing weapon</b>.</span></div>
+        <div class="q"><span class="lbl">How</span><span class="a">Fixed prices per action, with live burn rate and "runs out in 19 days" forecasting. Per-project caps and auto-pause guardrails.
+          <div class="box">Group run, all AI engines — <b>25</b><br>Retry one AI engine — <b>8</b><br>Generate variants — <b>5</b><br>Content generation — <b>40</b><br>AI Visibility Report — <b>100</b></div>
+          <b>The clever part:</b> because customers connect their own AI keys, the AI calls cost us nothing — so LLM calls are <b>free</b>. Credits only meter crawls, scrapes, reports and drafts. Competitors charge per run because they pay per run. We do not.
+        </span></div>
+      </div>
+    </div>
+
+    <!-- 9 -->
+    <div class="feat">
+      <div class="fh"><h3>9 · Schedules</h3></div>
+      <div class="qa">
+        <div class="q"><span class="lbl">What</span><span class="a">Set questions to re-run automatically — daily, weekly or monthly.</span></div>
+        <div class="q"><span class="lbl">Why</span><span class="a">AI answers drift over time. Checking once tells you nothing about the trend. And customers should not have to remember to press a button.</span></div>
+        <div class="q"><span class="lbl">How</span><span class="a">Choose the group, how often, which AI engines, and how many repeats. The screen shows a <b>weekly credit forecast</b> and warns when you are over budget — the demo shows "4.2× over allowance" with one-click fixes to bring it down.</span></div>
+      </div>
+    </div>
+
+    <!-- 10 -->
+    <div class="feat">
+      <div class="fh"><h3>10 · Connections</h3></div>
+      <div class="qa">
+        <div class="q"><span class="lbl">What</span><span class="a">One page for everything we read from or write to.</span></div>
+        <div class="q"><span class="lbl">Why</span><span class="a">Settings were scattered. Also, connections are a sales argument: we need fewer than rivals do, because we own our own SERP and keyword data.</span></div>
+        <div class="q"><span class="lbl">How</span><span class="a">Google Search Console, Google Analytics, WordPress, Slack, and the customer's own six AI keys. Plus three developer things that are new for us: an <b>MCP server</b> (query our data from Claude Desktop or Cursor), <b>webhooks</b>, and a <b>public API</b>.</span></div>
+      </div>
+    </div>
+
+    <!-- 11 -->
+    <div class="feat">
+      <div class="fh"><h3>11 · Prompt Generator</h3></div>
+      <div class="qa">
+        <div class="q"><span class="lbl">What</span><span class="a">Four ways to create the buyer questions we track.</span></div>
+        <div class="q"><span class="lbl">Why</span><span class="a">The whole product depends on tracking the right questions. If the questions are wrong, every number after them is wrong.</span></div>
+        <div class="q"><span class="lbl">How</span><span class="a">Generate with AI · read your own website pages and write the questions back · start from known content gaps · upload a spreadsheet. All four end in a <b>review step</b> before anything is tracked.</span></div>
+      </div>
+    </div>
+
+    <!-- 12 -->
+    <div class="feat">
+      <div class="fh"><h3>12 · What's New</h3></div>
+      <div class="qa">
+        <div class="q"><span class="lbl">What</span><span class="a">An in-app changelog where users vote on what to build next.</span></div>
+        <div class="q"><span class="lbl">Why</span><span class="a">Customers do not notice features they are not told about, and voting tells us what to build.</span></div>
+        <div class="q"><span class="lbl">How</span><span class="a">A list of shipped and planned items with an upvote button on each.</span></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ENGINE JOBS -->
+  <section>
+    <div class="sechead"><h2>What our engine must do for all this</h2></div>
+    <p class="lead col">The jobs our background worker needs to handle. Green means it is a new job it cannot do today.</p>
+
+    <div class="scroller">
+      <table>
+        <thead><tr><th style="width:26%">Job</th><th style="width:14%">Status</th><th>What it means in practice</th></tr></thead>
+        <tbody>
+          <tr><td>Ask the 6 AI engines</td><td><span class="tag t-has">Have</span></td><td>Already working. Sends the question, gets the answer back.</td></tr>
+          <tr><td>Read the answer</td><td><span class="tag t-has">Have</span></td><td>Finds brand names, positions, links and tone.</td></tr>
+          <tr class="newjob"><td>Repeat 3–10 times</td><td><span class="tag t-new">New</span></td><td>The single biggest change. Today the database can only store one result per question per AI — that has to change before anything else works.</td></tr>
+          <tr class="newjob"><td>Save every single run</td><td><span class="tag t-new">New</span></td><td>Keep each answer separately with its speed and result, so every number can be proven.</td></tr>
+          <tr class="newjob"><td>Measure disagreement</td><td><span class="tag t-new">New</span></td><td>Compare the repeats. If they disagree, flag it and lower the confidence rating.</td></tr>
+          <tr class="newjob"><td>Crawl websites</td><td><span class="tag t-new">New</span></td><td>Visit up to 200 pages: check page speed, broken links, missing titles, whether AI bots are blocked. <b>The crawling libraries are already installed</b> — they just are not being used.</td></tr>
+          <tr class="newjob"><td>Calculate 12 measures</td><td><span class="tag t-new">New</span></td><td>Turn raw data into the Findable / Cited / Chosen scores, each against a target.</td></tr>
+          <tr class="newjob"><td>Count credits</td><td><span class="tag t-new">New</span></td><td>Charge before each action, refuse when out, and stop schedules at the guardrail.</td></tr>
+          <tr class="newjob"><td>Run on a timer</td><td><span class="tag t-new">New</span></td><td>Fire scheduled runs at the right hour in the customer's timezone.</td></tr>
+          <tr class="newjob"><td>Run a public audit</td><td><span class="tag t-new">New</span></td><td>The full 6-stage pipeline for a stranger with no account, finishing in about 3 minutes.</td></tr>
+          <tr class="newjob"><td>Check claims vs your site</td><td><span class="tag t-new">New</span></td><td>When AI states a fact about the customer, open the page it cites and check whether the page actually says that.</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <div class="note col">
+      <span class="lbl">If you only do one thing</span>
+      <p>Everything else on this list depends on <strong>repeating the ask 3–10 times and saving every run</strong>. Visibility Health, the Plan, the confidence meter, the Audit report and the credit meter all read from that record. It is the foundation — build it first.</p>
+    </div>
+  </section>
+
+  <footer class="foot">
+    <p>Taken from <span class="mono">promptmaxx-v11.html</span> — all 46 screens read, with the scoring weights, credit prices and pipeline stages quoted directly from the prototype. Numbers shown are its demo data, not real customer figures.</p>
+  </footer>
+
+</div>
+
+</body>
+</html>

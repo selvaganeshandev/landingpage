@@ -1,0 +1,309 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="description" content="Full spec of the v11 Credits and Usage screen - blocks, price list, rules and gaps.">
+  <style>
+    :root { color-scheme: light dark; }
+    html { -webkit-text-size-adjust: 100%; }
+    body { margin: 0; }
+    img { max-width: 100%; }
+    [hidden] { display: none !important; }
+  </style>
+  <title>Credits &amp; Usage Screen</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wght@500;600;700&family=Source+Serif+4:opsz,wght@8..60,400;8..60,600&family=JetBrains+Mono:wght@400;500;700&display=swap">
+
+  <style>
+    :root {
+      --ground:#FBFAFD; --surface:#FFFFFF; --surface-2:#F3F1F9;
+      --ink:#1A1726; --ink-2:#423D57; --muted:#6E6A85;
+      --rule:#E2DEEE; --rule-strong:#CFC9E4;
+      --brand:#6547FA; --brand-soft:#EDE9FE;
+      --ok:#1F7A52; --ok-soft:#E0F2E9;
+      --warn:#A8620C; --warn-soft:#FBEEDC;
+      --crit:#C0353A; --crit-soft:#FBE6E7;
+      --f-display:"Archivo","Helvetica Neue",Arial,sans-serif;
+      --f-body:"Source Serif 4",Georgia,serif;
+      --f-mono:"JetBrains Mono",ui-monospace,Consolas,monospace;
+    }
+    @media (prefers-color-scheme: dark) {
+      :root:not([data-theme="light"]) {
+        --ground:#121020; --surface:#1A1730; --surface-2:#221E3C;
+        --ink:#EFEDF8; --ink-2:#C3BDDB; --muted:#918BAE;
+        --rule:#2E2950; --rule-strong:#443D6E;
+        --brand:#9B85FF; --brand-soft:#241F45;
+        --ok:#5FCB97; --ok-soft:#17301F;
+        --warn:#E8AE5C; --warn-soft:#33260F;
+        --crit:#F0868A; --crit-soft:#35191B;
+      }
+    }
+    :root[data-theme="dark"] {
+      --ground:#121020; --surface:#1A1730; --surface-2:#221E3C;
+      --ink:#EFEDF8; --ink-2:#C3BDDB; --muted:#918BAE;
+      --rule:#2E2950; --rule-strong:#443D6E;
+      --brand:#9B85FF; --brand-soft:#241F45;
+      --ok:#5FCB97; --ok-soft:#17301F;
+      --warn:#E8AE5C; --warn-soft:#33260F;
+      --crit:#F0868A; --crit-soft:#35191B;
+    }
+
+    * { box-sizing: border-box; }
+    body { background: var(--ground); color: var(--ink); font-family: var(--f-body); font-size: 16.5px; line-height: 1.6; -webkit-font-smoothing: antialiased; }
+    .wrap { max-width: 940px; margin: 0 auto; padding: 0 24px 80px; }
+    .col { max-width: 68ch; }
+
+    .mast { padding: 44px 0 20px; border-bottom: 2px solid var(--ink); margin-bottom: 30px; }
+    .eyebrow { font-family: var(--f-mono); font-size: 10.5px; font-weight: 700; letter-spacing: .16em; text-transform: uppercase; color: var(--brand); margin: 0 0 13px; }
+    h1 { font-family: var(--f-display); font-weight: 700; font-size: clamp(32px,5.2vw,52px); line-height: 1; letter-spacing: -.028em; margin: 0 0 13px; text-wrap: balance; }
+    .sub { font-size: 17.5px; color: var(--ink-2); margin: 0; max-width: 58ch; }
+
+    h2 { font-family: var(--f-display); font-weight: 600; font-size: 26px; letter-spacing: -.02em; margin: 0 0 8px; text-wrap: balance; }
+    section { margin-bottom: 52px; }
+    .sechead { border-top: 1px solid var(--ink); padding-top: 14px; margin-bottom: 18px; display: flex; align-items: baseline; gap: 12px; flex-wrap: wrap; }
+    .cnt { font-family: var(--f-mono); font-size: 11px; font-weight: 700; letter-spacing: .05em; padding: 3px 8px; border-radius: 2px; background: var(--surface-2); color: var(--muted); }
+    .cnt.bad { background: var(--crit-soft); color: var(--crit); }
+    .lead { font-size: 16.5px; color: var(--ink-2); margin: 0 0 18px; max-width: 66ch; }
+    p { margin: 0 0 14px; }
+    strong { font-weight: 600; color: var(--ink); }
+
+    /* parts */
+    .part { background: var(--surface); border: 1px solid var(--rule); border-radius: 3px; padding: 18px 22px; margin-bottom: 12px; }
+    .ph { display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; margin-bottom: 9px; }
+    .ph .no { font-family: var(--f-mono); font-size: 11px; font-weight: 700; color: var(--brand); letter-spacing: .06em; }
+    .ph h3 { font-family: var(--f-display); font-weight: 600; font-size: 18.5px; margin: 0; letter-spacing: -.015em; }
+    .part p { font-size: 15.5px; color: var(--ink-2); margin: 0 0 9px; }
+    .part p:last-child { margin: 0; }
+    .shows { font-family: var(--f-mono); font-size: 12.5px; color: var(--ink-2); background: var(--surface-2); padding: 9px 13px; border-radius: 3px; line-height: 1.7; }
+    .shows b { color: var(--ink); }
+    .flag { display: inline-block; font-family: var(--f-mono); font-size: 9.5px; font-weight: 700; letter-spacing: .07em; text-transform: uppercase; padding: 3px 6px; border-radius: 2px; background: var(--crit-soft); color: var(--crit); }
+    .flag.ok { background: var(--ok-soft); color: var(--ok); }
+
+    .scroller { overflow-x: auto; }
+    table { border-collapse: collapse; width: 100%; min-width: 540px; font-family: var(--f-display); font-size: 14.5px; line-height: 1.45; }
+    thead th { font-family: var(--f-mono); font-size: 9.5px; font-weight: 700; letter-spacing: .1em; text-transform: uppercase; color: var(--muted); text-align: left; padding: 0 12px 8px 0; border-bottom: 1.5px solid var(--rule-strong); white-space: nowrap; }
+    tbody td { padding: 10px 12px 10px 0; border-bottom: 1px solid var(--rule); vertical-align: top; color: var(--ink-2); }
+    tbody td:first-child { color: var(--ink); font-weight: 500; }
+    tbody tr:last-child td { border-bottom: none; }
+    .num { font-variant-numeric: tabular-nums; text-align: right; white-space: nowrap; font-family: var(--f-mono); font-weight: 700; color: var(--ink); }
+    th.rt { text-align: right; }
+    tr.miss td:first-child { box-shadow: inset 3px 0 0 var(--crit); padding-left: 11px; }
+    tr.onscr td:first-child { box-shadow: inset 3px 0 0 var(--ok); padding-left: 11px; }
+    .mono { font-family: var(--f-mono); font-size: 12.5px; }
+
+    .rules { display: flex; flex-direction: column; gap: 2px; }
+    .rule { display: grid; grid-template-columns: 108px 1fr; gap: 16px; background: var(--surface); border: 1px solid var(--rule); padding: 14px 18px; align-items: start; }
+    .rule:first-child { border-radius: 3px 3px 0 0; }
+    .rule:last-child { border-radius: 0 0 3px 3px; }
+    .rule + .rule { border-top: none; }
+    .rule .w { font-family: var(--f-mono); font-size: 10.5px; font-weight: 700; letter-spacing: .09em; text-transform: uppercase; color: var(--brand); padding-top: 3px; }
+    .rule .t { font-size: 15.5px; color: var(--ink-2); }
+    .rule .t b { color: var(--ink); font-weight: 600; }
+
+    .note { border-left: 3px solid var(--brand); background: var(--brand-soft); padding: 15px 19px; border-radius: 0 3px 3px 0; margin: 20px 0; font-size: 16px; }
+    .note.warn { border-color: var(--crit); background: var(--crit-soft); }
+    .note .lbl { font-family: var(--f-mono); font-size: 10px; font-weight: 700; letter-spacing: .12em; text-transform: uppercase; color: var(--brand); display: block; margin-bottom: 6px; }
+    .note.warn .lbl { color: var(--crit); }
+    .note p { margin: 0; }
+
+    .foot { border-top: 1px solid var(--rule); padding-top: 18px; font-size: 13.5px; color: var(--muted); }
+
+    @media (max-width: 620px) {
+      .wrap { padding: 0 16px 64px; }
+      .rule { grid-template-columns: 1fr; gap: 5px; }
+    }
+    @media (prefers-reduced-motion: reduce) { * { animation: none !important; transition: none !important; } }
+  </style>
+</head>
+<body>
+
+<div class="wrap">
+
+  <header class="mast">
+    <p class="eyebrow">v11 screen spec · 1 of 12</p>
+    <h1>Credits &amp; Usage</h1>
+    <p class="sub">The money screen. What every action costs, what's left, who spent it, and how to stop it running away. Everything below is read from the prototype, including what it forgot.</p>
+  </header>
+
+  <!-- PURPOSE -->
+  <section>
+    <div class="sechead"><h2>Why this screen exists</h2></div>
+    <div class="col">
+      <p>v11 asks each question <strong>3 to 10 times instead of once</strong>. That is the single most valuable change in the release — and the most expensive. Without a meter, costs run away quietly and we find out at the end of the month.</p>
+      <p>So this screen does two jobs. The obvious one is control: show the balance, show the burn rate, stop the spending before it hurts. The second one is <strong>selling</strong>, and it is the more important of the two.</p>
+    </div>
+
+    <div class="note col">
+      <span class="lbl">The business idea underneath</span>
+      <p>Customers connect their own AI keys, so <strong>the AI calls cost us nothing — and we charge nothing for them.</strong> Credits only meter what genuinely costs us money: crawls, scrapes, report generation and content drafts. Competitors charge per run because they pay per run. This screen is where a customer sees that difference. The prototype puts it in writing: <em>"Rivals charge you per run because they pay per run."</em></p>
+    </div>
+  </section>
+
+  <!-- PARTS -->
+  <section>
+    <div class="sechead"><h2>The screen, part by part</h2><span class="cnt">8 blocks</span></div>
+    <p class="lead">Top to bottom, exactly as the prototype lays it out.</p>
+
+    <div class="part">
+      <div class="ph"><span class="no">01</span><h3>Four tiles across the top</h3></div>
+      <p>The whole answer at a glance. A customer should not need to scroll to know if they are fine.</p>
+      <div class="shows"><b>Remaining</b> 308 of 500 · resets in 18 days<br><b>Spent this period</b> 192<br><b>Burn rate</b> 16 / day · runs out in 19 days<br><b>Largest consumer</b> Prompt runs · 83% of spend</div>
+    </div>
+
+    <div class="part">
+      <div class="ph"><span class="no">02</span><h3>Daily spend chart</h3></div>
+      <p>A 14-bar chart of the last two weeks, with the two most recent bars highlighted. Shows whether spending is steady or spiking.</p>
+      <p><span class="flag">Incomplete</span> No dates, no scale, no numbers. Fourteen bars with no axis cannot be read — you can see a shape but not what it means. Needs date labels and a value on hover.</p>
+    </div>
+
+    <div class="part">
+      <div class="ph"><span class="no">03</span><h3>Cost per action</h3></div>
+      <p>A short price list so nobody is surprised. Sits beside the chart.</p>
+      <p><span class="flag">Incomplete</span> Lists only 5 actions. The product actually charges for <strong>11</strong> — the full list is in the next section. Every priced action should appear here or customers will hit charges they never saw.</p>
+    </div>
+
+    <div class="part">
+      <div class="ph"><span class="no">04</span><h3>Bring your own key</h3></div>
+      <p>The sales argument, on the page. Confirms all six AI keys are connected and states plainly that LLM calls do not use credits.</p>
+      <div class="shows">Shows <b>"Saved this month: ~2,400 credits"</b> — the amount a competitor would have charged. Links to Connections to manage keys.</div>
+      <p style="margin-top:9px">That saved-amount number is the strongest thing on the screen. It should be prominent, and it should be real, not estimated.</p>
+    </div>
+
+    <div class="part">
+      <div class="ph"><span class="no">05</span><h3>Plan &amp; seats</h3></div>
+      <p>What the customer is on and how much room is left.</p>
+      <div class="shows">Agency · flat · <b>66 projects</b> · 12 of 15 seats · 500 credits/mo included<br>"no per-action pricing. Overage packs available, never required."</div>
+      <p style="margin-top:9px">Two buttons: <strong>Billing portal</strong> and <strong>Add seats</strong>.</p>
+    </div>
+
+    <div class="part">
+      <div class="ph"><span class="no">06</span><h3>Spend by project</h3></div>
+      <p>Essential for agencies. With 66 clients in one workspace, "we used 192 credits" is useless — you need to know which client.</p>
+      <div class="shows">Columns: Project · Credits · Share · Cap · Largest action<br>Kotak Bank 192 (38%, no cap, Group runs) · HDFC Sky 118 (24%, cap 150/mo, GEO Report) · Kia Motors 74 (15%) · 62 others 116</div>
+      <p style="margin-top:9px">Note that caps are set <em>per project</em>, so an agency can stop one client eating the whole allowance.</p>
+    </div>
+
+    <div class="part">
+      <div class="ph"><span class="no">07</span><h3>Guardrails</h3></div>
+      <p>Three settings that prevent the bad ending. This is the part that stops a runaway schedule draining a month's credits overnight.</p>
+      <div class="shows"><b>Alert me at</b> 30% / 20% / 10% remaining<br><b>Auto-pause schedules at</b> 10% / 5% / Off<br><b>This project's cap</b> No cap / 150 per month / Custom</div>
+      <p style="margin-top:9px"><span class="flag">Undefined</span> What happens to a run already in flight when auto-pause triggers? Finish it, or kill it mid-way and refund? Must be decided before build.</p>
+    </div>
+
+    <div class="part">
+      <div class="ph"><span class="no">08</span><h3>Ledger</h3></div>
+      <p>The line-by-line history. Five columns: When · Description · Reason · Delta · Balance. Exports to CSV.</p>
+      <p><span class="flag">Not built</span> <strong>The table is empty in the prototype.</strong> The markup is <span class="mono">&lt;tbody id="ldg"&gt;&lt;/tbody&gt;</span> and no code ever fills it. The screen's own subtitle promises "Every debit, with what caused it" — and this is the part that would deliver it. It is the most important block on the page and the only one with no design at all.</p>
+    </div>
+
+    <div class="note warn col">
+      <span class="lbl">Biggest gap on this screen</span>
+      <p>The Ledger needs designing before build. Decide now: does one group run write <strong>one row</strong> ("Group run · Savings · 25") or <strong>one row per engine call</strong>? That choice changes the database, the export, and whether a customer can ever reconcile a charge they dispute.</p>
+    </div>
+  </section>
+
+  <!-- PRICES -->
+  <section>
+    <div class="sechead"><h2>The full price list</h2><span class="cnt">11 actions</span></div>
+    <p class="lead">Gathered from every screen in the prototype, not just this one. Green rows are the five shown on the Credits screen; red rows are charged elsewhere but never listed here.</p>
+
+    <div class="scroller">
+      <table>
+        <thead><tr><th style="width:38%">Action</th><th class="rt" style="width:14%">Credits</th><th>Where it appears</th></tr></thead>
+        <tbody>
+          <tr class="onscr"><td>Group run · all AI engines</td><td class="num">25</td><td>Credits screen, Analysis run</td></tr>
+          <tr class="onscr"><td>Retry a single AI engine</td><td class="num">8</td><td>Credits screen, Runs</td></tr>
+          <tr class="onscr"><td>Generate variants</td><td class="num">5</td><td>Credits screen</td></tr>
+          <tr class="onscr"><td>Content generation</td><td class="num">40</td><td>Credits screen, Automations</td></tr>
+          <tr class="onscr"><td>AI Visibility Report</td><td class="num">100</td><td>Credits screen, Automations</td></tr>
+          <tr class="miss"><td>Public audit</td><td class="num">30</td><td>Audit Engine — "30 credits refunded"</td></tr>
+          <tr class="miss"><td>Scrape one competitor page</td><td class="num">2</td><td>Competitors</td></tr>
+          <tr class="miss"><td>Re-discovery run</td><td class="num">6</td><td>Competitors</td></tr>
+          <tr class="miss"><td>Link-gap run</td><td class="num">8</td><td>Backlinks</td></tr>
+          <tr class="miss"><td>Brand Context re-run after edit</td><td class="num">125</td><td>Brand Context — affects 5 groups</td></tr>
+          <tr class="miss"><td>Quarterly report bundle</td><td class="num">250</td><td>Reports</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <div class="note col">
+      <span class="lbl">Sanity check on the allowance</span>
+      <p>500 credits a month = <strong>125 a week</strong>, which matches what Schedules shows. But the demo customer's schedules forecast <strong>525 a week — 4.2× over</strong>. That is deliberate: it shows the warning working. Worth confirming the real plan sizes are set against realistic run volumes, or every customer lands in a warning state on day one.</p>
+    </div>
+  </section>
+
+  <!-- RULES -->
+  <section>
+    <div class="sechead"><h2>The rules the backend has to enforce</h2></div>
+    <p class="lead">Drawn from behaviour visible across the prototype.</p>
+
+    <div class="rules">
+      <div class="rule"><span class="w">Check first</span><span class="t">Estimate the cost <b>before</b> the action runs and show it. The Schedule dialog does this live: <em>"At daily cadence this spends 175 credits a week. Your weekly allowance is 125."</em></span></div>
+      <div class="rule"><span class="w">Block</span><span class="t">If the balance is short, refuse and explain. The prototype has a dedicated dialog: <b>"This run costs 1,000 credits. You have 308 remaining, so you're short by 692."</b> Two ways out — <b>Adjust run</b> or <b>Upgrade Plan</b>. Never fail silently.</span></div>
+      <div class="rule"><span class="w">Charge</span><span class="t">Debit when the action starts, and write a ledger row naming what caused it.</span></div>
+      <div class="rule"><span class="w">Refund</span><span class="t">Cancelled work is returned — <em>"Audit cancelled · 30 credits refunded"</em>. Also needs deciding: what happens on a <b>failed</b> run? Runs shows a 1.4% failure rate with automatic retries, and customers should not pay for our failures.</span></div>
+      <div class="rule"><span class="w">Warn</span><span class="t">Fire an alert at the chosen threshold (30 / 20 / 10%).</span></div>
+      <div class="rule"><span class="w">Stop</span><span class="t">Auto-pause schedules at 10% or 5%. Automations respect this too — one recipe carries the guardrail <b>"never below 30% balance"</b>.</span></div>
+      <div class="rule"><span class="w">Cap</span><span class="t">Enforce per-project limits independently of the workspace balance.</span></div>
+      <div class="rule"><span class="w">Reset</span><span class="t">Refill monthly. <b>Undefined:</b> does the reset fall on the calendar month or the signup anniversary, and do unused credits roll over? The screen says "resets in 18 days" without saying which.</span></div>
+    </div>
+  </section>
+
+  <!-- ELSEWHERE -->
+  <section>
+    <div class="sechead"><h2>Where credits show up elsewhere</h2></div>
+    <p class="lead">This screen is the hub, but the meter appears across the product. All of these read the same balance.</p>
+    <div class="scroller">
+      <table>
+        <thead><tr><th style="width:26%">Screen</th><th>What it shows</th></tr></thead>
+        <tbody>
+          <tr><td>Top bar (everywhere)</td><td>Persistent chip: <span class="mono">◈ Credits · 308 left</span> — always visible, links here</td></tr>
+          <tr><td>Schedules</td><td>Cost per run column, weekly forecast, over-allowance warning with one-click fixes</td></tr>
+          <tr><td>Analysis run</td><td>Cost shown on the batch before and during the run</td></tr>
+          <tr><td>Automations</td><td>Per-recipe cost, plus balance guardrails that disable a recipe</td></tr>
+          <tr><td>Brand Context</td><td>Warns that saving a new version triggers a 125-credit re-run</td></tr>
+          <tr><td>Audit Engine</td><td>Charges 30, refunds on cancel</td></tr>
+          <tr><td>Run buttons</td><td>Every one shows its cost and blocks when short</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <!-- BACKEND -->
+  <section>
+    <div class="sechead"><h2>What the backend needs</h2></div>
+    <div class="col">
+      <p>Nothing exotic. A balance, a price table, a ledger, and a check that runs before every billable action.</p>
+    </div>
+    <div class="scroller">
+      <table>
+        <thead><tr><th style="width:28%">Piece</th><th>What it holds or does</th></tr></thead>
+        <tbody>
+          <tr><td>Balance per workspace</td><td>Allowance, used, period start and end, rollover rule</td></tr>
+          <tr><td>Price table</td><td>Action name → cost. Editable without a deploy, so pricing can change.</td></tr>
+          <tr><td>Ledger</td><td>Timestamp, description, reason, delta, running balance, project, user, linked job id</td></tr>
+          <tr><td>Pre-flight estimate</td><td>Given an action and its options, return the cost <em>before</em> running — this is what the Schedule dialog calls</td></tr>
+          <tr><td>Charge / refund</td><td>Atomic. A crashed job must not leave credits taken but no work done.</td></tr>
+          <tr><td>Project caps</td><td>Separate limit checked alongside the workspace balance</td></tr>
+          <tr><td>Guardrail watcher</td><td>Fires alerts and pauses schedules at thresholds</td></tr>
+          <tr><td>Aggregates</td><td>Burn rate, days remaining, spend by project, largest consumer, daily series for the chart</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <div class="note col">
+      <span class="lbl">One decision that shapes everything</span>
+      <p>Credits are only worth metering if the numbers are real. Since LLM calls are free under BYOK, what we are actually charging for is <strong>our own compute</strong> — crawls, scrapes, report rendering, draft generation. Price those against what they genuinely cost to run, or the meter becomes arbitrary and customers will notice.</p>
+    </div>
+  </section>
+
+  <footer class="foot">
+    <p>Read from <span class="mono">promptmaxx-v11.html</span>, screen <span class="mono">scr-credits</span>, plus every credit reference across the other 45 screens and the prototype's JavaScript. Figures shown are its demo data. Items marked <em>Incomplete</em>, <em>Undefined</em> or <em>Not built</em> are genuine gaps in the prototype, not omissions in this summary.</p>
+  </footer>
+
+</div>
+
+</body>
+</html>

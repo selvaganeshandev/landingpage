@@ -1,0 +1,359 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="description" content="Quick side-by-side of Promptmaxx and Pixis on SEO, technical SEO and GEO - what's the same, what's outdated, and the 5 things worth copying.">
+  <style>
+    :root { color-scheme: light dark; }
+    html { -webkit-text-size-adjust: 100%; }
+    body { margin: 0; }
+    img { max-width: 100%; }
+    [hidden] { display: none !important; }
+  </style>
+  <title>Promptmaxx vs Pixis</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wght@500;600;700&family=Source+Serif+4:opsz,wght@8..60,400;8..60,600&family=JetBrains+Mono:wght@400;700&display=swap">
+
+  <style>
+    :root {
+      --ground:#FBFAFD; --surface:#FFFFFF; --surface-2:#F3F1F9;
+      --ink:#1A1726; --ink-2:#423D57; --muted:#6E6A85;
+      --rule:#E2DEEE; --rule-strong:#CFC9E4;
+      --brand:#6547FA; --brand-soft:#EDE9FE;
+      --ok:#1F7A52;  --ok-soft:#E0F2E9;
+      --warn:#A8620C; --warn-soft:#FBEEDC;
+      --crit:#C0353A; --crit-soft:#FBE6E7;
+      --f-display:"Archivo","Helvetica Neue",Arial,sans-serif;
+      --f-body:"Source Serif 4",Georgia,serif;
+      --f-mono:"JetBrains Mono",ui-monospace,Consolas,monospace;
+    }
+    @media (prefers-color-scheme: dark) {
+      :root:not([data-theme="light"]) {
+        --ground:#121020; --surface:#1A1730; --surface-2:#221E3C;
+        --ink:#EFEDF8; --ink-2:#C3BDDB; --muted:#918BAE;
+        --rule:#2E2950; --rule-strong:#443D6E;
+        --brand:#9B85FF; --brand-soft:#241F45;
+        --ok:#5FCB97; --ok-soft:#17301F;
+        --warn:#E8AE5C; --warn-soft:#33260F;
+        --crit:#F0868A; --crit-soft:#35191B;
+      }
+    }
+    :root[data-theme="dark"] {
+      --ground:#121020; --surface:#1A1730; --surface-2:#221E3C;
+      --ink:#EFEDF8; --ink-2:#C3BDDB; --muted:#918BAE;
+      --rule:#2E2950; --rule-strong:#443D6E;
+      --brand:#9B85FF; --brand-soft:#241F45;
+      --ok:#5FCB97; --ok-soft:#17301F;
+      --warn:#E8AE5C; --warn-soft:#33260F;
+      --crit:#F0868A; --crit-soft:#35191B;
+    }
+
+    * { box-sizing: border-box; }
+    body {
+      background: var(--ground); color: var(--ink);
+      font-family: var(--f-body); font-size: 16px; line-height: 1.55;
+      -webkit-font-smoothing: antialiased;
+    }
+    .wrap { max-width: 940px; margin: 0 auto; padding: 0 24px 80px; }
+
+    /* head */
+    .mast { padding: 44px 0 20px; border-bottom: 2px solid var(--ink); margin-bottom: 28px; }
+    .eyebrow {
+      font-family: var(--f-mono); font-size: 10.5px; font-weight: 700;
+      letter-spacing: .16em; text-transform: uppercase; color: var(--brand); margin: 0 0 14px;
+    }
+    h1 {
+      font-family: var(--f-display); font-weight: 700;
+      font-size: clamp(32px,5.4vw,52px); line-height: 1; letter-spacing: -.028em;
+      margin: 0 0 14px; text-wrap: balance;
+    }
+    .sub { font-size: 17px; color: var(--ink-2); margin: 0; max-width: 58ch; }
+
+    /* scoreboard */
+    .board {
+      display: grid; grid-template-columns: repeat(auto-fit,minmax(150px,1fr));
+      gap: 1px; background: var(--rule); border: 1px solid var(--rule);
+      border-radius: 3px; overflow: hidden; margin-bottom: 40px;
+    }
+    .bx { background: var(--surface); padding: 16px 18px; display: flex; flex-direction: column; gap: 3px; }
+    .bx .n {
+      font-family: var(--f-display); font-weight: 700; font-size: 32px; line-height: 1;
+      font-variant-numeric: tabular-nums;
+    }
+    .bx .l {
+      font-family: var(--f-mono); font-size: 10px; letter-spacing: .09em;
+      text-transform: uppercase; color: var(--muted); line-height: 1.4;
+    }
+    .bx.lead  .n { color: var(--ok); }
+    .bx.same  .n { color: var(--ink-2); }
+    .bx.behind .n { color: var(--warn); }
+    .bx.miss  .n { color: var(--crit); }
+
+    /* sections */
+    section { margin-bottom: 46px; }
+    .sh { display: flex; align-items: baseline; gap: 12px; margin-bottom: 6px; flex-wrap: wrap; }
+    h2 {
+      font-family: var(--f-display); font-weight: 600; font-size: 25px;
+      letter-spacing: -.02em; margin: 0;
+    }
+    .verdict {
+      font-family: var(--f-mono); font-size: 11px; font-weight: 700;
+      letter-spacing: .05em; padding: 3px 8px; border-radius: 2px;
+    }
+    .v-win  { background: var(--ok-soft);   color: var(--ok); }
+    .v-mix  { background: var(--warn-soft); color: var(--warn); }
+    .v-lose { background: var(--crit-soft); color: var(--crit); }
+    .oneline { color: var(--ink-2); margin: 0 0 18px; font-size: 16px; max-width: 62ch; }
+
+    /* tables */
+    .scroller { overflow-x: auto; }
+    table {
+      border-collapse: collapse; width: 100%; min-width: 600px;
+      font-family: var(--f-display); font-size: 14.5px; line-height: 1.4;
+    }
+    thead th {
+      font-family: var(--f-mono); font-size: 9.5px; font-weight: 700;
+      letter-spacing: .1em; text-transform: uppercase; color: var(--muted);
+      text-align: left; padding: 0 12px 8px 0;
+      border-bottom: 1.5px solid var(--rule-strong); white-space: nowrap;
+    }
+    tbody td {
+      padding: 10px 12px 10px 0; border-bottom: 1px solid var(--rule);
+      vertical-align: top; color: var(--ink-2);
+    }
+    tbody td:first-child { color: var(--ink); font-weight: 500; }
+    tbody tr:last-child td { border-bottom: none; }
+    th.w1 { width: 27%; } th.w2 { width: 25%; } th.w3 { width: 25%; }
+
+    .tag {
+      display: inline-block; font-family: var(--f-mono); font-size: 9.5px;
+      font-weight: 700; letter-spacing: .06em; text-transform: uppercase;
+      padding: 3px 6px; border-radius: 2px; white-space: nowrap;
+    }
+    .t-lead { background: var(--ok-soft);   color: var(--ok); }
+    .t-same { background: var(--surface-2); color: var(--muted); }
+    .t-old  { background: var(--warn-soft); color: var(--warn); }
+    .t-miss { background: var(--crit-soft); color: var(--crit); }
+
+    tr.r-miss td:first-child { box-shadow: inset 3px 0 0 var(--crit); padding-left: 11px; }
+    tr.r-old  td:first-child { box-shadow: inset 3px 0 0 var(--warn); padding-left: 11px; }
+    tr.r-lead td:first-child { box-shadow: inset 3px 0 0 var(--ok);   padding-left: 11px; }
+
+    .yes { color: var(--ok); font-weight: 600; }
+    .no  { color: var(--crit); font-weight: 600; }
+
+    /* take list */
+    .takes { display: flex; flex-direction: column; gap: 2px; }
+    .take {
+      display: grid; grid-template-columns: 34px 1fr; gap: 14px;
+      background: var(--surface); border: 1px solid var(--rule);
+      padding: 16px 18px; align-items: start;
+    }
+    .take:first-child { border-radius: 3px 3px 0 0; }
+    .take:last-child  { border-radius: 0 0 3px 3px; }
+    .take + .take { border-top: none; }
+    .take .r {
+      font-family: var(--f-display); font-weight: 700; font-size: 22px;
+      color: var(--brand); line-height: 1.1; font-variant-numeric: tabular-nums;
+    }
+    .take h3 {
+      font-family: var(--f-display); font-size: 16.5px; font-weight: 600;
+      margin: 0 0 4px; letter-spacing: -.01em;
+    }
+    .take p { margin: 0 0 8px; font-size: 15px; color: var(--ink-2); }
+    .take p:last-child { margin: 0; }
+    .eff {
+      display: inline-block; font-family: var(--f-mono); font-size: 10px;
+      color: var(--muted); border: 1px solid var(--rule-strong);
+      border-radius: 2px; padding: 2px 6px; letter-spacing: .04em;
+    }
+    .eff.big { border-color: var(--crit); color: var(--crit); }
+
+    .legend {
+      display: flex; flex-wrap: wrap; gap: 8px 14px; align-items: center;
+      margin: 0 0 16px; font-size: 14px; color: var(--muted);
+    }
+
+    .foot {
+      border-top: 1px solid var(--rule); padding-top: 18px;
+      font-size: 13.5px; color: var(--muted); margin-top: 8px;
+    }
+    .mono { font-family: var(--f-mono); font-size: 12.5px; }
+
+    @media (max-width: 600px) {
+      .wrap { padding: 0 16px 64px; }
+      .take { grid-template-columns: 1fr; gap: 6px; }
+    }
+    @media (prefers-reduced-motion: reduce) { * { animation: none !important; transition: none !important; } }
+  </style>
+</head>
+<body>
+
+<div class="wrap">
+
+  <header class="mast">
+    <p class="eyebrow">SEO · Technical SEO · GEO only</p>
+    <h1>Promptmaxx vs Pixis</h1>
+    <p class="sub">Side by side on the three things that matter. What we both have, what's old, what's better, and what's worth copying.</p>
+  </header>
+
+  <div class="board">
+    <div class="bx lead"><span class="n">7</span><span class="l">We are better</span></div>
+    <div class="bx same"><span class="n">11</span><span class="l">Same on both</span></div>
+    <div class="bx behind"><span class="n">2</span><span class="l">Ours is outdated</span></div>
+    <div class="bx miss"><span class="n">12</span><span class="l">We don't have it</span></div>
+  </div>
+
+  <div class="legend">
+    <span class="tag t-lead">We lead</span>
+    <span class="tag t-same">Same</span>
+    <span class="tag t-old">Ours is old</span>
+    <span class="tag t-miss">Missing</span>
+  </div>
+
+  <!-- GEO -->
+  <section>
+    <div class="sh">
+      <h2>1 · GEO — AI visibility</h2>
+      <span class="verdict v-win">We win on data, they win on explaining it</span>
+    </div>
+    <p class="oneline">We track more AI engines than they do and hold data they simply don't have. But we ask each AI once and they ask twelve times — and they tell the customer <em>why</em> they're missing, while we only show that they're missing.</p>
+
+    <div class="scroller">
+      <table>
+        <thead><tr><th class="w1">What</th><th class="w2">Promptmaxx</th><th class="w3">Pixis</th><th>Verdict</th></tr></thead>
+        <tbody>
+          <tr class="r-lead"><td>AI engines watched</td><td><span class="yes">6</span> — ChatGPT, Gemini, Perplexity, Claude, Grok, DeepSeek</td><td>4, and the cheap plans give you fewer</td><td><span class="tag t-lead">We lead</span></td></tr>
+          <tr class="r-lead"><td>Country breakdown</td><td><span class="yes">Yes</span> — mentions by country</td><td><span class="no">No</span></td><td><span class="tag t-lead">We lead</span></td></tr>
+          <tr class="r-lead"><td>Other languages</td><td><span class="yes">Yes</span> — own module</td><td><span class="no">No</span></td><td><span class="tag t-lead">We lead</span></td></tr>
+          <tr class="r-lead"><td>Wrong info about the brand</td><td><span class="yes">Full module</span> — detect, alert, act</td><td>Just one number</td><td><span class="tag t-lead">We lead</span></td></tr>
+          <tr class="r-old"><td>How many times we ask each AI</td><td><span class="no">Once</span></td><td>12 times (3 per engine)</td><td><span class="tag t-old">Ours is old</span></td></tr>
+          <tr><td>Share of voice</td><td>Yes</td><td>Yes ("AI Market Share")</td><td><span class="tag t-same">Same</span></td></tr>
+          <tr><td>Who gets cited &amp; which sources</td><td>Yes</td><td>Yes ("Citation Bank")</td><td><span class="tag t-same">Same</span></td></tr>
+          <tr><td>Good or bad tone</td><td>Yes</td><td>Yes</td><td><span class="tag t-same">Same</span></td></tr>
+          <tr><td>Competitor comparison</td><td>Yes</td><td>Yes</td><td><span class="tag t-same">Same</span></td></tr>
+          <tr><td>Drill into one prompt</td><td>Yes</td><td>Yes</td><td><span class="tag t-same">Same</span></td></tr>
+          <tr class="r-miss"><td>Tells you <em>why</em> you're missing</td><td><span class="no">No</span></td><td>Sorts every gap into 4 causes, each with a fix</td><td><span class="tag t-miss">Missing</span></td></tr>
+          <tr class="r-miss"><td>Shows the maths behind the score</td><td><span class="no">No</span></td><td>Every number shows what it was divided by</td><td><span class="tag t-miss">Missing</span></td></tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <!-- SEO -->
+  <section>
+    <div class="sh">
+      <h2>2 · SEO — keywords &amp; links</h2>
+      <span class="verdict v-win">Basically level, we're ahead on one thing</span>
+    </div>
+    <p class="oneline">This is our strongest area. We match them everywhere and beat them on deciding which keyword to chase. Only one real hole: we don't group keywords into topics.</p>
+
+    <div class="scroller">
+      <table>
+        <thead><tr><th class="w1">What</th><th class="w2">Promptmaxx</th><th class="w3">Pixis</th><th>Verdict</th></tr></thead>
+        <tbody>
+          <tr class="r-lead"><td>Which keyword to chase first</td><td><span class="yes">Richer</span> — can we win it, traffic we'd gain, going up or down, what to do</td><td>Volume × difficulty × CPC × gap</td><td><span class="tag t-lead">We lead</span></td></tr>
+          <tr class="r-lead"><td>Backlinks</td><td><span class="yes">Deeper</span> — links, referring domains, anchors, pages, history</td><td>Backlink intelligence</td><td><span class="tag t-lead">We lead</span></td></tr>
+          <tr><td>Keyword rankings + history</td><td>Yes</td><td>Yes</td><td><span class="tag t-same">Same</span></td></tr>
+          <tr><td>Google SERP features</td><td>Yes</td><td>Yes</td><td><span class="tag t-same">Same</span></td></tr>
+          <tr><td>Competitor keywords</td><td>Yes</td><td>Yes</td><td><span class="tag t-same">Same</span></td></tr>
+          <tr><td>Content gaps</td><td>Yes</td><td>Yes</td><td><span class="tag t-same">Same</span></td></tr>
+          <tr><td>Reports</td><td>Yes</td><td>Yes</td><td><span class="tag t-same">Same</span></td></tr>
+          <tr class="r-miss"><td>Group keywords into topics</td><td><span class="no">No</span></td><td>Semantic clusters</td><td><span class="tag t-miss">Missing</span></td></tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <!-- TECHNICAL SEO -->
+  <section>
+    <div class="sh">
+      <h2>3 · Technical SEO — site health</h2>
+      <span class="verdict v-lose">We have none of it</span>
+    </div>
+    <p class="oneline">The whole area is empty on our side. We check where a page ranks, never whether the page is healthy. Pixis runs eight checks on a schedule and gives one score out of 100. This is our biggest single gap — and it feeds GEO too, because an AI can't quote a page it can't reach.</p>
+
+    <div class="scroller">
+      <table>
+        <thead><tr><th class="w1">Check</th><th class="w2">Promptmaxx</th><th class="w3">Pixis</th><th>Why it matters</th></tr></thead>
+        <tbody>
+          <tr class="r-miss"><td>Are AI bots blocked?</td><td><span class="no">None</span></td><td>Reads robots.txt, one-click fix</td><td>Block the wrong bot = zero AI citations</td></tr>
+          <tr class="r-miss"><td>Site speed</td><td><span class="no">None</span></td><td>Load, response, layout shift</td><td>Slow pages get crawled less</td></tr>
+          <tr class="r-miss"><td>Broken pages</td><td><span class="no">None</span></td><td>Errors + redirect chains</td><td>A broken page can't be cited</td></tr>
+          <tr class="r-miss"><td>Sitemaps</td><td><span class="no">None</span></td><td>Valid? submitted vs indexed</td><td>How engines find your pages</td></tr>
+          <tr class="r-miss"><td>Internal links</td><td><span class="no">None</span></td><td>Orphan pages, link depth</td><td>Lets AI move through your content</td></tr>
+          <tr class="r-miss"><td>Page titles &amp; descriptions</td><td><span class="no">None</span></td><td>Missing, duplicate, bad headings</td><td>Makes answers easy to lift</td></tr>
+          <tr class="r-miss"><td>Schema markup</td><td><span class="no">None</span></td><td>Valid + matches the page</td><td>Stale markup <em>lowers</em> trust</td></tr>
+          <tr class="r-miss"><td>Images</td><td><span class="no">None</span></td><td>Missing alt text, size</td><td>Basic hygiene</td></tr>
+          <tr class="r-miss"><td>One health score</td><td><span class="no">None</span></td><td>Score /100, ranked fixes, alerts</td><td>Tells the customer what to do Monday</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <!-- TAKE -->
+  <section>
+    <div class="sh">
+      <h2>What to take from Pixis</h2>
+      <span class="verdict v-mix">5 things, in order</span>
+    </div>
+    <p class="oneline">Nothing here needs new vendors or new science. Four of the five are work we can already do with what's installed.</p>
+
+    <div class="takes">
+      <div class="take">
+        <span class="r">1</span>
+        <div>
+          <h3>Ask each AI 3 times, not once</h3>
+          <p>AI answers change every time you ask. Asking once and calling it a measurement is the weakest thing in our product. Three runs across our six engines = <strong>18 samples vs their 12</strong> — instantly the best in the category. Also lets us show "how reliable is this result", which nobody sells.</p>
+          <p><span class="eff big">Costs 3× more LLM spend — price it first</span></p>
+        </div>
+      </div>
+
+      <div class="take">
+        <span class="r">2</span>
+        <div>
+          <h3>Build the site health checks</h3>
+          <p>The eight checks above, on a schedule, adding up to one score out of 100. Biggest gap we have, and it makes our GEO numbers better too. Start with AI-bot blocking and site speed — most value, least code.</p>
+          <p><span class="eff">Crawler libraries already installed</span> <span class="eff">Speed data is a free Google API</span></p>
+        </div>
+      </div>
+
+      <div class="take">
+        <span class="r">3</span>
+        <div>
+          <h3>Free "is AI blocked on your site?" checker</h3>
+          <p>One public page, no login. Type a domain, we read its robots.txt and say which AI engines can't see them. Most sites fail this. Pixis hides the same thing behind a sales demo — ours would be free and open.</p>
+          <p><span class="eff">~2 days</span> <span class="eff">Brings in leads</span></p>
+        </div>
+      </div>
+
+      <div class="take">
+        <span class="r">4</span>
+        <div>
+          <h3>Say why they're missing, not just that they're missing</h3>
+          <p>Sort every prompt into four causes: <strong>doing fine</strong> · <strong>competitor took it</strong> (needs outside mentions) · <strong>nobody owns it yet</strong> (open lane, publish first) · <strong>missing on one engine only</strong> (technical fix). We already hold all this data — it's grouping and wording, not new tracking.</p>
+          <p><span class="eff">Mostly existing data</span> <span class="eff">Turns a dashboard into advice</span></p>
+        </div>
+      </div>
+
+      <div class="take">
+        <span class="r">5</span>
+        <div>
+          <h3>Show the maths</h3>
+          <p>Next to every score, show what it's out of and how many times we asked. Sounds small; it's how Pixis wins methodology arguments in demos. Cheap, and it turns a question we get asked into a reason to trust us.</p>
+          <p><span class="eff">UI + wording only</span></p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <footer class="foot">
+    <p><strong>How this was checked.</strong> Pixis side: their product pages plus 56 of their own SEO/GEO articles. Promptmaxx side: the actual code on branch <span class="mono">Selva-Ganeshan</span> — <span class="mono">seo_rankings</span>, <span class="mono">engine/core</span>, and the app pages — not our docs. Pixis's own numbers are their marketing claims and haven't been independently verified. Full detail in the <a href="https://claude.ai/code/artifact/329aad8b-a0ab-48fc-ac4f-a2768c60b4fa">Pixis Visibility Teardown</a>.</p>
+  </footer>
+
+</div>
+
+</body>
+</html>

@@ -1,0 +1,858 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="description" content="Deep teardown of Pixis Visibility's GEO and SEO audit methodology, mapped against what Promptmaxx already ships.">
+  <style>
+    :root { color-scheme: light dark; }
+    html { -webkit-text-size-adjust: 100%; }
+    body { margin: 0; }
+    img { max-width: 100%; }
+    [hidden] { display: none !important; }
+  </style>
+  <title>Pixis Visibility Teardown</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wght@500;600;700&family=Source+Serif+4:ital,opsz,wght@0,8..60,400;0,8..60,600;1,8..60,400&family=JetBrains+Mono:wght@400;500;700&display=swap">
+
+  <style>
+    :root {
+      --ground:      #FBFAFD;
+      --surface:     #FFFFFF;
+      --surface-2:   #F3F1F9;
+      --ink:         #1A1726;
+      --ink-2:       #423D57;
+      --muted:       #6E6A85;
+      --rule:        #E2DEEE;
+      --rule-strong: #CFC9E4;
+      --brand:       #6547FA;
+      --brand-soft:  #EDE9FE;
+      --accent:      #C664F7;
+      --ok:          #1F7A52;
+      --ok-soft:     #E0F2E9;
+      --warn:        #A8620C;
+      --warn-soft:   #FBEEDC;
+      --crit:        #C0353A;
+      --crit-soft:   #FBE6E7;
+      --shadow:      0 1px 2px rgba(26,23,38,.06), 0 8px 24px -12px rgba(26,23,38,.14);
+
+      --f-display: "Archivo", "Helvetica Neue", Arial, sans-serif;
+      --f-body:    "Source Serif 4", Georgia, "Times New Roman", serif;
+      --f-mono:    "JetBrains Mono", ui-monospace, "SFMono-Regular", Consolas, monospace;
+    }
+
+    @media (prefers-color-scheme: dark) {
+      :root:not([data-theme="light"]) {
+        --ground:      #121020;
+        --surface:     #1A1730;
+        --surface-2:   #221E3C;
+        --ink:         #EFEDF8;
+        --ink-2:       #C3BDDB;
+        --muted:       #918BAE;
+        --rule:        #2E2950;
+        --rule-strong: #443D6E;
+        --brand:       #9B85FF;
+        --brand-soft:  #241F45;
+        --accent:      #D68BFB;
+        --ok:          #5FCB97;
+        --ok-soft:     #17301F;
+        --warn:        #E8AE5C;
+        --warn-soft:   #33260F;
+        --crit:        #F0868A;
+        --crit-soft:   #35191B;
+        --shadow:      0 1px 2px rgba(0,0,0,.4), 0 8px 28px -14px rgba(0,0,0,.7);
+      }
+    }
+
+    :root[data-theme="dark"] {
+      --ground:      #121020;
+      --surface:     #1A1730;
+      --surface-2:   #221E3C;
+      --ink:         #EFEDF8;
+      --ink-2:       #C3BDDB;
+      --muted:       #918BAE;
+      --rule:        #2E2950;
+      --rule-strong: #443D6E;
+      --brand:       #9B85FF;
+      --brand-soft:  #241F45;
+      --accent:      #D68BFB;
+      --ok:          #5FCB97;
+      --ok-soft:     #17301F;
+      --warn:        #E8AE5C;
+      --warn-soft:   #33260F;
+      --crit:        #F0868A;
+      --crit-soft:   #35191B;
+      --shadow:      0 1px 2px rgba(0,0,0,.4), 0 8px 28px -14px rgba(0,0,0,.7);
+    }
+
+    * { box-sizing: border-box; }
+
+    body {
+      background: var(--ground);
+      color: var(--ink);
+      font-family: var(--f-body);
+      font-size: 17px;
+      line-height: 1.62;
+      -webkit-font-smoothing: antialiased;
+    }
+
+    .wrap {
+      max-width: 1120px;
+      margin: 0 auto;
+      padding: 0 28px 96px;
+    }
+
+    .col {
+      max-width: 68ch;
+    }
+
+    /* ---------- masthead ---------- */
+
+    .mast {
+      border-bottom: 2px solid var(--ink);
+      padding: 56px 0 26px;
+      margin-bottom: 40px;
+    }
+
+    .eyebrow {
+      font-family: var(--f-mono);
+      font-size: 11px;
+      font-weight: 500;
+      letter-spacing: .16em;
+      text-transform: uppercase;
+      color: var(--brand);
+      margin: 0 0 18px;
+    }
+
+    h1 {
+      font-family: var(--f-display);
+      font-weight: 700;
+      font-size: clamp(38px, 6vw, 66px);
+      line-height: .98;
+      letter-spacing: -.028em;
+      text-wrap: balance;
+      margin: 0 0 20px;
+    }
+
+    .standfirst {
+      font-size: 20px;
+      line-height: 1.5;
+      color: var(--ink-2);
+      max-width: 60ch;
+      margin: 0 0 28px;
+    }
+
+    .mastmeta {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px 28px;
+      font-family: var(--f-mono);
+      font-size: 11.5px;
+      color: var(--muted);
+      letter-spacing: .02em;
+    }
+    .mastmeta b { color: var(--ink-2); font-weight: 500; }
+
+    /* ---------- figures strip ---------- */
+
+    .figs {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(178px, 1fr));
+      gap: 1px;
+      background: var(--rule);
+      border: 1px solid var(--rule);
+      border-radius: 3px;
+      overflow: hidden;
+      margin-bottom: 56px;
+    }
+    .fig {
+      background: var(--surface);
+      padding: 20px 20px 18px;
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+    }
+    .fig .n {
+      font-family: var(--f-display);
+      font-weight: 700;
+      font-size: 30px;
+      letter-spacing: -.02em;
+      line-height: 1;
+      font-variant-numeric: tabular-nums;
+      color: var(--ink);
+    }
+    .fig .n small { font-size: 15px; font-weight: 600; color: var(--muted); letter-spacing: 0; }
+    .fig .l {
+      font-family: var(--f-mono);
+      font-size: 10.5px;
+      letter-spacing: .09em;
+      text-transform: uppercase;
+      color: var(--muted);
+      line-height: 1.45;
+    }
+
+    /* ---------- sections ---------- */
+
+    section { margin-bottom: 68px; }
+
+    .sechead {
+      display: flex;
+      align-items: baseline;
+      gap: 14px;
+      border-top: 1px solid var(--ink);
+      padding-top: 14px;
+      margin-bottom: 26px;
+    }
+    .sechead .tag {
+      font-family: var(--f-mono);
+      font-size: 10.5px;
+      font-weight: 700;
+      letter-spacing: .13em;
+      text-transform: uppercase;
+      color: var(--surface);
+      background: var(--ink);
+      padding: 3px 7px;
+      border-radius: 2px;
+      white-space: nowrap;
+      position: relative;
+      top: -1px;
+    }
+    h2 {
+      font-family: var(--f-display);
+      font-weight: 600;
+      font-size: clamp(25px, 3.4vw, 34px);
+      letter-spacing: -.02em;
+      line-height: 1.1;
+      margin: 0;
+      text-wrap: balance;
+    }
+
+    h3 {
+      font-family: var(--f-display);
+      font-weight: 600;
+      font-size: 19px;
+      letter-spacing: -.01em;
+      margin: 40px 0 12px;
+      color: var(--ink);
+    }
+    h4 {
+      font-family: var(--f-mono);
+      font-weight: 700;
+      font-size: 11.5px;
+      letter-spacing: .11em;
+      text-transform: uppercase;
+      color: var(--muted);
+      margin: 30px 0 10px;
+    }
+
+    p { margin: 0 0 16px; }
+    a { color: var(--brand); text-underline-offset: 2px; }
+    a:focus-visible, .toc a:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; border-radius: 2px; }
+
+    strong { font-weight: 600; color: var(--ink); }
+    em.term { font-style: normal; font-family: var(--f-mono); font-size: .88em; color: var(--ink); background: var(--surface-2); padding: 1px 5px; border-radius: 3px; }
+
+    ul.plain { margin: 0 0 16px; padding-left: 20px; }
+    ul.plain li { margin-bottom: 7px; }
+
+    /* ---------- toc ---------- */
+
+    .toc {
+      background: var(--surface-2);
+      border-radius: 3px;
+      padding: 20px 24px;
+      margin-bottom: 56px;
+    }
+    .toc ol {
+      margin: 0; padding: 0; list-style: none;
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(230px, 1fr));
+      gap: 9px 26px;
+      counter-reset: toc;
+    }
+    .toc li { counter-increment: toc; font-size: 15px; }
+    .toc li::before {
+      content: counter(toc, decimal-leading-zero);
+      font-family: var(--f-mono);
+      font-size: 10.5px;
+      color: var(--brand);
+      margin-right: 9px;
+    }
+    .toc a { color: var(--ink-2); text-decoration: none; }
+    .toc a:hover { color: var(--brand); text-decoration: underline; }
+
+    /* ---------- tables ---------- */
+
+    .scroller { overflow-x: auto; margin: 0 0 8px; -webkit-overflow-scrolling: touch; }
+
+    table {
+      border-collapse: collapse;
+      width: 100%;
+      min-width: 560px;
+      font-family: var(--f-display);
+      font-size: 14.5px;
+      line-height: 1.45;
+    }
+    thead th {
+      font-family: var(--f-mono);
+      font-size: 10px;
+      font-weight: 700;
+      letter-spacing: .1em;
+      text-transform: uppercase;
+      color: var(--muted);
+      text-align: left;
+      padding: 0 14px 9px 0;
+      border-bottom: 1.5px solid var(--rule-strong);
+      white-space: nowrap;
+    }
+    tbody td {
+      padding: 11px 14px 11px 0;
+      border-bottom: 1px solid var(--rule);
+      vertical-align: top;
+      color: var(--ink-2);
+    }
+    tbody td:first-child { color: var(--ink); font-weight: 500; }
+    tbody tr:last-child td { border-bottom: none; }
+    td .mono, th .mono { font-family: var(--f-mono); font-size: 12.5px; }
+    .num { font-variant-numeric: tabular-nums; white-space: nowrap; }
+
+    caption {
+      caption-side: bottom;
+      text-align: left;
+      font-family: var(--f-mono);
+      font-size: 11px;
+      color: var(--muted);
+      padding-top: 12px;
+      line-height: 1.5;
+    }
+
+    /* ---------- status chips ---------- */
+
+    .chip {
+      display: inline-block;
+      font-family: var(--f-mono);
+      font-size: 10px;
+      font-weight: 700;
+      letter-spacing: .07em;
+      text-transform: uppercase;
+      padding: 3px 7px;
+      border-radius: 2px;
+      white-space: nowrap;
+    }
+    .chip-ahead { background: var(--brand-soft); color: var(--brand); }
+    .chip-have  { background: var(--ok-soft);    color: var(--ok); }
+    .chip-part  { background: var(--warn-soft);  color: var(--warn); }
+    .chip-gap   { background: var(--crit-soft);  color: var(--crit); }
+
+    .legend { display: flex; flex-wrap: wrap; gap: 10px 16px; margin: 0 0 20px; align-items: center; }
+    .legend span.k { font-family: var(--f-body); font-size: 14px; color: var(--muted); }
+
+    /* severity rail on gap table */
+    tr.is-gap td:first-child  { box-shadow: inset 3px 0 0 var(--crit); padding-left: 12px; }
+    tr.is-part td:first-child { box-shadow: inset 3px 0 0 var(--warn); padding-left: 12px; }
+
+    /* ---------- callout ---------- */
+
+    .note {
+      border-left: 3px solid var(--brand);
+      background: var(--brand-soft);
+      padding: 16px 20px;
+      border-radius: 0 3px 3px 0;
+      margin: 24px 0;
+      font-size: 16px;
+    }
+    .note p:last-child { margin-bottom: 0; }
+    .note .lbl {
+      font-family: var(--f-mono);
+      font-size: 10px; font-weight: 700; letter-spacing: .12em;
+      text-transform: uppercase; color: var(--brand);
+      display: block; margin-bottom: 6px;
+    }
+
+    /* ---------- sampling diagram ---------- */
+
+    .sampling {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(268px, 1fr));
+      gap: 18px;
+      margin: 26px 0 8px;
+    }
+    .samp {
+      background: var(--surface);
+      border: 1px solid var(--rule);
+      border-radius: 3px;
+      padding: 18px 20px 20px;
+    }
+    .samp.mine { border-color: var(--rule-strong); }
+    .samp h5 {
+      font-family: var(--f-mono);
+      font-size: 10.5px; font-weight: 700; letter-spacing: .11em; text-transform: uppercase;
+      margin: 0 0 4px; color: var(--ink);
+    }
+    .samp .sub { font-family: var(--f-mono); font-size: 11px; color: var(--muted); margin: 0 0 14px; }
+    .grid-rows { display: flex; flex-direction: column; gap: 7px; }
+    .grow { display: grid; grid-template-columns: 74px 1fr; align-items: center; gap: 10px; }
+    .grow .eng {
+      font-family: var(--f-mono); font-size: 10.5px; color: var(--muted);
+      text-align: right; letter-spacing: .02em;
+    }
+    .dots { display: flex; gap: 4px; }
+    .dot { width: 15px; height: 15px; border-radius: 2px; background: var(--brand); }
+    .dot.pale { background: var(--rule-strong); }
+    .samp .tot {
+      margin-top: 14px; padding-top: 12px; border-top: 1px solid var(--rule);
+      font-family: var(--f-mono); font-size: 11px; color: var(--ink-2);
+    }
+    .samp .tot b { color: var(--ink); font-size: 13px; }
+
+    /* ---------- build plan ---------- */
+
+    .builds { display: flex; flex-direction: column; gap: 2px; }
+    .build {
+      display: grid;
+      grid-template-columns: 44px 1fr;
+      gap: 18px;
+      background: var(--surface);
+      border: 1px solid var(--rule);
+      padding: 20px 22px;
+      align-items: start;
+    }
+    .build:first-child { border-radius: 3px 3px 0 0; }
+    .build:last-child  { border-radius: 0 0 3px 3px; }
+    .build + .build { border-top: none; }
+    .build .rank {
+      font-family: var(--f-display);
+      font-weight: 700; font-size: 26px; line-height: 1;
+      color: var(--brand); font-variant-numeric: tabular-nums;
+    }
+    .build h3 { margin: 0 0 6px; font-size: 18px; }
+    .build p { font-size: 15.5px; margin: 0 0 10px; color: var(--ink-2); }
+    .build p:last-child { margin-bottom: 0; }
+    .meta {
+      display: flex; flex-wrap: wrap; gap: 6px 10px;
+      font-family: var(--f-mono); font-size: 10.5px; color: var(--muted);
+    }
+    .meta span {
+      border: 1px solid var(--rule-strong); border-radius: 2px;
+      padding: 2px 6px; letter-spacing: .04em;
+    }
+    .meta span.hot { border-color: var(--crit); color: var(--crit); }
+
+    /* ---------- footer ---------- */
+
+    .foot {
+      border-top: 1px solid var(--rule);
+      padding-top: 22px;
+      font-size: 14px;
+      color: var(--muted);
+    }
+    .foot h4 { margin-top: 0; }
+
+    @media (max-width: 620px) {
+      body { font-size: 16px; }
+      .wrap { padding: 0 18px 72px; }
+      .build { grid-template-columns: 1fr; gap: 8px; }
+    }
+
+    @media (prefers-reduced-motion: reduce) {
+      * { animation: none !important; transition: none !important; }
+    }
+  </style>
+</head>
+<body>
+
+<div class="wrap">
+
+  <header class="mast">
+    <p class="eyebrow">Competitive research · Promptmaxx</p>
+    <h1>Pixis Visibility Teardown</h1>
+    <p class="standfirst">A deep read of how Pixis runs its GEO audit and its SEO audit — the methodology, the module architecture, the metrics and their denominators — mapped against what Promptmaxx already ships.</p>
+    <div class="mastmeta">
+      <span><b>Crawled</b> pixis.ai · 564 URLs · 56 pages read in full</span>
+      <span><b>Scope</b> Visibility product only</span>
+      <span><b>Date</b> 3 Sep 2026</span>
+    </div>
+  </header>
+
+  <div class="figs">
+    <div class="fig"><span class="n">$99<small>/site/mo</small></span><span class="l">Entry price, all modules included</span></div>
+    <div class="fig"><span class="n">4</span><span class="l">AI engines tracked</span></div>
+    <div class="fig"><span class="n">12</span><span class="l">Sessions run per prompt</span></div>
+    <div class="fig"><span class="n">8</span><span class="l">Technical SEO monitors</span></div>
+    <div class="fig"><span class="n">27</span><span class="l">Content formats in the brief generator</span></div>
+  </div>
+
+  <nav class="toc" aria-label="Contents">
+    <ol>
+      <li><a href="#shape">The shape of the product</a></li>
+      <li><a href="#geo">The GEO audit</a></li>
+      <li><a href="#sampling">Sampling: their 12 vs our 1</a></li>
+      <li><a href="#seo">The SEO audit</a></li>
+      <li><a href="#crawlers">The AI crawler map</a></li>
+      <li><a href="#gaps">Gap matrix vs Promptmaxx</a></li>
+      <li><a href="#build">What to build, in order</a></li>
+    </ol>
+  </nav>
+
+  <!-- ============ 1 ============ -->
+  <section id="shape">
+    <div class="sechead"><span class="tag">Architecture</span><h2>The shape of the product</h2></div>
+
+    <div class="col">
+      <p>Pixis Visibility is one of three products at Pixis (alongside Prism for paid campaigns and Adroom for creative). It is sold as a single <strong>SEO + GEO execution platform</strong> — the pitch is not "we measure AI visibility" but "we measure it and then publish the article that fixes it, in the same tool."</p>
+      <p>That framing is the whole competitive story. Every comparison page they publish against Profound, Peec, AthenaHQ, Semrush, Ahrefs, Conductor, Botify and Surfer lands on the same line: those tools stop at a dashboard, we go from gap → brief → draft → published page → measured impact. It is worth taking seriously because it is a defensible position, and because it is the axis on which they will be compared to us.</p>
+      <p>Ten modules make up the product. The two most interesting to us are the ones we do not have at all.</p>
+    </div>
+
+    <div class="scroller">
+      <table>
+        <thead>
+          <tr><th style="width:22%">Module</th><th style="width:46%">What it does</th><th>Notable detail</th></tr>
+        </thead>
+        <tbody>
+          <tr><td>Strategy Brain</td><td>Standalone config layer sitting upstream of every other output — ICP, funnel stage, brand voice, objectives.</td><td>Every recommendation in the platform is filtered through it. Configured during the 10–15 min onboarding.</td></tr>
+          <tr><td>GEO Analysis Hub</td><td>Runs the prompt portfolio across engines, extracts entities, maps cross-model section consensus.</td><td>12 sessions per prompt, 3 per engine, with variance reduction.</td></tr>
+          <tr><td>GEO Insights</td><td>The dashboard: AI Market Share, Average Position, Top 3 Presence, Model Coverage, Competitor Matrix.</td><td>Per-engine, never blended into one score.</td></tr>
+          <tr><td>Citation Bank</td><td>The specific sources each engine cites when answering prompts in your category.</td><td>Source-type breakdown — owned vs earned vs commercial third-party.</td></tr>
+          <tr><td>Technical SEO</td><td>Eight continuous monitors feeding a Technical Health score out of 100.</td><td>Scheduled runs with threshold alerts, not on-demand crawls.</td></tr>
+          <tr><td>Keyword Intelligence</td><td>Gap analysis, semantic clustering, priority scoring on volume × difficulty × CPC × competitive gap.</td><td>Competitor benchmark on DA, traffic, backlinks, referring domains, link velocity.</td></tr>
+          <tr><td>Opportunities</td><td>Detected gaps queued for action, feeding the 30/60/90 day calendar.</td><td>Auto-populates every calendar slot with a generated brief.</td></tr>
+          <tr><td>Execute</td><td>Brief generator (27 formats, reusable templates, bulk), AI drafting, sentence-level humanisation.</td><td>Format defaults to <em class="term">Auto</em> — the AI picks the format from what engines are citing.</td></tr>
+          <tr><td>Publishing</td><td>One-click WordPress with diff review, version history, instant rollback.</td><td>Webflow / Contentful / Sanity are Enterprise-only.</td></tr>
+          <tr><td>Reports &amp; Authority</td><td>Before/after impact tied to publish events; plus a managed backlink service.</td><td>Authority is a human service (Brand PR, Community Promotion, Editorial Links), custom-priced.</td></tr>
+        </tbody>
+        <caption>Module inventory assembled from the Visibility product page, the Technical SEO posts, and eleven head-to-head comparison articles.</caption>
+      </table>
+    </div>
+
+    <div class="note">
+      <span class="lbl">Read the source critically</span>
+      <p>Almost everything below is drawn from Pixis's own marketing and blog content. It describes what they <em>claim</em> to ship. Treat the methodology as the useful part — it is specific, internally consistent, and mostly correct on the underlying science — and treat the capability claims as unverified until someone runs a trial.</p>
+    </div>
+  </section>
+
+  <!-- ============ 2 ============ -->
+  <section id="geo">
+    <div class="sechead"><span class="tag">GEO audit</span><h2>How they audit AI visibility</h2></div>
+
+    <div class="col">
+      <p>This is the strongest part of their thinking, and the part most worth copying. It rests on one honest admission that most of the category avoids: <strong>no AI engine publishes a visibility score, so every number is an outside estimate</strong>, and two tools can score the same brand 45 and 22 without the brand changing. Their answer is to make the methodology the product.</p>
+
+      <h3>The prompt portfolio</h3>
+      <p>Everything starts with a fixed, repeatable prompt set — not keywords. They define eight intent types, and a portfolio is considered weak if it does not cover all of them:</p>
+      <ul class="plain">
+        <li><strong>Branded</strong> — does this specific brand suit a given need</li>
+        <li><strong>Category</strong> — best platforms in the space</li>
+        <li><strong>Problem-led</strong> — a pain point described without naming a category</li>
+        <li><strong>Use-case</strong> — which platforms support a specific workflow</li>
+        <li><strong>Comparison</strong> — one brand weighed against another</li>
+        <li><strong>Alternative</strong> — options beyond an incumbent</li>
+        <li><strong>Validation</strong> — suitability for a context, e.g. regulated industries</li>
+        <li><strong>Buying</strong> — which to choose for a specific requirement</li>
+      </ul>
+      <p>They cite the <strong>IAB "Measuring Visibility in the AI Era" framework (Aug 2026)</strong>, which classes any programme under 50 queries as <em>exploratory</em> rather than directional, and organises visibility into four layers: presence, prominence, portrayal, persuasion. Their own line is that a platform can measure the first three; persuasion needs downstream business data. That is a defensible, quotable position and we should hold the same one.</p>
+
+      <h3>The measurement hierarchy</h3>
+      <p>Five nested levels, and they argue most tools produce misleading numbers by collapsing them. This is genuinely the sharpest idea in their material:</p>
+
+      <div class="scroller">
+        <table>
+          <thead><tr><th style="width:26%">Level</th><th>Unit</th><th style="width:34%">Failure if collapsed</th></tr></thead>
+          <tbody>
+            <tr><td>Category / topic</td><td>The market being evaluated</td><td>Orientation only — never a diagnosis</td></tr>
+            <tr><td>Prompt cluster</td><td>Prompts sharing one intent</td><td>Hides intent gaps: strong on education, absent on comparison</td></tr>
+            <tr><td>Unique prompt</td><td>One buyer question</td><td>—</td></tr>
+            <tr><td>Prompt × engine</td><td>That question on one engine</td><td>Hides engine gaps: strong on Gemini, invisible on Claude</td></tr>
+            <tr><td>Generated response</td><td>One output from one run</td><td>Hides instability: 1-of-3 runs reads as "visible"</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <h3>Metrics, and the denominators that make them mean something</h3>
+      <p>Their strongest editorial move is insisting every metric publishes both numerator and denominator. We report several of these already but do not state the denominator anywhere in the UI.</p>
+    </div>
+
+    <div class="scroller">
+      <table>
+        <thead><tr><th style="width:26%">Metric</th><th style="width:44%">Definition</th><th>Denominator</th></tr></thead>
+        <tbody>
+          <tr><td>Response-level mention rate</td><td>Share of evaluated responses naming the brand</td><td class="mono">total responses evaluated</td></tr>
+          <tr><td>Prompt coverage</td><td>Unique prompts where the brand appears at least once</td><td class="mono">total unique prompts</td></tr>
+          <tr><td>Engine-level inclusion rate</td><td>Mentions within one engine's responses only</td><td class="mono">responses on that engine</td></tr>
+          <tr><td>Owned-domain citation rate</td><td>Responses citing a URL the brand controls</td><td class="mono">total responses evaluated</td></tr>
+          <tr><td>Citation share</td><td>Owned citations against a declared source set</td><td class="mono">must be disclosed</td></tr>
+          <tr><td>Prominence</td><td>First mention, shortlist position, section placement</td><td>—</td></tr>
+          <tr><td>Portrayal</td><td>Positive / neutral / negative / mixed framing</td><td>—</td></tr>
+          <tr><td>Recommendation rate</td><td>Actively recommended, not merely named</td><td class="mono">total responses evaluated</td></tr>
+        </tbody>
+        <caption>The mention/recommendation split is the one they weight highest — a brand mentioned everywhere and recommended nowhere has an inflated score and a flat pipeline.</caption>
+      </table>
+    </div>
+
+    <div class="col">
+      <h3>The three-bucket diagnosis</h3>
+      <p>Their free 15-minute audit — the one they use as the demo hook — maps every gap into one of three buckets, each with a different root cause. This is the piece that turns a dashboard into advice, and it is cheap for us to implement because we already hold all three signals:</p>
+      <ul class="plain">
+        <li><strong>Present and cited</strong> — healthy. Below 30% of prompts is materially weak.</li>
+        <li><strong>Absent, competitors present</strong> — off-site authority problem. Fix is earned mentions on the third-party sources the engines actually cite, not another blog post. Urgent above 50%.</li>
+        <li><strong>Nobody cited, generic answer</strong> — open lane. The model has no confident opinion yet; first comprehensive publisher takes the ground.</li>
+      </ul>
+      <p>A fourth diagnosis sits alongside: <strong>present on some engines, absent on others</strong> — a retrieval problem, not a content problem, and each engine gets a different fix. ChatGPT leans on the Bing index (6–12 weeks to reflect changes); Perplexity runs live web search (2–4 weeks); Google AI Overviews draw ~97% of cited sources from Google's top 20, so it is an organic-ranking problem; Gemini favours structured data; Claude favours well-structured authoritative sources.</p>
+    </div>
+  </section>
+
+  <!-- ============ 3 ============ -->
+  <section id="sampling">
+    <div class="sechead"><span class="tag">Methodology</span><h2>Sampling: their 12 against our 1</h2></div>
+
+    <div class="col">
+      <p>This is the single most important finding in the research, and it is a genuine methodological gap rather than a missing feature.</p>
+      <p>AI answers are non-deterministic. Run the same prompt twice and the brands, sources and framing move. Semrush's own research found 40–60% of cited sources change month to month. Pixis's response is to run <strong>every prompt 12 times — 3 runs on each of 4 engines</strong> — and report variance-reduced aggregates. They then use it as the primary attack line against Peec, AthenaHQ, Conductor and AirOps, all of whom sample once (AirOps gates multi-session to Enterprise, and their own docs call single-session "just one snapshot").</p>
+      <p>Promptmaxx currently queries each prompt <strong>once per platform</strong>. In <span class="mono">engine/core/prompt_analytics_processor.py</span> the loop is one call per platform, and <span class="mono">PromptAnalytics</span> is keyed uniquely on <span class="mono">(prompt, platform)</span> — the schema itself has no room for a second run. Every headline number we show a customer rests on a single sample.</p>
+    </div>
+
+    <div class="sampling">
+      <div class="samp">
+        <h5>Pixis Visibility</h5>
+        <p class="sub">3 runs × 4 engines</p>
+        <div class="grid-rows">
+          <div class="grow"><span class="eng">ChatGPT</span><span class="dots"><i class="dot"></i><i class="dot"></i><i class="dot"></i></span></div>
+          <div class="grow"><span class="eng">Perplexity</span><span class="dots"><i class="dot"></i><i class="dot"></i><i class="dot"></i></span></div>
+          <div class="grow"><span class="eng">Gemini</span><span class="dots"><i class="dot"></i><i class="dot"></i><i class="dot"></i></span></div>
+          <div class="grow"><span class="eng">Claude</span><span class="dots"><i class="dot"></i><i class="dot"></i><i class="dot"></i></span></div>
+        </div>
+        <p class="tot"><b>12</b> observations per prompt</p>
+      </div>
+
+      <div class="samp mine">
+        <h5>Promptmaxx today</h5>
+        <p class="sub">1 run × 6 engines</p>
+        <div class="grid-rows">
+          <div class="grow"><span class="eng">ChatGPT</span><span class="dots"><i class="dot"></i><i class="dot pale"></i><i class="dot pale"></i></span></div>
+          <div class="grow"><span class="eng">Perplexity</span><span class="dots"><i class="dot"></i><i class="dot pale"></i><i class="dot pale"></i></span></div>
+          <div class="grow"><span class="eng">Gemini</span><span class="dots"><i class="dot"></i><i class="dot pale"></i><i class="dot pale"></i></span></div>
+          <div class="grow"><span class="eng">Claude</span><span class="dots"><i class="dot"></i><i class="dot pale"></i><i class="dot pale"></i></span></div>
+          <div class="grow"><span class="eng">Grok</span><span class="dots"><i class="dot"></i><i class="dot pale"></i><i class="dot pale"></i></span></div>
+          <div class="grow"><span class="eng">DeepSeek</span><span class="dots"><i class="dot"></i><i class="dot pale"></i><i class="dot pale"></i></span></div>
+        </div>
+        <p class="tot"><b>6</b> observations per prompt · no variance data</p>
+      </div>
+    </div>
+
+    <div class="col">
+      <div class="note">
+        <span class="lbl">The opportunity</span>
+        <p>We already query six engines to their four. Three runs each puts us at <strong>18 observations per prompt against their 12</strong> — the strongest methodology claim in the category, from a change that is mostly a schema migration and a cost decision. It also unlocks a metric nobody is selling: a per-prompt <strong>stability score</strong>, telling a customer which of their wins are fragile.</p>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============ 4 ============ -->
+  <section id="seo">
+    <div class="sechead"><span class="tag">SEO audit</span><h2>The eight technical monitors</h2></div>
+
+    <div class="col">
+      <p>Their SEO side is deliberately unglamorous, and it is where our gap is widest — we have <em>no</em> technical audit capability at all. Nothing in the repo touches robots.txt, sitemaps, Core Web Vitals, broken links or schema validation. Our SEO module is rankings, backlinks, competitors, content gaps and share of voice; theirs adds a continuously-running site health layer underneath all of it.</p>
+      <p>Eight monitors run on a schedule and roll into a <strong>Technical Health score out of 100</strong> with severity-ranked action items and threshold-based alerting — the team is notified when something changes, rather than having to go look.</p>
+    </div>
+
+    <div class="scroller">
+      <table>
+        <thead><tr><th style="width:19%">Monitor</th><th style="width:45%">Checks</th><th>Why it matters for GEO</th></tr></thead>
+        <tbody>
+          <tr><td>Robots</td><td>Parses robots.txt, flags blocked crawlers, High/Med/Low prioritised fixes, one-click "Add to Robots.txt" and download</td><td>The highest-leverage AI fix there is — a blocked retrieval bot means zero citations</td></tr>
+          <tr><td>Sitemaps</td><td>Presence, validity, submitted vs indexed by page type</td><td>Discovery hint for both classic and AI crawlers</td></tr>
+          <tr><td>Broken URLs</td><td>4xx/5xx on pages meant to serve content, redirect chains weighted by crawl frequency and traffic</td><td>A page that errors cannot be cited</td></tr>
+          <tr><td>Internal Links</td><td>Orphans, link depth, anchor relevance, power pages with authority to give</td><td>Lets a model traverse the topic cluster</td></tr>
+          <tr><td>Site Vitals</td><td>LCP / INP / CLS at the 75th percentile of field data</td><td>Crawlers under resource limits deprioritise slow pages</td></tr>
+          <tr><td>Images</td><td>Missing alt attributes, optimisation, decorative vs informative</td><td>Extraction and accessibility signals</td></tr>
+          <tr><td>Schema</td><td>JSON-LD validity, and whether markup matches the visible page</td><td>Stale schema <em>lowers</em> engine trust rather than raising it</td></tr>
+          <tr><td>Metadata</td><td>Titles, descriptions, heading hierarchy, duplicates</td><td>Answer-first structure is what makes a passage extractable</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <div class="col">
+      <h4>Core Web Vitals thresholds they score against</h4>
+    </div>
+    <div class="scroller">
+      <table style="min-width:460px">
+        <thead><tr><th style="width:34%">Metric</th><th class="num">Good</th><th class="num">Needs work</th><th class="num">Poor</th></tr></thead>
+        <tbody>
+          <tr><td>LCP <span class="mono">loading</span></td><td class="num">≤ 2.5s</td><td class="num">2.5 – 4s</td><td class="num">&gt; 4s</td></tr>
+          <tr><td>INP <span class="mono">responsiveness</span></td><td class="num">≤ 200ms</td><td class="num">200 – 500ms</td><td class="num">&gt; 500ms</td></tr>
+          <tr><td>CLS <span class="mono">visual stability</span></td><td class="num">≤ 0.1</td><td class="num">0.1 – 0.25</td><td class="num">&gt; 0.25</td></tr>
+        </tbody>
+        <caption>Scored on field data at the 75th percentile; lab data used only to diagnose causes.</caption>
+      </table>
+    </div>
+
+    <div class="col">
+      <h3>One thing they get right that most competitors oversell</h3>
+      <p>Their SEO audit guide is unusually honest about structured data: Google states plainly that schema is <em>not</em> required for its generative features and there is no special markup for them. Pixis repeats this rather than selling schema as a citation lever. If we ship a technical audit, we should hold the same line — it is a trust signal in a category full of magic-bullet claims.</p>
+    </div>
+  </section>
+
+  <!-- ============ 5 ============ -->
+  <section id="crawlers">
+    <div class="sechead"><span class="tag">Highest leverage</span><h2>The AI crawler map</h2></div>
+
+    <div class="col">
+      <p>The single most useful, most concrete thing in their entire content library — and the cheapest for us to build. The insight is that AI crawlers do three different jobs, and <strong>only one of them affects whether you get cited</strong>. Teams routinely block the wrong ones.</p>
+      <p>The classic failure: a team blocks GPTBot and ClaudeBot to protect IP — a legitimate choice that does nothing to citations, because those are training bots. Meanwhile an over-broad CDN rule blocks OAI-SearchBot or PerplexityBot and quietly removes the brand from AI answers entirely. Most sites built or last audited before 2023 block AI crawlers by default.</p>
+    </div>
+
+    <div class="scroller">
+      <table>
+        <thead><tr><th style="width:22%">User-agent</th><th style="width:16%">Job</th><th style="width:22%">Owner</th><th>Effect if blocked</th></tr></thead>
+        <tbody>
+          <tr><td class="mono">GPTBot</td><td>Training</td><td>OpenAI</td><td>Out of training data. <strong>No effect on citations.</strong></td></tr>
+          <tr><td class="mono">ClaudeBot</td><td>Training</td><td>Anthropic</td><td>Out of training data. No effect on citations.</td></tr>
+          <tr><td class="mono">Google-Extended</td><td>Training</td><td>Google</td><td>Out of Gemini training. No effect on Search or AI Overviews.</td></tr>
+          <tr><td class="mono">CCBot</td><td>Training</td><td>Common Crawl</td><td>Out of the open crawl corpus.</td></tr>
+          <tr class="is-gap"><td class="mono">OAI-SearchBot</td><td>Retrieval</td><td>OpenAI</td><td><strong>Removed from ChatGPT Search results.</strong></td></tr>
+          <tr class="is-gap"><td class="mono">Claude-SearchBot</td><td>Retrieval</td><td>Anthropic</td><td><strong>Removed from Claude citations.</strong></td></tr>
+          <tr class="is-gap"><td class="mono">PerplexityBot</td><td>Retrieval</td><td>Perplexity</td><td><strong>Removed from Perplexity answers.</strong></td></tr>
+          <tr class="is-gap"><td class="mono">Bingbot</td><td>Retrieval</td><td>Microsoft</td><td><strong>Feeds ChatGPT and Copilot indirectly.</strong></td></tr>
+          <tr class="is-part"><td class="mono">ChatGPT-User</td><td>User fetch</td><td>OpenAI</td><td>Breaks the moment a person asks about your page.</td></tr>
+          <tr class="is-part"><td class="mono">Claude-User</td><td>User fetch</td><td>Anthropic</td><td>Breaks live user lookups.</td></tr>
+          <tr class="is-part"><td class="mono">Perplexity-User</td><td>User fetch</td><td>Perplexity</td><td>Perplexity states this agent is not required to honour robots.txt.</td></tr>
+        </tbody>
+        <caption>Red rail = blocking this costs you citations. Amber = blocking breaks live user lookups. Unmarked training bots are an IP decision with no citation consequence.</caption>
+      </table>
+    </div>
+
+    <div class="col">
+      <p>Two caveats they publish, both worth carrying into our own copy because they are the kind of nuance that earns trust: Cloudflare documented in Aug 2025 that Perplexity uses undeclared crawlers rotating user-agents and IPs to evade directives — so robots.txt is advisory and real enforcement needs WAF rules. And Rutgers/Wharton research (Dec 2025) found publishers who blocked AI crawlers saw a <strong>23.1% total traffic decline without reliably reducing citation rates</strong>, which complicates the tidy "block training, allow retrieval" advice everyone gives.</p>
+      <p>Also worth noting: AI crawlers are generally poor at executing JavaScript. A client-side-rendered site serves them a near-blank page. That check alone — does your critical content exist in server-rendered HTML — is a one-request test with a dramatic finding.</p>
+    </div>
+  </section>
+
+  <!-- ============ 6 ============ -->
+  <section id="gaps">
+    <div class="sechead"><span class="tag">Gap matrix</span><h2>Where we stand against them</h2></div>
+
+    <div class="col">
+      <p>Assessed against the actual repo — pages in <span class="mono">frontend/src/pages</span>, apps in <span class="mono">backend/</span>, processors in <span class="mono">engine/core</span> — not against the marketing site.</p>
+    </div>
+
+    <div class="legend">
+      <span class="chip chip-ahead">Ahead</span><span class="k">we beat them</span>
+      <span class="chip chip-have">Have</span><span class="k">parity</span>
+      <span class="chip chip-part">Partial</span><span class="k">exists, incomplete</span>
+      <span class="chip chip-gap">Gap</span><span class="k">nothing shipped</span>
+    </div>
+
+    <div class="scroller">
+      <table>
+        <thead><tr><th style="width:24%">Capability</th><th style="width:11%">Status</th><th style="width:32%">Promptmaxx today</th><th>Pixis</th></tr></thead>
+        <tbody>
+          <tr><td>Engine coverage</td><td><span class="chip chip-ahead">Ahead</span></td><td>6 — ChatGPT, Gemini, Perplexity, Claude, Grok, DeepSeek</td><td>4, and gated by plan tier</td></tr>
+          <tr><td>Geographic attribution</td><td><span class="chip chip-ahead">Ahead</span></td><td>Per-country mentions, region-scoped dashboard, localised query context</td><td>Not offered on Visibility</td></tr>
+          <tr><td>Multilingual</td><td><span class="chip chip-ahead">Ahead</span></td><td>Dedicated module + language config</td><td>Not advertised</td></tr>
+          <tr><td>Misinformation detection</td><td><span class="chip chip-ahead">Ahead</span></td><td>Full module — detection, alerts, action workflow</td><td>Only a "source-to-answer match rate" metric</td></tr>
+          <tr><td>Agency multi-tenancy</td><td><span class="chip chip-ahead">Ahead</span></td><td>Clients, per-project access, granular member permissions, invoicing</td><td>Multi-tenant workspaces, less depth</td></tr>
+          <tr><td>Share of voice</td><td><span class="chip chip-have">Have</span></td><td>GEO + SEO share of voice pages</td><td>AI Market Share</td></tr>
+          <tr><td>Citations &amp; sources</td><td><span class="chip chip-have">Have</span></td><td>Citations, Sources, per-mention detail</td><td>Citation Bank with source-type split</td></tr>
+          <tr><td>Sentiment</td><td><span class="chip chip-have">Have</span></td><td>Sentiment module with scoring</td><td>Portrayal — positive/neutral/negative/mixed</td></tr>
+          <tr><td>Competitor benchmarking</td><td><span class="chip chip-have">Have</span></td><td>Competitors, detail views, heatmap, comparison dialogs</td><td>Competitor Matrix</td></tr>
+          <tr><td>Content briefs &amp; drafts</td><td><span class="chip chip-have">Have</span></td><td>Generator, editor, bulk upload, humanisation validation</td><td>27 formats, templates, bulk</td></tr>
+          <tr><td>Content calendar</td><td><span class="chip chip-have">Have</span></td><td>Calendar module</td><td>30/60/90 auto-populated from gaps</td></tr>
+          <tr><td>CMS publishing</td><td><span class="chip chip-have">Have</span></td><td>CMS provider manager, publish dialog</td><td>WordPress one-click</td></tr>
+          <tr><td>Chat with your data</td><td><span class="chip chip-have">Have</span></td><td>Chat, AI Copilot, floating copilot</td><td>Natural-language assistant</td></tr>
+          <tr><td>Backlinks</td><td><span class="chip chip-have">Have</span></td><td>Backlinks module, processor, models</td><td>Backlink intelligence + managed service</td></tr>
+          <tr class="is-part"><td>Brand context layer</td><td><span class="chip chip-part">Partial</span></td><td><span class="mono">brand_identity.py</span> exists but does not gate every output</td><td>Strategy Brain filters every recommendation</td></tr>
+          <tr class="is-part"><td>Keyword clustering &amp; scoring</td><td><span class="chip chip-part">Partial</span></td><td>Content gaps and opportunities exist; clustering and priority scoring unverified</td><td>Semantic clusters, priority score on 4 factors</td></tr>
+          <tr class="is-part"><td>Alerting</td><td><span class="chip chip-part">Partial</span></td><td>Alerts module and rules; no Slack delivery found</td><td>Threshold alerts to Slack or email</td></tr>
+          <tr class="is-gap"><td>Multi-session sampling</td><td><span class="chip chip-gap">Gap</span></td><td>One run per prompt per platform; schema keyed <span class="mono">(prompt, platform)</span></td><td>12 sessions, variance reduction</td></tr>
+          <tr class="is-gap"><td>Technical SEO audit</td><td><span class="chip chip-gap">Gap</span></td><td>Nothing — no crawler, no robots, no vitals, no schema check</td><td>8 monitors, Health score /100</td></tr>
+          <tr class="is-gap"><td>AI crawler audit</td><td><span class="chip chip-gap">Gap</span></td><td>Nothing</td><td>robots.txt analysis with one-click fix</td></tr>
+          <tr class="is-gap"><td>Publish safety</td><td><span class="chip chip-gap">Gap</span></td><td>No diff, version history or rollback in <span class="mono">backend/content</span></td><td>Diff review, history, instant rollback</td></tr>
+          <tr class="is-gap"><td>Before/after impact</td><td><span class="chip chip-gap">Gap</span></td><td>Reports exist but are not tied to publish events</td><td>Ranking + citation delta per publish</td></tr>
+          <tr class="is-gap"><td>Entity &amp; consensus extraction</td><td><span class="chip chip-gap">Gap</span></td><td>Nothing</td><td>Entities and sections engines actually cite, fed into briefs</td></tr>
+          <tr class="is-gap"><td>Self-serve free audit</td><td><span class="chip chip-gap">Gap</span></td><td>Trial requires signup; no public tool</td><td>Free workspace, 500 credits, no card</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <!-- ============ 7 ============ -->
+  <section id="build">
+    <div class="sechead"><span class="tag">Recommendation</span><h2>What to build, in order</h2></div>
+
+    <div class="col">
+      <p>Ordered by impact per unit of effort. The first three are the ones that change how we win a comparison; the rest close credibility gaps.</p>
+    </div>
+
+    <div class="builds">
+      <div class="build">
+        <span class="rank">1</span>
+        <div>
+          <h3>Multi-session sampling</h3>
+          <p>Add a run index to <span class="mono">PromptAnalytics</span>, migrate off the <span class="mono">(prompt, platform)</span> unique key, run each prompt 3× per engine and store per-run results with an aggregate. Six engines × 3 gives us 18 observations to their 12 — the strongest methodology claim available in this category.</p>
+          <p>Ship a <strong>stability score</strong> alongside it: how consistently a brand appears across runs. Nobody sells that, and it directly answers the "is this win real?" question every buyer has.</p>
+          <div class="meta"><span class="hot">Blocks our credibility</span><span>engine/core/prompt_analytics_processor.py</span><span>schema migration</span><span>3× LLM cost — model it first</span></div>
+        </div>
+      </div>
+
+      <div class="build">
+        <span class="rank">2</span>
+        <div>
+          <h3>Technical SEO audit module</h3>
+          <p>The largest missing surface. Build the eight monitors — robots, sitemaps, broken URLs, internal links, site vitals, images, schema, metadata — behind a scheduled crawler, rolling into a Technical Health score out of 100 with severity-ranked actions.</p>
+          <p><strong>Cheaper than it looks: the crawling stack is already installed.</strong> <span class="mono">backend/requirements.txt</span> declares Crawl4AI 0.8.6, Playwright 1.58 with stealth, firecrawl 4.3.6, trafilatura, lxml and BeautifulSoup — enough to cover broken URLs, internal links, metadata, images and JSON-LD extraction without adding a dependency. Only Core Web Vitals needs something new, and that is the free PageSpeed Insights API.</p>
+          <p>Sequence it: robots and vitals first (highest value, least code), then broken URLs and metadata, then internal links, schema and images.</p>
+          <div class="meta"><span class="hot">Widest gap</span><span>new backend app</span><span>new frontend section</span><span>crawler already vendored</span><span>+ PSI API key</span></div>
+        </div>
+      </div>
+
+      <div class="build">
+        <span class="rank">3</span>
+        <div>
+          <h3>Free AI crawler check, public and ungated</h3>
+          <p>One page, no login: enter a domain, we fetch robots.txt, classify every AI user-agent as training / retrieval / user-fetch, and tell them exactly which citations they are losing. Add the server-rendered-HTML check in the same request.</p>
+          <p>This is a day or two of work — it is two HTTP requests and a user-agent table, and the parsing libraries are already vendored. It produces an alarming and true finding for most sites, and it is the lead magnet Pixis puts behind a demo booking. Ungated beats theirs.</p>
+          <div class="meta"><span>2 days</span><span>lead generation</span><span>ungated beats their demo wall</span></div>
+        </div>
+      </div>
+
+      <div class="build">
+        <span class="rank">4</span>
+        <div>
+          <h3>Publish safety and impact loop</h3>
+          <p>Diff review before publish, version history, one-click rollback, and a before/after panel that ties ranking and citation movement to a specific publish event. We already publish to a CMS; we just do it without a safety net or a feedback loop, which is exactly the half they use to beat everyone else.</p>
+          <div class="meta"><span>backend/content</span><span>ties Reports to publish events</span></div>
+        </div>
+      </div>
+
+      <div class="build">
+        <span class="rank">5</span>
+        <div>
+          <h3>Diagnosis, not just measurement</h3>
+          <p>Classify every tracked prompt into the four buckets — present, absent-with-competitors, open lane, engine-specific gap — and attach the matching fix. We hold all the signals already; this is aggregation and copy, not new data collection. It turns our dashboard into advice, which is the exact criticism Pixis levels at every competitor.</p>
+          <div class="meta"><span>mostly aggregation</span><span>high perceived value</span></div>
+        </div>
+      </div>
+
+      <div class="build">
+        <span class="rank">6</span>
+        <div>
+          <h3>Publish the denominators</h3>
+          <p>Show numerator and denominator next to every visibility figure in the UI, expose run count and engine coverage, and adopt the IAB four-layer language (presence / prominence / portrayal / persuasion) with the ≥50-prompt threshold. Cheap, and it makes methodology a selling point rather than a thing we get asked about in a demo.</p>
+          <div class="meta"><span>UI + copy</span><span>IAB Aug 2026 framework</span></div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <footer class="foot">
+    <h4>Sources &amp; method</h4>
+    <p>All 11 sitemap children of <a href="https://pixis.ai/sitemap.xml">pixis.ai</a> were fetched and de-duplicated to 564 URLs. The Visibility product page, the Insights &amp; Monitoring solution page and 56 SEO/GEO blog posts were downloaded and read in full, including eleven head-to-head comparison articles against Profound, Peec AI, AthenaHQ, Evertune, AirOps, Semrush, Ahrefs, Conductor, Botify, Surfer and Search Atlas — these carry more product detail than the product pages themselves. Promptmaxx capability claims were verified against the working tree on branch <span class="mono">Selva-Ganeshan</span>, not against documentation.</p>
+    <p>Pricing, session counts and module inventories are Pixis's own published claims and are unverified. Third-party figures cited by Pixis (IAB, Semrush, Cloudflare, Rutgers/Wharton, Princeton GEO research) are reproduced as they present them and have not been independently checked.</p>
+  </footer>
+
+</div>
+
+</body>
+</html>

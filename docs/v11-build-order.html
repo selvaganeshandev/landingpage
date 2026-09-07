@@ -1,0 +1,385 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="description" content="The v11 prototype broken into 19 builds ordered by effort, with backend needs for each.">
+  <style>
+    :root { color-scheme: light dark; }
+    html { -webkit-text-size-adjust: 100%; }
+    body { margin: 0; }
+    img { max-width: 100%; }
+    [hidden] { display: none !important; }
+  </style>
+  <title>v11 Build Order</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wght@500;600;700&family=Source+Serif+4:opsz,wght@8..60,400;8..60,600&family=JetBrains+Mono:wght@400;500;700&display=swap">
+
+  <style>
+    :root {
+      --ground:#FBFAFD; --surface:#FFFFFF; --surface-2:#F3F1F9;
+      --ink:#1A1726; --ink-2:#423D57; --muted:#6E6A85;
+      --rule:#E2DEEE; --rule-strong:#CFC9E4;
+      --brand:#6547FA; --brand-soft:#EDE9FE;
+      --t1:#1F7A52; --t1s:#E0F2E9;
+      --t2:#2F6FB5; --t2s:#E3EDF9;
+      --t3:#A8620C; --t3s:#FBEEDC;
+      --t4:#C0353A; --t4s:#FBE6E7;
+      --f-display:"Archivo","Helvetica Neue",Arial,sans-serif;
+      --f-body:"Source Serif 4",Georgia,serif;
+      --f-mono:"JetBrains Mono",ui-monospace,Consolas,monospace;
+    }
+    @media (prefers-color-scheme: dark) {
+      :root:not([data-theme="light"]) {
+        --ground:#121020; --surface:#1A1730; --surface-2:#221E3C;
+        --ink:#EFEDF8; --ink-2:#C3BDDB; --muted:#918BAE;
+        --rule:#2E2950; --rule-strong:#443D6E;
+        --brand:#9B85FF; --brand-soft:#241F45;
+        --t1:#5FCB97; --t1s:#17301F;
+        --t2:#7FB2EC; --t2s:#152438;
+        --t3:#E8AE5C; --t3s:#33260F;
+        --t4:#F0868A; --t4s:#35191B;
+      }
+    }
+    :root[data-theme="dark"] {
+      --ground:#121020; --surface:#1A1730; --surface-2:#221E3C;
+      --ink:#EFEDF8; --ink-2:#C3BDDB; --muted:#918BAE;
+      --rule:#2E2950; --rule-strong:#443D6E;
+      --brand:#9B85FF; --brand-soft:#241F45;
+      --t1:#5FCB97; --t1s:#17301F;
+      --t2:#7FB2EC; --t2s:#152438;
+      --t3:#E8AE5C; --t3s:#33260F;
+      --t4:#F0868A; --t4s:#35191B;
+    }
+
+    * { box-sizing: border-box; }
+    body { background: var(--ground); color: var(--ink); font-family: var(--f-body); font-size: 16.5px; line-height: 1.6; -webkit-font-smoothing: antialiased; }
+    .wrap { max-width: 980px; margin: 0 auto; padding: 0 24px 80px; }
+    .col { max-width: 68ch; }
+
+    .mast { padding: 44px 0 20px; border-bottom: 2px solid var(--ink); margin-bottom: 28px; }
+    .eyebrow { font-family: var(--f-mono); font-size: 10.5px; font-weight: 700; letter-spacing: .16em; text-transform: uppercase; color: var(--brand); margin: 0 0 13px; }
+    h1 { font-family: var(--f-display); font-weight: 700; font-size: clamp(32px,5.2vw,52px); line-height: 1; letter-spacing: -.028em; margin: 0 0 13px; text-wrap: balance; }
+    .sub { font-size: 17.5px; color: var(--ink-2); margin: 0; max-width: 60ch; }
+
+    h2 { font-family: var(--f-display); font-weight: 600; font-size: 25px; letter-spacing: -.02em; margin: 0; }
+    section { margin-bottom: 50px; }
+    .lead { font-size: 16.5px; color: var(--ink-2); margin: 0 0 20px; max-width: 68ch; }
+    p { margin: 0 0 14px; }
+    strong { font-weight: 600; color: var(--ink); }
+    .mono { font-family: var(--f-mono); font-size: 12.5px; }
+
+    /* correction */
+    .correct { background: var(--surface); border: 1px solid var(--rule-strong); border-left: 4px solid var(--brand); border-radius: 0 3px 3px 0; padding: 18px 22px; margin-bottom: 40px; }
+    .correct .lbl { font-family: var(--f-mono); font-size: 10px; font-weight: 700; letter-spacing: .12em; text-transform: uppercase; color: var(--brand); display: block; margin-bottom: 8px; }
+    .correct p:last-child { margin: 0; }
+
+    /* tier head */
+    .tier { margin-bottom: 40px; }
+    .th { display: flex; align-items: baseline; gap: 12px; flex-wrap: wrap; padding-top: 14px; border-top: 2px solid var(--ink); margin-bottom: 6px; }
+    .badge { font-family: var(--f-mono); font-size: 10.5px; font-weight: 700; letter-spacing: .09em; text-transform: uppercase; padding: 4px 9px; border-radius: 2px; }
+    .b1 { background: var(--t1s); color: var(--t1); }
+    .b2 { background: var(--t2s); color: var(--t2); }
+    .b3 { background: var(--t3s); color: var(--t3); }
+    .b4 { background: var(--t4s); color: var(--t4); }
+    .tdesc { font-size: 16px; color: var(--ink-2); margin: 0 0 16px; max-width: 68ch; }
+
+    /* item */
+    .item { display: grid; grid-template-columns: 34px 1fr; gap: 16px; background: var(--surface); border: 1px solid var(--rule); padding: 16px 20px; align-items: start; }
+    .item:first-of-type { border-radius: 3px 3px 0 0; }
+    .item:last-of-type { border-radius: 0 0 3px 3px; }
+    .item + .item { border-top: none; }
+    .item .n { font-family: var(--f-display); font-weight: 700; font-size: 19px; line-height: 1.25; font-variant-numeric: tabular-nums; color: var(--muted); }
+    .t1 .item .n { color: var(--t1); } .t2 .item .n { color: var(--t2); }
+    .t3 .item .n { color: var(--t3); } .t4 .item .n { color: var(--t4); }
+    .item h3 { font-family: var(--f-display); font-weight: 600; font-size: 17.5px; margin: 0 0 5px; letter-spacing: -.012em; }
+    .item .d { font-size: 15.5px; color: var(--ink-2); margin: 0 0 9px; }
+    .item .d:last-child { margin: 0; }
+    .item .d b { color: var(--ink); font-weight: 600; }
+    .facts { display: flex; flex-wrap: wrap; gap: 6px; }
+    .f { font-family: var(--f-mono); font-size: 10.5px; letter-spacing: .03em; border: 1px solid var(--rule-strong); border-radius: 2px; padding: 3px 7px; color: var(--muted); }
+    .f.have { border-color: var(--t1); color: var(--t1); }
+    .f.be { border-color: var(--t3); color: var(--t3); }
+    .f.new { border-color: var(--t4); color: var(--t4); }
+
+    /* summary table */
+    .scroller { overflow-x: auto; }
+    table { border-collapse: collapse; width: 100%; min-width: 620px; font-family: var(--f-display); font-size: 14.5px; line-height: 1.45; }
+    thead th { font-family: var(--f-mono); font-size: 9.5px; font-weight: 700; letter-spacing: .1em; text-transform: uppercase; color: var(--muted); text-align: left; padding: 0 12px 8px 0; border-bottom: 1.5px solid var(--rule-strong); white-space: nowrap; }
+    tbody td { padding: 10px 12px 10px 0; border-bottom: 1px solid var(--rule); vertical-align: top; color: var(--ink-2); }
+    tbody td:first-child { color: var(--ink); font-weight: 500; }
+    tbody tr:last-child td { border-bottom: none; }
+
+    .note { border-left: 3px solid var(--brand); background: var(--brand-soft); padding: 15px 19px; border-radius: 0 3px 3px 0; margin: 22px 0 0; font-size: 16px; }
+    .note .lbl { font-family: var(--f-mono); font-size: 10px; font-weight: 700; letter-spacing: .12em; text-transform: uppercase; color: var(--brand); display: block; margin-bottom: 6px; }
+    .note p { margin: 0; }
+
+    .foot { border-top: 1px solid var(--rule); padding-top: 18px; font-size: 13.5px; color: var(--muted); }
+
+    @media (max-width: 620px) {
+      .wrap { padding: 0 16px 64px; }
+      .item { grid-template-columns: 1fr; gap: 6px; }
+    }
+    @media (prefers-reduced-motion: reduce) { * { animation: none !important; transition: none !important; } }
+  </style>
+</head>
+<body>
+
+<div class="wrap">
+
+  <header class="mast">
+    <p class="eyebrow">v11 prototype vs our code · ordered by effort</p>
+    <h1>v11 Build Order</h1>
+    <p class="sub">Everything in the prototype, sorted easiest first. What each one needs on the backend, and what we already have that makes it cheaper than it looks.</p>
+  </header>
+
+  <div class="correct col">
+    <span class="lbl">Correction to what I told you earlier</span>
+    <p>I said the database could not store a second run of a prompt. That was wrong, and it changes the plan in our favour.</p>
+    <p><span class="mono">PromptAnalytics</span> can only hold one row per prompt/platform/region — that part was right. But there is a companion table, <span class="mono">PromptAnalyticsRun</span>, which is <strong>append-only, one immutable row per run</strong>, and the engine <strong>already writes to it on every run</strong> (<span class="mono">prompt_analytics_processor.py:831</span>). It stores mention, position, sentiment, the full citation list and competitors, keyed by timestamp — so multiple runs of the same prompt already fit.</p>
+    <p>Multi-run sampling therefore drops from "schema migration" to "add a repeat loop and read the table". The Runs screen moves from a big build to a medium one.</p>
+  </div>
+
+  <!-- TIER 1 -->
+  <div class="tier t1">
+    <div class="th"><h2>Start here</h2><span class="badge b1">Front-end only · days</span></div>
+    <p class="tdesc">No backend work at all. These read data we already return, or are pure layout and wording. Ship them while the harder work is being scoped.</p>
+
+    <div class="item">
+      <span class="n">1</span>
+      <div>
+        <h3>Re-organise the navigation</h3>
+        <p class="d">v11 groups everything under Tracking / Analytics / Advanced / Strategy with a small landing page for each section. Every page it links to already exists — this is menus and four new summary pages.</p>
+        <div class="facts"><span class="f have">Reuses all 54 existing pages</span><span class="f">No API change</span><span class="f">1–2 days</span></div>
+      </div>
+    </div>
+
+    <div class="item">
+      <span class="n">2</span>
+      <div>
+        <h3>Show the denominators</h3>
+        <p class="d">Next to every score, say what it is out of and how many times we asked. "64% mention rate" becomes "<b>64% — 23 of 36 answers</b>". Pure copy and layout over numbers we already compute.</p>
+        <div class="facts"><span class="f have">Data already returned</span><span class="f">Biggest trust gain per hour</span><span class="f">2 days</span></div>
+      </div>
+    </div>
+
+    <div class="item">
+      <span class="n">3</span>
+      <div>
+        <h3>Methodology note on reports</h3>
+        <p class="d">A short block at the end of every report stating which AI models were used, on what date, how many times, and the honest limits. v11 does this and it is the single cheapest credibility feature in the release.</p>
+        <div class="facts"><span class="f have">Reads existing run data</span><span class="f">1 day</span></div>
+      </div>
+    </div>
+
+    <div class="item">
+      <span class="n">4</span>
+      <div>
+        <h3>What's New page</h3>
+        <p class="d">Ship it static first — a hand-written changelog. Voting can come later behind a tiny endpoint.</p>
+        <div class="facts"><span class="f">Static content</span><span class="f">1 day</span></div>
+      </div>
+    </div>
+
+    <div class="item">
+      <span class="n">5</span>
+      <div>
+        <h3>Prompt Generator screen</h3>
+        <p class="d">v11 gives prompt generation its own screen with four sources and a review step. We already have the wizard as a component, and the backend models <span class="mono">PromptGenerationRun</span> and <span class="mono">PromptCandidate</span> exist. This is lifting a dialog into a page and adding "from your site pages" later.</p>
+        <div class="facts"><span class="f have">Models exist</span><span class="f be">One new source needs backend</span><span class="f">3 days</span></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- TIER 2 -->
+  <div class="tier t2">
+    <div class="th"><h2>Next</h2><span class="badge b2">Small backend · 1–2 weeks each</span></div>
+    <p class="tdesc">New endpoints or a small model on top of things that already exist. No new subsystems.</p>
+
+    <div class="item">
+      <span class="n">6</span>
+      <div>
+        <h3>Runs screen</h3>
+        <p class="d">The evidence ledger. <b>The table already exists and is already being filled</b> — this is a list endpoint with filters (engine, group, mention, date) plus the UI.</p>
+        <p class="d"><b>Backend:</b> one paginated read API over <span class="mono">PromptAnalyticsRun</span>, grouped by batch. No new model.</p>
+        <div class="facts"><span class="f have">PromptAnalyticsRun exists + populated</span><span class="f be">New read API</span><span class="f">1 week</span></div>
+      </div>
+    </div>
+
+    <div class="item">
+      <span class="n">7</span>
+      <div>
+        <h3>Variance and confidence</h3>
+        <p class="d">Count how many runs a prompt has, whether they agree, and show a confidence rating. Once runs are being repeated this is just arithmetic over the run table.</p>
+        <p class="d"><b>Backend:</b> an aggregate query and a small scoring function. Read-only.</p>
+        <div class="facts"><span class="f be">Depends on item 10</span><span class="f">4 days</span></div>
+      </div>
+    </div>
+
+    <div class="item">
+      <span class="n">8</span>
+      <div>
+        <h3>Credit guardrail alerts</h3>
+        <p class="d">"Tell me at 30% left" and "pause schedules at 10%". We already have <span class="mono">AlertRule</span>, <span class="mono">Alert</span> and <span class="mono">AlertNotification</span> models with a working evaluator — this adds a new rule type.</p>
+        <p class="d"><b>Backend:</b> new rule type + threshold check. Depends on credits existing (item 11).</p>
+        <div class="facts"><span class="f have">Alerts engine exists</span><span class="f be">After credits</span><span class="f">3 days</span></div>
+      </div>
+    </div>
+
+    <div class="item">
+      <span class="n">9</span>
+      <div>
+        <h3>Brand Context</h3>
+        <p class="d">One place to describe the business, with versioning and uploaded documents. We have <span class="mono">brand_identity.py</span> in the engine as a starting point.</p>
+        <p class="d"><b>Backend:</b> new model with version history, document upload and indexing, and every generator reading from it. The versioning and "this affects 5 groups" warning are the fiddly parts.</p>
+        <div class="facts"><span class="f have">brand_identity.py</span><span class="f new">New model + versioning</span><span class="f">2 weeks</span></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- TIER 3 -->
+  <div class="tier t3">
+    <div class="th"><h2>Then</h2><span class="badge b3">Real backend work · 3–5 weeks each</span></div>
+    <p class="tdesc">New models, new services, changes to how the engine runs. These need proper design before code.</p>
+
+    <div class="item">
+      <span class="n">10</span>
+      <div>
+        <h3>Multi-run sampling</h3>
+        <p class="d"><b>The foundation.</b> Ask each question 3 times instead of once. The storage is solved; the work is elsewhere.</p>
+        <p class="d"><b>Backend:</b> wrap the platform call in a repeat loop (the engine already runs platforms concurrently through a thread pool, so this slots in). Then the harder half — every read path that reports a single result must become a rate across runs, and <span class="mono">PromptAnalytics</span> has to become an aggregate rather than "the last run". Cost goes up 3×, so it cannot ship before item 11.</p>
+        <div class="facts"><span class="f have">Run table + write path exist</span><span class="f new">Read paths must be rewritten</span><span class="f new">3× LLM cost</span><span class="f">3 weeks</span></div>
+      </div>
+    </div>
+
+    <div class="item">
+      <span class="n">11</span>
+      <div>
+        <h3>Credits system</h3>
+        <p class="d">Must land before multi-run, or costs run away. Full spec is in the Credits screen document.</p>
+        <p class="d"><b>Backend:</b> four new pieces — balance per workspace, an editable price table, an append-only ledger, and a pre-flight estimate every action calls before running. Plus charge/refund that is atomic, and per-project caps. Note the ledger has <b>no design in the prototype at all</b> — decide the row granularity first.</p>
+        <div class="facts"><span class="f have">token_usage.py + invoicing exist</span><span class="f new">4 new models</span><span class="f new">Ledger undesigned</span><span class="f">3 weeks</span></div>
+      </div>
+    </div>
+
+    <div class="item">
+      <span class="n">12</span>
+      <div>
+        <h3>Schedules</h3>
+        <p class="d">Customer-defined recurring runs with a weekly credit forecast.</p>
+        <p class="d"><b>Backend:</b> we have Celery Beat working, but the schedule list lives in a settings file — it is fixed at deploy time. Customer schedules need a database-driven scheduler (django-celery-beat or equivalent), per-customer timezones, and the forecast calculation.</p>
+        <div class="facts"><span class="f have">Celery Beat running</span><span class="f new">Static → DB-driven</span><span class="f">3 weeks</span></div>
+      </div>
+    </div>
+
+    <div class="item">
+      <span class="n">13</span>
+      <div>
+        <h3>Visibility Health scoring</h3>
+        <p class="d">The 12 measures across Findable / Cited / Chosen, each against a target.</p>
+        <p class="d"><b>Backend:</b> about half the measures compute from data we already hold (mention rate, placement, engine coverage, citation share, sentiment). The other half need the crawler — bot access, page structure, page freshness, author signals. So it lands in two stages, and the Findable pillar waits on item 15.</p>
+        <div class="facts"><span class="f have">6 of 12 measures computable now</span><span class="f be">6 need the crawler</span><span class="f">4 weeks</span></div>
+      </div>
+    </div>
+
+    <div class="item">
+      <span class="n">14</span>
+      <div>
+        <h3>Brand Narrative</h3>
+        <p class="d">How AI describes you, versus how you want to be described.</p>
+        <p class="d"><b>Backend:</b> extract framing and lead attributes from stored responses, then compare against Brand Context. Needs item 9 first. The extraction itself is an LLM pass over answers we already keep.</p>
+        <div class="facts"><span class="f have">Responses already stored</span><span class="f be">After Brand Context</span><span class="f">3 weeks</span></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- TIER 4 -->
+  <div class="tier t4">
+    <div class="th"><h2>Last</h2><span class="badge b4">New subsystems · 6+ weeks each</span></div>
+    <p class="tdesc">These are whole new capabilities, not extensions. Each one is its own project.</p>
+
+    <div class="item">
+      <span class="n">15</span>
+      <div>
+        <h3>Technical SEO crawler</h3>
+        <p class="d">The 8 monitors — robots, sitemaps, broken URLs, internal links, site vitals, images, schema, metadata — plus a health score out of 100.</p>
+        <p class="d"><b>Backend:</b> a new app and a crawl pipeline that can walk 200 pages politely, store per-page findings, and re-run on a schedule. <b>Cheaper than it sounds:</b> Crawl4AI, Playwright, firecrawl, trafilatura, lxml and BeautifulSoup are all already in <span class="mono">requirements.txt</span>. Only page-speed data needs something new, and that is a free Google API.</p>
+        <div class="facts"><span class="f have">Crawl libraries installed</span><span class="f new">New app + pipeline</span><span class="f">6 weeks</span></div>
+      </div>
+    </div>
+
+    <div class="item">
+      <span class="n">16</span>
+      <div>
+        <h3>Audit Engine</h3>
+        <p class="d">The free public audit — and the biggest single piece in v11.</p>
+        <p class="d"><b>Backend:</b> a whole pipeline that runs for someone with no account: profile detection, prompt generation, 144 engine calls, SERP + crawl, scoring, then a public shareable page with PDF and JSON output. Plus abuse protection, rate limiting, a claim-to-project flow that carries the data over, and the lead pipeline behind it. Needs items 10, 13 and 15 to exist first.</p>
+        <div class="facts"><span class="f new">Depends on 10, 13, 15</span><span class="f new">Anonymous + public surface</span><span class="f">8 weeks</span></div>
+      </div>
+    </div>
+
+    <div class="item">
+      <span class="n">17</span>
+      <div>
+        <h3>Visibility Plan</h3>
+        <p class="d">Now / Next / Later with owners, due dates and projected scores.</p>
+        <p class="d"><b>Backend:</b> an actions model with assignment and status, rules that turn a failing measure into the right task, and score projection — which means modelling what a fix is worth before it happens. That projection is the hard, and least defined, part.</p>
+        <div class="facts"><span class="f be">After Visibility Health</span><span class="f new">Projection model undefined</span><span class="f">5 weeks</span></div>
+      </div>
+    </div>
+
+    <div class="item">
+      <span class="n">18</span>
+      <div>
+        <h3>Automations recipe engine</h3>
+        <p class="d">Trigger → condition → approval → action, with step-by-step run logs.</p>
+        <p class="d"><b>Backend:</b> a small workflow runtime — recipe storage, an evaluator, approval gates, step logging, and webhooks in and out. We have <span class="mono">AutomationSettings</span> today but it is a settings form, not an engine.</p>
+        <div class="facts"><span class="f new">New workflow runtime</span><span class="f">6 weeks</span></div>
+      </div>
+    </div>
+
+    <div class="item">
+      <span class="n">19</span>
+      <div>
+        <h3>Connections: MCP, webhooks, public API</h3>
+        <p class="d">The connector list itself is mostly UI — the <span class="mono">Integration</span> model and GSC/GA/WordPress/CMS plumbing already exist. The three developer features are the real work.</p>
+        <p class="d"><b>Backend:</b> we already have an <span class="mono">mcp-server/</span> directory, so that is a head start. A public API needs versioning, keys, rate limits and docs — treat it as its own product.</p>
+        <div class="facts"><span class="f have">Integration model + mcp-server dir</span><span class="f new">Public API is its own project</span><span class="f">6 weeks</span></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ORDER -->
+  <section>
+    <div class="th" style="border-top:1px solid var(--ink)"><h2>Suggested order, and why</h2></div>
+    <p class="lead">Dependencies matter more than effort here. Three things gate almost everything else.</p>
+
+    <div class="scroller">
+      <table>
+        <thead><tr><th style="width:16%">Stage</th><th style="width:34%">Build</th><th>Why this order</th></tr></thead>
+        <tbody>
+          <tr><td>Weeks 1–2</td><td>Items 1–5 — navigation, denominators, methodology, What's New, Prompt Generator</td><td>Front-end only. Ships visible progress while the rest is designed, and costs nothing to change later.</td></tr>
+          <tr><td>Weeks 3–6</td><td>Item 11 — Credits</td><td><b>Must come before multi-run.</b> Tripling our LLM volume without a meter is how a month's budget disappears in a week.</td></tr>
+          <tr><td>Weeks 7–10</td><td>Item 10 — Multi-run, then 6 and 7 — Runs screen and confidence</td><td>The credibility fix. The storage already exists, so the effort is in the read paths and in not breaking every current number.</td></tr>
+          <tr><td>Weeks 11–17</td><td>Item 15 — Technical SEO crawler</td><td>Our widest gap against Pixis, and it unlocks half of Visibility Health. Libraries are already installed.</td></tr>
+          <tr><td>Weeks 18–22</td><td>Items 13 and 9 — Visibility Health, Brand Context</td><td>Both pillars now have their data. Brand Context can run in parallel — different people, no overlap.</td></tr>
+          <tr><td>Then</td><td>Items 12, 14, 16, 17, 18, 19</td><td>Schedules, Narrative, Audit Engine, Plan, Automations, Connections. The Audit Engine is last because it needs almost everything else to exist.</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <div class="note col">
+      <span class="lbl">The one thing to decide first</span>
+      <p>Multi-run changes what every existing number means. A customer's visibility score will move the day it ships, because it stops being one lucky answer and starts being a rate. Decide now whether historical figures get recalculated or whether there is a clean break with a dated note — and tell customers before it happens, not after.</p>
+    </div>
+  </section>
+
+  <footer class="foot">
+    <p>Effort figures assume one full-stack developer per item and include testing, not design. Every "we already have" claim was checked against the working tree on branch <span class="mono">Selva-Ganeshan</span> — models, processors and requirements files — not against documentation. Items 16 and 17 carry the most estimate risk because parts of them are undefined in the prototype itself.</p>
+  </footer>
+
+</div>
+
+</body>
+</html>
