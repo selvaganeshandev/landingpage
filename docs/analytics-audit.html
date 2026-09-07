@@ -1,0 +1,406 @@
+<title>Analytics Integrity Audit</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap">
+<style>
+  :root {
+    --ground: #f6f7f9;
+    --surface: #ffffff;
+    --surface-2: #f1f3f6;
+    --ink: #1a1d23;
+    --ink-soft: #3d434e;
+    --muted: #5b616e;
+    --line: #e4e7ec;
+    --line-strong: #d3d8e0;
+    --accent: #4f46e5;
+    --accent-soft: #eef0fe;
+    --critical: #d1242f;
+    --critical-soft: #fdecec;
+    --warning: #b4690e;
+    --warning-soft: #fbf1e3;
+    --ok: #0a7a4f;
+    --ok-soft: #e7f5ee;
+    --shadow: 0 1px 2px rgba(20,25,40,.05), 0 8px 24px -12px rgba(20,25,40,.12);
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --ground: #0e1116;
+      --surface: #161a21;
+      --surface-2: #1d222b;
+      --ink: #e6e9ef;
+      --ink-soft: #c2c8d2;
+      --muted: #8b93a1;
+      --line: #262c36;
+      --line-strong: #333b47;
+      --accent: #8b83f7;
+      --accent-soft: #201f36;
+      --critical: #f2666f;
+      --critical-soft: #2a1518;
+      --warning: #dfa257;
+      --warning-soft: #2a2013;
+      --ok: #4cc38a;
+      --ok-soft: #10231a;
+      --shadow: 0 1px 2px rgba(0,0,0,.3), 0 10px 30px -14px rgba(0,0,0,.6);
+    }
+  }
+  :root[data-theme="dark"] {
+    --ground: #0e1116;
+    --surface: #161a21;
+    --surface-2: #1d222b;
+    --ink: #e6e9ef;
+    --ink-soft: #c2c8d2;
+    --muted: #8b93a1;
+    --line: #262c36;
+    --line-strong: #333b47;
+    --accent: #8b83f7;
+    --accent-soft: #201f36;
+    --critical: #f2666f;
+    --critical-soft: #2a1518;
+    --warning: #dfa257;
+    --warning-soft: #2a2013;
+    --ok: #4cc38a;
+    --ok-soft: #10231a;
+    --shadow: 0 1px 2px rgba(0,0,0,.3), 0 10px 30px -14px rgba(0,0,0,.6);
+  }
+
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    background: var(--ground);
+    color: var(--ink);
+    font-family: "IBM Plex Sans", system-ui, sans-serif;
+    line-height: 1.55;
+    -webkit-font-smoothing: antialiased;
+  }
+  .wrap { max-width: 960px; margin: 0 auto; padding: 0 24px 96px; }
+  mono, .mono { font-family: "IBM Plex Mono", ui-monospace, monospace; font-variant-numeric: tabular-nums; }
+
+  /* ---- Header ---- */
+  header.masthead {
+    border-bottom: 1px solid var(--line);
+    background: linear-gradient(180deg, var(--surface), var(--ground));
+  }
+  .masthead .wrap { padding-top: 40px; padding-bottom: 32px; }
+  .eyebrow {
+    font-family: "IBM Plex Mono", monospace;
+    font-size: 12px; letter-spacing: .14em; text-transform: uppercase;
+    color: var(--accent); font-weight: 500; margin: 0 0 14px;
+  }
+  h1 {
+    font-size: clamp(30px, 5vw, 46px); font-weight: 700; letter-spacing: -.02em;
+    line-height: 1.05; margin: 0 0 14px; text-wrap: balance;
+  }
+  .lede { font-size: 18px; color: var(--ink-soft); max-width: 62ch; margin: 0 0 6px; }
+  .meta {
+    font-family: "IBM Plex Mono", monospace; font-size: 12.5px; color: var(--muted);
+    margin-top: 18px; display: flex; flex-wrap: wrap; gap: 6px 20px;
+  }
+  .meta b { color: var(--ink-soft); font-weight: 600; }
+
+  /* ---- Summary tiles ---- */
+  .tiles { display: grid; grid-template-columns: repeat(4, 1fr); gap: 14px; margin: 32px 0 12px; }
+  .tile {
+    background: var(--surface); border: 1px solid var(--line); border-radius: 12px;
+    padding: 18px 18px 16px; box-shadow: var(--shadow); position: relative; overflow: hidden;
+  }
+  .tile::before { content: ""; position: absolute; left: 0; top: 0; bottom: 0; width: 3px; background: var(--stripe, var(--line-strong)); }
+  .tile.crit { --stripe: var(--critical); }
+  .tile.warn { --stripe: var(--warning); }
+  .tile.good { --stripe: var(--ok); }
+  .tile.neut { --stripe: var(--accent); }
+  .tile .n { font-family: "IBM Plex Mono", monospace; font-size: 34px; font-weight: 600; line-height: 1; letter-spacing: -.02em; }
+  .tile.crit .n { color: var(--critical); }
+  .tile.warn .n { color: var(--warning); }
+  .tile.good .n { color: var(--ok); }
+  .tile .k { font-size: 12.5px; color: var(--muted); margin-top: 8px; letter-spacing: .01em; }
+
+  /* ---- Sections ---- */
+  section { margin-top: 48px; }
+  .sec-head { display: flex; align-items: baseline; gap: 12px; border-bottom: 2px solid var(--line-strong); padding-bottom: 10px; margin-bottom: 6px; }
+  .sec-head h2 { font-size: 21px; font-weight: 600; letter-spacing: -.01em; margin: 0; }
+  .sec-head .count { font-family: "IBM Plex Mono", monospace; font-size: 13px; color: var(--muted); margin-left: auto; }
+  .sec-note { color: var(--muted); font-size: 14.5px; margin: 12px 0 24px; max-width: 66ch; }
+
+  /* ---- Finding ---- */
+  .finding {
+    background: var(--surface); border: 1px solid var(--line); border-radius: 12px;
+    box-shadow: var(--shadow); margin-bottom: 18px; overflow: hidden;
+    display: grid; grid-template-columns: 4px 1fr;
+  }
+  .finding .rail { background: var(--sev, var(--line-strong)); }
+  .finding.crit { --sev: var(--critical); }
+  .finding.high { --sev: #e0592b; }
+  .finding.med  { --sev: var(--warning); }
+  .finding .body { padding: 20px 22px 22px; min-width: 0; }
+  .f-top { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; margin-bottom: 4px; }
+  .f-id { font-family: "IBM Plex Mono", monospace; font-size: 13px; font-weight: 600; color: var(--muted); }
+  .f-title { font-size: 18px; font-weight: 600; letter-spacing: -.01em; margin: 0; flex: 1 1 auto; min-width: 200px; }
+  .chip {
+    font-family: "IBM Plex Mono", monospace; font-size: 11px; font-weight: 600;
+    letter-spacing: .06em; text-transform: uppercase; padding: 4px 9px; border-radius: 999px; white-space: nowrap;
+  }
+  .chip.crit { color: var(--critical); background: var(--critical-soft); }
+  .chip.high { color: #c24a1f; background: var(--warning-soft); }
+  .chip.med  { color: var(--warning); background: var(--warning-soft); }
+
+  .rows { margin-top: 14px; display: grid; gap: 9px; }
+  .row { display: grid; grid-template-columns: 88px 1fr; gap: 14px; align-items: baseline; }
+  .row .lbl {
+    font-family: "IBM Plex Mono", monospace; font-size: 11px; letter-spacing: .08em;
+    text-transform: uppercase; color: var(--muted); padding-top: 1px;
+  }
+  .row .val { font-size: 14.5px; color: var(--ink-soft); }
+  .row .val strong { color: var(--ink); font-weight: 600; }
+
+  .evidence {
+    margin-top: 14px; background: var(--surface-2); border: 1px solid var(--line);
+    border-radius: 8px; padding: 12px 14px; font-family: "IBM Plex Mono", monospace;
+    font-size: 12.5px; line-height: 1.7; color: var(--ink-soft); overflow-x: auto;
+  }
+  .evidence .bad { color: var(--critical); font-weight: 600; }
+  .evidence .good { color: var(--ok); font-weight: 600; }
+  .evidence .dim { color: var(--muted); }
+
+  /* ---- Tables ---- */
+  .tbl-wrap { overflow-x: auto; border: 1px solid var(--line); border-radius: 12px; box-shadow: var(--shadow); background: var(--surface); }
+  table { border-collapse: collapse; width: 100%; font-size: 14px; }
+  th, td { text-align: left; padding: 12px 16px; border-bottom: 1px solid var(--line); }
+  thead th { font-size: 12px; letter-spacing: .04em; text-transform: uppercase; color: var(--muted); font-weight: 600; background: var(--surface-2); }
+  tbody tr:last-child td { border-bottom: none; }
+  td.num, th.num { font-family: "IBM Plex Mono", monospace; font-variant-numeric: tabular-nums; }
+  .tag { font-family: "IBM Plex Mono", monospace; font-size: 11px; font-weight: 600; padding: 3px 8px; border-radius: 6px; white-space: nowrap; }
+  .tag.ok { color: var(--ok); background: var(--ok-soft); }
+  .tag.bad { color: var(--critical); background: var(--critical-soft); }
+  .tag.warn { color: var(--warning); background: var(--warning-soft); }
+
+  /* ---- Callout ---- */
+  .callout {
+    margin-top: 40px; background: var(--accent-soft); border: 1px solid color-mix(in srgb, var(--accent) 30%, transparent);
+    border-radius: 14px; padding: 26px 28px;
+  }
+  .callout h3 { margin: 0 0 10px; font-size: 17px; font-weight: 600; color: var(--accent); }
+  .callout p { margin: 0; font-size: 16px; color: var(--ink-soft); max-width: 70ch; }
+  .callout p strong { color: var(--ink); }
+
+  footer { margin-top: 40px; padding-top: 20px; border-top: 1px solid var(--line); color: var(--muted); font-size: 12.5px; font-family: "IBM Plex Mono", monospace; }
+
+  @media (max-width: 720px) {
+    .tiles { grid-template-columns: repeat(2, 1fr); }
+    .row { grid-template-columns: 1fr; gap: 2px; }
+    .row .lbl { padding-top: 6px; }
+  }
+</style>
+
+<header class="masthead">
+  <div class="wrap">
+    <p class="eyebrow">Data Integrity · Analytics Layer</p>
+    <h1>Analytics Integrity Audit</h1>
+    <p class="lede">Ten defects in how mentions, competitors, and visibility are counted — every figure verified against live production data. The raw answer records are trustworthy; the stored and aggregated numbers on the dashboards are not.</p>
+    <div class="meta">
+      <span><b>Scope</b> Dashboard · Share of Voice · Competitors</span>
+      <span><b>Method</b> live production queries (read-only)</span>
+      <span><b>Reference domain</b> Kotak Bank (id 157)</span>
+    </div>
+  </div>
+</header>
+
+<div class="wrap">
+
+  <div class="tiles">
+    <div class="tile crit"><div class="n">2</div><div class="k">Critical — visibly wrong numbers on the dashboard</div></div>
+    <div class="tile warn"><div class="n">3</div><div class="k">High — undercounts &amp; stale saved values</div></div>
+    <div class="tile neut"><div class="n">5</div><div class="k">Consistency — same label, different meanings</div></div>
+    <div class="tile good"><div class="n">3</div><div class="k">Numbers confirmed correct (ground truth)</div></div>
+  </div>
+
+  <!-- ============ CONFIRMED BUGS ============ -->
+  <section>
+    <div class="sec-head"><h2>Confirmed bugs</h2><span class="count">5 findings · proven on production</span></div>
+    <p class="sec-note">Each of these produces a number a user sees that does not match reality. All verified by querying the same records the code reads.</p>
+
+    <!-- F1 -->
+    <article class="finding crit">
+      <div class="rail"></div>
+      <div class="body">
+        <div class="f-top">
+          <span class="f-id">BUG-01</span>
+          <h3 class="f-title">Dashboard “Mentions” card inflates by pile-up</h3>
+          <span class="chip crit">Critical</span>
+        </div>
+        <div class="rows">
+          <div class="row"><span class="lbl">What</span><span class="val">The card sums the <strong>mentions</strong> field across <strong>every snapshot date × every platform</strong> instead of showing the latest.</span></div>
+          <div class="row"><span class="lbl">Effect</span><span class="val">The number grows every time a domain is tracked on a new day. Domains tracked once look correct by coincidence; multi-day domains balloon.</span></div>
+          <div class="row"><span class="lbl">Cause</span><span class="val"><span class="mono">SUM(mentions)</span> over <span class="mono">DomainMetricSnapshot</span> with no “latest snapshot” filter.</span></div>
+          <div class="row"><span class="lbl">Fix</span><span class="val">Read the latest snapshot per platform (or the true count), not the sum of all dates.</span></div>
+        </div>
+        <div class="evidence">Kotak — DomainMetricSnapshot: <span class="dim">2 dates × 4 platforms = 8 rows</span>
+Dashboard SUM(mentions) ........ <span class="bad">25,719</span>  <span class="dim">(user sees ~19k in-window)</span>
+Real answers that named brand .. <span class="good">876</span>
+Bioderma <span class="dim">(tracked 1 day)</span> ......... 595 = 595  <span class="good">✓ matches</span></div>
+      </div>
+    </article>
+
+    <!-- F2 -->
+    <article class="finding crit">
+      <div class="rail"></div>
+      <div class="body">
+        <div class="f-top">
+          <span class="f-id">BUG-02</span>
+          <h3 class="f-title">Share of Voice dropdown double-counts (×2)</h3>
+          <span class="chip crit">Critical</span>
+        </div>
+        <div class="rows">
+          <div class="row"><span class="lbl">What</span><span class="val">Sums the per-platform rows <strong>plus</strong> the “Overall” row — but “Overall” already equals the sum of the platforms.</span></div>
+          <div class="row"><span class="lbl">Effect</span><span class="val">Every figure is exactly <strong>twice</strong> the correct value.</span></div>
+          <div class="row"><span class="lbl">Cause</span><span class="val">The SoV block reads <span class="mono">latest_rows</span> without filtering to the “Overall” scope.</span></div>
+          <div class="row"><span class="lbl">Fix</span><span class="val">Use only the “Overall” row (or sum only the real platforms — never both).</span></div>
+        </div>
+        <div class="evidence">Kotak — own-brand SoV rows (latest day):
+ChatGPT 4,026 · Claude 929 · Gemini 1,157 · Perplexity 559  → <span class="dim">= 6,671</span>
+Overall row ................. 6,671   <span class="dim">(already the total)</span>
+Dropdown shows (all summed) . <span class="bad">13,342</span>
+Correct value .............. <span class="good">6,671</span></div>
+      </div>
+    </article>
+
+    <!-- F3 -->
+    <article class="finding high">
+      <div class="rail"></div>
+      <div class="body">
+        <div class="f-top">
+          <span class="f-id">BUG-03</span>
+          <h3 class="f-title">Competitor “Mentions” is a stale saved value</h3>
+          <span class="chip high">High</span>
+        </div>
+        <div class="rows">
+          <div class="row"><span class="lbl">What</span><span class="val">The Competitors screen reads <span class="mono">Competitor.total_mentions</span>, a saved field that isn’t recomputed when the underlying data refreshes.</span></div>
+          <div class="row"><span class="lbl">Effect</span><span class="val">Shows an old, higher number with no source in the current data.</span></div>
+          <div class="row"><span class="lbl">Cause</span><span class="val">Reprocessing rewrites the raw records but leaves the competitor’s saved total behind.</span></div>
+          <div class="row"><span class="lbl">Fix</span><span class="val">Recompute <span class="mono">total_mentions</span> whenever the competitor’s records are reprocessed.</span></div>
+        </div>
+        <div class="evidence">Paisabazaar — stored total_mentions .... <span class="bad">800</span>
+Live recompute (133 records) .......... <span class="good">47</span>
+Historical snapshot (2026-08-11) ...... 47
+Share of Voice “Overall” .............. 47   <span class="dim">← all agree; only the saved field is wrong</span></div>
+      </div>
+    </article>
+
+    <!-- F4 -->
+    <article class="finding high">
+      <div class="rail"></div>
+      <div class="body">
+        <div class="f-top">
+          <span class="f-id">BUG-04</span>
+          <h3 class="f-title">Competitors are measured on only one AI model each</h3>
+          <span class="chip high">High</span>
+        </div>
+        <div class="rows">
+          <div class="row"><span class="lbl">What</span><span class="val">Competitor detection reads only the <strong>most recent answer</strong> per prompt, so each competitor is measured on a <strong>single platform</strong> — and which one varies.</span></div>
+          <div class="row"><span class="lbl">Effect</span><span class="val">Competitor mentions are undercounted; they miss whatever the other three models said.</span></div>
+          <div class="row"><span class="lbl">Cause</span><span class="val"><span class="mono">.order_by('-tracked_at').first()</span> picks one answer instead of looping over all four platforms (as own-brand analysis does).</span></div>
+          <div class="row"><span class="lbl">Fix</span><span class="val">Scan every platform’s answer for competitors, matching the own-brand pipeline.</span></div>
+        </div>
+        <div class="evidence">Own brand (Kotak) .. ChatGPT 354 · Claude 353 · Gemini 393 · Perplexity 399  <span class="good">✓ all 4</span>
+Paisabazaar ........ <span class="bad">Perplexity only</span>       Hdfcbank ...... <span class="bad">ChatGPT only</span>
+Smartprix .......... <span class="bad">Perplexity only</span>       Incometax ..... <span class="bad">Gemini only</span></div>
+      </div>
+    </article>
+
+    <!-- F5 -->
+    <article class="finding med">
+      <div class="rail"></div>
+      <div class="body">
+        <div class="f-top">
+          <span class="f-id">BUG-05</span>
+          <h3 class="f-title">Competitive Strength radar shows a fake “Position = 100”</h3>
+          <span class="chip med">Medium</span>
+        </div>
+        <div class="rows">
+          <div class="row"><span class="lbl">What</span><span class="val">Competitor average position is <span class="mono">0.0</span> (never calculated), but the formula treats “0” as “ranked #1”.</span></div>
+          <div class="row"><span class="lbl">Effect</span><span class="val">Every competitor scores a perfect <strong>100</strong> on the Position axis — they all look like they rank first.</span></div>
+          <div class="row"><span class="lbl">Cause</span><span class="val"><span class="mono">100 − (avg_position × 10)</span> with <span class="mono">avg_position = 0</span> → 100.</span></div>
+          <div class="row"><span class="lbl">Fix</span><span class="val">Treat <span class="mono">0</span> as “no data” (blank / neutral), not as the best rank.</span></div>
+        </div>
+        <div class="evidence">Paisabazaar avg_position 0.00 → Position score <span class="bad">100</span>
+Bankbazaar  avg_position 0.00 → Position score <span class="bad">100</span></div>
+      </div>
+    </article>
+  </section>
+
+  <!-- ============ CONSISTENCY ISSUES ============ -->
+  <section>
+    <div class="sec-head"><h2>Consistency &amp; data-quality issues</h2><span class="count">5 findings</span></div>
+    <p class="sec-note">Not always “wrong” in isolation, but they make the same metric read differently across screens — which looks broken to a user.</p>
+
+    <article class="finding med">
+      <div class="rail"></div>
+      <div class="body">
+        <div class="f-top"><span class="f-id">ISS-06</span><h3 class="f-title">Competitor visibility is stale &amp; identical</h3><span class="chip med">Medium</span></div>
+        <div class="rows"><div class="row"><span class="lbl">Detail</span><span class="val">Paisabazaar and Bankbazaar both show <span class="mono">24.81%</span> visibility — two different brands with the exact same value, a stale/default artefact.</span></div></div>
+      </div>
+    </article>
+
+    <article class="finding med">
+      <div class="rail"></div>
+      <div class="body">
+        <div class="f-top"><span class="f-id">ISS-07</span><h3 class="f-title">Radar measures you and competitors with different formulas</h3><span class="chip med">Medium</span></div>
+        <div class="rows"><div class="row"><span class="lbl">Detail</span><span class="val">Your Visibility = <span class="mono">100 − (position × 20)</span>; competitor Visibility = a stored score from a different blend. The same axis is not apples-to-apples.</span></div></div>
+      </div>
+    </article>
+
+    <article class="finding med">
+      <div class="rail"></div>
+      <div class="body">
+        <div class="f-top"><span class="f-id">ISS-08</span><h3 class="f-title">Share of Voice freshness varies by domain</h3><span class="chip med">Medium</span></div>
+        <div class="rows"><div class="row"><span class="lbl">Detail</span><span class="val">Recomputed on different dates per domain — <span class="mono">Kotak = 2026-08-11 (stale)</span>, <span class="mono">Bioderma = 2026-08-24 (current)</span>. Two domains on one screen are “as of” different days.</span></div></div>
+      </div>
+    </article>
+
+    <article class="finding med">
+      <div class="rail"></div>
+      <div class="body">
+        <div class="f-top"><span class="f-id">ISS-09</span><h3 class="f-title">Visibility score is inconsistent for the same brand</h3><span class="chip med">Medium</span></div>
+        <div class="rows"><div class="row"><span class="lbl">Detail</span><span class="val">Kotak’s stored visibility (<span class="mono">69.71%</span>) ≠ the dashboard-computed value (<span class="mono">33.64%</span>) — two different formulas. Note: because it’s a rate, it never inflates like the counts.</span></div></div>
+      </div>
+    </article>
+
+    <article class="finding med">
+      <div class="rail"></div>
+      <div class="body">
+        <div class="f-top"><span class="f-id">ISS-10</span><h3 class="f-title">Six different “mention” numbers, all labelled the same</h3><span class="chip med">Medium</span></div>
+        <div class="rows"><div class="row"><span class="lbl">Detail</span><span class="val">The word “mentions” appears on six figures measuring different things over different windows — the core reason users can’t reconcile the screens (see table below).</span></div></div>
+      </div>
+    </article>
+  </section>
+
+  <!-- ============ THE NUMBERS TABLE ============ -->
+  <section>
+    <div class="sec-head"><h2>Every “mention” number for Kotak, decoded</h2></div>
+    <p class="sec-note">The same brand shows six different mention figures. Here is what each one actually measures and whether it can be trusted.</p>
+    <div class="tbl-wrap">
+      <table>
+        <thead>
+          <tr><th class="num">Value</th><th>Where it appears</th><th>What it really measures</th><th>Verdict</th></tr>
+        </thead>
+        <tbody>
+          <tr><td class="num">876</td><td>Analytics (raw)</td><td>AI answers that named the brand</td><td><span class="tag ok">Correct</span></td></tr>
+          <tr><td class="num">6,671</td><td>Share of Voice graph</td><td>Times named across platforms (Overall)</td><td><span class="tag ok">Correct · stale</span></td></tr>
+          <tr><td class="num">47</td><td>Competitor snapshot</td><td>Competitor times-named (latest day)</td><td><span class="tag ok">Correct</span></td></tr>
+          <tr><td class="num">800</td><td>Competitor card</td><td>Stale saved <span class="mono">total_mentions</span></td><td><span class="tag bad">Stale · BUG-03</span></td></tr>
+          <tr><td class="num">13,342</td><td>Dashboard SoV dropdown</td><td>Overall + platforms (counted twice)</td><td><span class="tag bad">2× · BUG-02</span></td></tr>
+          <tr><td class="num">~19k</td><td>Dashboard Mentions card</td><td>Every snapshot date summed</td><td><span class="tag bad">Inflated · BUG-01</span></td></tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <div class="callout">
+    <h3>The single root cause behind almost all of it</h3>
+    <p><strong>Anything read from a stored or aggregated field is stale or double-summed; only the raw answer records are reliable.</strong> Every bug here is a variation of one mistake — <em>summing rows that shouldn’t be summed</em>, or <em>reading a saved value that was never refreshed</em>. Fix the read paths (latest snapshot, Overall-only) and the recompute-on-reprocess paths, and every headline number falls back into agreement with the raw truth.</p>
+  </div>
+
+  <footer>
+    Analytics Integrity Audit · findings verified read-only against production · reference domain Kotak Bank (157) · figures current as of the SoV snapshot dates noted per finding.
+  </footer>
+
+</div>
