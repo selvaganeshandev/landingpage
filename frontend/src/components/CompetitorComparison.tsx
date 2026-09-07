@@ -46,6 +46,9 @@ export const CompetitorComparison = ({ competitors = [] }: CompetitorComparisonP
             plain="Of all the brand mentions in your tracked answers — yours plus the competitors you track — how many are yours."
             formula={
               <>
+                <span className="block font-semibold text-foreground mb-2">
+                  SOV = ( Your brand's mentions ÷ Total mentions of all brands ) × 100
+                </span>
                 Each brand's mentions ÷ the mentions of every tracked brand combined, over the date
                 range at the top of the page. Only competitors you have added are counted, so
                 adding or removing one moves everybody's share. The <strong>pts</strong> figure is

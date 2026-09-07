@@ -135,3 +135,6 @@ backend/media/
 
 # Claude Code per-machine local settings (never commit — may hold secrets)
 .claude/settings.local.json
+
+# Office lock/owner files (created while a .docx is open)
+~$*

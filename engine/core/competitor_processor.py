@@ -539,11 +539,32 @@ class CompetitorProcessor:
             
             competitor_name = comp_prompt.competitor.name
             
-            # Analyze competitor presence in existing response
-            analytics = self._analyze_competitor_mention(
-                response_text=response_text,
+            # Analyse the competitor across EVERY platform's answer, not just one.
+            # Each prompt is answered by every enabled platform (ChatGPT, Claude,
+            # Gemini, Perplexity) and each answer is stored as its own
+            # PromptAnalytics row. This previously read a SINGLE row (.first()),
+            # so a competitor was measured on one model while the brand's own
+            # mentions are counted across all of them — undercounting competitors
+            # roughly four-fold and making share-of-voice comparisons unfair.
+            # Falls back to the single primary row if nothing else is available,
+            # so behaviour is unchanged when only one answer exists.
+            platform_rows = list(
+                PromptAnalytics.objects.filter(
+                    prompt=comp_prompt.prompt,
+                    track_status='COMP'
+                ).exclude(
+                    context_summary__isnull=True
+                ).exclude(
+                    context_summary=''
+                )
+            )
+            if not platform_rows:
+                platform_rows = [prompt_analytics]
+
+            analytics = self._analyze_competitor_mention_across_platforms(
+                analytics_rows=platform_rows,
                 competitor_name=competitor_name,
-                competitor_url=comp_prompt.competitor.url
+                competitor_url=comp_prompt.competitor.url,
             )
             
             # Update CompetitorPromptAnalytics with results
@@ -558,9 +579,17 @@ class CompetitorProcessor:
                 cp.sentiment_category = analytics['sentiment_category']
                 cp.sentiment_score = analytics['sentiment_score']
                 cp.response_text = response_text  # Store the context_summary we used
-                # Filter citations to only those relevant to this specific competitor
+                # Filter citations to only those relevant to this specific
+                # competitor. Gathered from EVERY platform's answer (not just the
+                # primary row) and de-duplicated, to match the multi-platform
+                # mention count above.
+                _all_citations = []
+                for _pa in platform_rows:
+                    for _c in (getattr(_pa, 'citation_list', None) or []):
+                        if _c not in _all_citations:
+                            _all_citations.append(_c)
                 cp.citation_list = extract_competitor_citations(
-                    prompt_analytics.citation_list,
+                    _all_citations,
                     competitor_name,
                     comp_prompt.competitor.url
                 )
@@ -578,10 +607,38 @@ class CompetitorProcessor:
                 cp.save(update_fields=['track_status', 'track_message', 'modified_at'])
             raise
     
+    @staticmethod
+    def _competitor_name_pattern(competitor_name: str):
+        """Compile a whole-word, case-insensitive matcher for a competitor name.
+
+        Mentions used to be counted with a plain substring search, which
+        over-counted badly whenever a brand's name is also an ordinary word:
+        "Cloud" matched every "cloud computing" / "iCloud", and short names
+        matched INSIDE unrelated words ("Ola" inside "solar" and "chocolate").
+        Word boundaries stop both without changing anything for distinctive
+        names like "Paisabazaar".
+
+        A boundary is only applied on a side that starts/ends with an
+        alphanumeric character, because \\b next to punctuation (e.g. "Yahoo!"
+        or ".NET") would never match and would silently drop real mentions.
+
+        Returns None for an empty or un-compilable name so callers fall back to
+        the original substring behaviour rather than failing.
+        """
+        name = (competitor_name or '').strip()
+        if not name:
+            return None
+        prefix = r'\b' if name[:1].isalnum() else ''
+        suffix = r'\b' if name[-1:].isalnum() else ''
+        try:
+            return re.compile(prefix + re.escape(name) + suffix, re.IGNORECASE)
+        except re.error:
+            return None
+
     def _analyze_competitor_mention(
-        self, 
-        response_text: str, 
-        competitor_name: str, 
+        self,
+        response_text: str,
+        competitor_name: str,
         competitor_url: str
     ) -> Dict[str, Any]:
         """
@@ -595,12 +652,26 @@ class CompetitorProcessor:
         Returns:
             dict: Analytics data about competitor mention
         """
-        # Simple keyword-based detection (can be enhanced with NLP)
+        # Keyword detection, matched on WHOLE WORDS only. A plain substring
+        # count inflated any brand whose name is an ordinary word (a competitor
+        # called "Cloud" scored every "cloud computing"/"iCloud") and matched
+        # short names inside unrelated words ("Ola" inside "solar"). Falls back
+        # to the original substring behaviour if the name cannot be compiled.
         response_lower = response_text.lower()
         competitor_lower = competitor_name.lower()
-        
-        is_mentioned = competitor_lower in response_lower
-        mention_count = response_lower.count(competitor_lower)
+
+        name_pattern = self._competitor_name_pattern(competitor_name)
+        if name_pattern is not None:
+            mention_count = len(name_pattern.findall(response_text))
+            is_mentioned = mention_count > 0
+        elif competitor_lower.strip():
+            is_mentioned = competitor_lower in response_lower
+            mention_count = response_lower.count(competitor_lower)
+        else:
+            # A blank name would otherwise "match" at every character position
+            # (''.count() returns len(text)+1), inventing mentions out of nothing.
+            is_mentioned = False
+            mention_count = 0
         
         # Find position (which numbered item in a list)
         position = None
@@ -608,9 +679,14 @@ class CompetitorProcessor:
             # Try to find position in numbered lists
             lines = response_text.split('\n')
             for i, line in enumerate(lines):
-                if competitor_lower in line.lower():
+                # Same whole-word rule as the count above, so the position is
+                # read from a line that really names the competitor.
+                line_has_name = (
+                    name_pattern.search(line) if name_pattern is not None
+                    else competitor_lower in line.lower()
+                )
+                if line_has_name:
                     # Extract number if present (e.g., "1. CompetitorName" -> 1)
-                    import re
                     match = re.match(r'^\s*(\d+)', line)
                     if match:
                         position = int(match.group(1))
@@ -619,7 +695,8 @@ class CompetitorProcessor:
         # Extract citations (URLs or references)
         citations = []
         if is_mentioned:
-            import re
+            # (`re` comes from the module-level import; a local `import re` here
+            # would make the name function-local and unbound in the block above.)
             # Find URLs near competitor mentions
             url_pattern = r'https?://[^\s<>"{}|\\^`\[\]]+'
             urls = re.findall(url_pattern, response_text)
@@ -652,7 +729,90 @@ class CompetitorProcessor:
             'sentiment_score': Decimal(str(sentiment_score)),
             'citations': citations
         }
-    
+
+    def _analyze_competitor_mention_across_platforms(
+        self,
+        analytics_rows,
+        competitor_name: str,
+        competitor_url: str
+    ) -> Dict[str, Any]:
+        """
+        Combine per-platform competitor analysis into a single result.
+
+        Every prompt is answered by each enabled platform, so a competitor has to
+        be measured across ALL of them — the brand's own mentions already are.
+        Reading one platform undercounted competitors and made share of voice an
+        unfair comparison.
+
+        Combining rules:
+          - mention_count : SUM across platforms (total times the name appears)
+          - is_mentioned  : True if ANY platform mentioned it
+          - position      : the BEST (lowest) position any platform gave it
+          - sentiment     : average across the platforms that mentioned it
+          - citations     : union across platforms, order preserved
+
+        With a single row this returns the same shape and values as the
+        single-answer analyser, so nothing changes for one-answer prompts.
+        Any per-row failure is logged and skipped rather than failing the job.
+        """
+        total_mentions = 0
+        is_mentioned = False
+        best_position = None
+        sentiment_scores = []
+        citations = []
+
+        for pa in (analytics_rows or []):
+            text = (getattr(pa, 'context_summary', '') or '')
+            if not text:
+                continue
+            try:
+                result = self._analyze_competitor_mention(
+                    response_text=text,
+                    competitor_name=competitor_name,
+                    competitor_url=competitor_url,
+                )
+            except Exception as e:  # never fail the whole prompt on one platform
+                logger.warning(
+                    f"Competitor analysis failed for PromptAnalytics "
+                    f"{getattr(pa, 'id', None)}: {e}"
+                )
+                continue
+
+            total_mentions += int(result.get('mention_count') or 0)
+
+            if result.get('is_mentioned'):
+                is_mentioned = True
+                pos = result.get('position')
+                if pos is not None and (best_position is None or pos < best_position):
+                    best_position = pos
+                try:
+                    sentiment_scores.append(float(result.get('sentiment_score') or 0))
+                except (TypeError, ValueError):
+                    pass
+
+            for c in (result.get('citations') or []):
+                if c not in citations:
+                    citations.append(c)
+
+        avg_sentiment = (
+            sum(sentiment_scores) / len(sentiment_scores) if sentiment_scores else 0.0
+        )
+        if avg_sentiment > 0.05:
+            sentiment_category = 'positive'
+        elif avg_sentiment < -0.05:
+            sentiment_category = 'negative'
+        else:
+            sentiment_category = 'neutral'
+
+        return {
+            'is_mentioned': is_mentioned,
+            'position': best_position,
+            'mention_count': total_mentions,
+            'sentiment_category': sentiment_category,
+            'sentiment_score': Decimal(str(round(avg_sentiment, 2))),
+            'citations': citations,
+        }
+
     def _aggregate_competitor_analytics(self, competitor: Competitor) -> None:
         """
         Aggregate all CompetitorPromptAnalytics data into:

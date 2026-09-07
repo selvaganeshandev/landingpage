@@ -11,6 +11,12 @@ from shared_models.models import (
     DomainMetricSnapshot, PromptGroupMetricSnapshot
 )
 
+# Platform label on the aggregate ("one row per brand") share-of-voice rows.
+# Defined next to the writer in competitor_processor; kept as a literal here so
+# the read-only dashboard path does not import the processor (and its LLM
+# client) just to read one constant. Must stay in sync with that module.
+SOV_OVERALL_PLATFORM = 'Overall'
+
 
 def calculate_relative_time(dt):
     """Calculate relative time string like '2 hours ago'"""
@@ -415,7 +421,24 @@ def dashboard_summary(request):
     if sov_qs.exists():
         latest_day = sov_qs.order_by('-timestamp').first().timestamp
         latest_rows = sov_qs.filter(timestamp=latest_day)
-        
+
+        # Share of voice stores TWO kinds of row per brand: one per AI platform
+        # (ChatGPT / Claude / Gemini / Perplexity) AND an aggregate row that
+        # already sums those platforms. Reading both returns every brand several
+        # times and double-counts the mentions — a domain whose true total is
+        # 7,804 was reported as 15,608. Prefer the aggregate rows, which give
+        # exactly one row per brand, as the writer's docstring requires
+        # ("consumers that want one figure per brand must filter to it").
+        #
+        # Rows written before the aggregate existed were all stamped
+        # platform='ChatGPT', so those domains have a single platform and
+        # already carry one row per brand. Falling back to the unfiltered set
+        # keeps them rendering exactly as before instead of showing an empty
+        # card — 22 of 41 domains in production are still in that state.
+        overall_rows = latest_rows.filter(platform=SOV_OVERALL_PLATFORM)
+        if overall_rows.exists():
+            latest_rows = overall_rows
+
         your_brand = latest_rows.filter(competitor__isnull=True).first()
         competitors_rows = latest_rows.filter(
             competitor__isnull=False
