@@ -1155,10 +1155,31 @@ Return ONLY a valid JSON object with this structure (no markdown, no commentary)
         }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 
-def _fetch_pagespeed_data(url, strategy='mobile'):
+# A PSI call is one real Lighthouse pass on Google's infrastructure, so its
+# duration tracks how heavy the page is, not how far away Google is. Measured
+# against the live API on 2026-09-09: example.com 11.3s, hitachiaircon.com 46.7s,
+# mysleepwell.com >90s. The previous 60s ceiling cleared hitachiaircon by only
+# 13s and lost anything heavier, so it is raised to 120s.
+#
+# There is room for it: gunicorn runs --timeout 300 and nginx proxy_read_timeout
+# is 300s, and mobile and desktop are fetched CONCURRENTLY, so the worst case for
+# the request is one PSI pass (~120s) rather than two.
+PAGESPEED_TIMEOUT = 120
+
+# FAILED_DOCUMENT_REQUEST means Lighthouse could not load the page at all. It is
+# frequently intermittent — a cold origin, a slow third-party script, a transient
+# block — so one retry converts a fair number of blank CWV panels into real
+# scores. Only this error is retried: a 400 for a malformed URL or a 429 for
+# quota would fail again identically and just burn another two minutes.
+_PSI_RETRYABLE = 'FAILED_DOCUMENT_REQUEST'
+
+
+def _fetch_pagespeed_data(url, strategy='mobile', _attempt=1):
     """
     Call Google PageSpeed Insights API.
     Returns dict with score, CWV metrics, speed_index, or None on failure.
+
+    Retries once on FAILED_DOCUMENT_REQUEST (see _PSI_RETRYABLE).
     """
     import requests as req
     api_key = getattr(settings, 'GOOGLE_PAGESPEED_API_KEY', None)
@@ -1174,9 +1195,7 @@ def _fetch_pagespeed_data(url, strategy='mobile'):
         'category': 'performance'
     }
     try:
-        # Uncached PSI runs regularly exceed 25s (Google's Lighthouse pass for a
-        # heavy page is 30-60s); a short timeout left every CWV check blank.
-        resp = req.get(psi_url, params=params, timeout=60)
+        resp = req.get(psi_url, params=params, timeout=PAGESPEED_TIMEOUT)
         if resp.status_code == 200:
             data = resp.json()
             lighthouse = data.get('lighthouseResult', {})
@@ -1203,42 +1222,124 @@ def _fetch_pagespeed_data(url, strategy='mobile'):
                 'tbt': round(tbt, 0),
             }
         else:
-            logger.warning(f"PageSpeed API returned status {resp.status_code} for {strategy}: {resp.text[:200]}")
+            body = resp.text[:200]
+            if _PSI_RETRYABLE in resp.text and _attempt == 1:
+                logger.warning(
+                    f"PageSpeed {_PSI_RETRYABLE} for {strategy} on {url}; retrying once"
+                )
+                return _fetch_pagespeed_data(url, strategy, _attempt=2)
+            logger.warning(f"PageSpeed API returned status {resp.status_code} for {strategy}: {body}")
             return None
     except Exception as e:
         logger.warning(f"PageSpeed API error ({strategy}): {e}")
         return None
 
 
+def _fetch_page_html_via_datablue(url):
+    """Fetch a page's FULL raw HTML through DataBlue, or None if unavailable.
+
+    `formats` is not optional here. The same /v1/scrape endpoint answers in three
+    shapes and only one of them is usable by the checks downstream, which regex
+    the document directly:
+
+        (omitted)          -> data.markdown  — no <head> at all
+        ["html"]           -> data.html      — <main> body only; no <title>,
+                                               no <meta>, no ld+json
+        ["rawHtml"]        -> data.raw_html  — the whole document
+
+    Measured on grownbrilliance.com (2026-09-09): 'html' returned 153KB with no
+    title and no schema; 'rawHtml' returned 940KB with title, meta description
+    and 3 ld+json blocks. Sending the wrong format would leave every head-derived
+    check reporting "missing" on a page that has them — a silent wrong answer
+    rather than an error, which is the failure mode this whole function exists
+    to avoid.
+    """
+    import requests as req
+
+    api_key = getattr(settings, 'DATABLUE_API_KEY', '')
+    if not api_key:
+        logger.warning("DATABLUE_API_KEY not configured — cannot scrape via DataBlue")
+        return None
+
+    endpoint = getattr(settings, 'DATABLUE_SCRAPE_URL', 'https://api.datablue.dev/v1/scrape')
+    # Health-check pages are full sites, not the single URLs the link checker
+    # sends, so they need longer than DATABLUE_SCRAPE_TIMEOUT's 30s default.
+    timeout = max(int(getattr(settings, 'DATABLUE_SCRAPE_TIMEOUT', 30)), 60)
+
+    try:
+        resp = req.post(
+            endpoint,
+            headers={
+                'Authorization': f'Bearer {api_key}',
+                'Content-Type': 'application/json',
+            },
+            json={
+                getattr(settings, 'DATABLUE_SCRAPE_URL_FIELD', 'url'): url,
+                'formats': ['rawHtml'],
+            },
+            timeout=timeout,
+        )
+    except Exception as e:
+        logger.warning(f"DataBlue scrape failed for {url}: {e}. Falling back to direct request.")
+        return None
+
+    if resp.status_code in (401, 403):
+        # DataBlue rejecting us (bad key or exhausted plan) — the same failure
+        # that took ScrapingDog out. Logged at error level so it is visible
+        # before every health check quietly degrades to the direct fallback.
+        logger.error(
+            f"DataBlue auth/limit rejected ({resp.status_code}) — check DATABLUE_API_KEY and plan"
+        )
+        return None
+    if resp.status_code != 200:
+        logger.warning(f"DataBlue returned status {resp.status_code}. Falling back to direct request.")
+        return None
+
+    try:
+        data = resp.json().get('data') or {}
+    except ValueError:
+        logger.warning(f"DataBlue returned non-JSON for {url}. Falling back to direct request.")
+        return None
+
+    # raw_html is what the endpoint returns for formats:["rawHtml"]; rawHtml is
+    # defensive against the key being camel-cased in a future version.
+    html = data.get('raw_html') or data.get('rawHtml') or ''
+    if not html.strip():
+        reason = data.get('empty_reason') or data.get('status') or 'no raw_html in response'
+        logger.warning(f"DataBlue returned no HTML for {url} ({reason}). Falling back to direct request.")
+        return None
+
+    # The origin's real status. DataBlue answers 200 even when the site 404s, so
+    # a 4xx/5xx here means the checks would be grading an error page.
+    origin_status = (data.get('metadata') or {}).get('status_code')
+    logger.info(f"Successfully fetched {url} using DataBlue (origin status {origin_status}, {len(html)} bytes)")
+    return html
+
+
 def _fetch_html_content(url, scrapingdog_api_key=None):
     """
-    Fetch HTML via ScrapingDog with direct-request fallback.
+    Fetch HTML via DataBlue with direct-request fallback.
     Returns (html_content, load_time) tuple. Raises on complete failure.
+
+    Was ScrapingDog-first. That account hit its plan limit and returned 403 on
+    every call (21 of 22 health checks in the 30 days to 2026-09-09), so every
+    run silently fell through to the direct request below — which bot-protected
+    sites reject outright. grownbrilliance.com answers 403 to any direct fetch,
+    with or without a browser UA, so its content checks were grading empty HTML.
+
+    `scrapingdog_api_key` is accepted and ignored so existing callers keep
+    working; it is no longer used by this path.
     """
     import requests as req
     import time
 
     start_time = time.time()
-    html_content = None
 
-    if scrapingdog_api_key:
-        try:
-            scrapingdog_url = "https://api.scrapingdog.com/scrape"
-            params = {
-                'api_key': scrapingdog_api_key,
-                'url': url,
-                'dynamic': 'false'
-            }
-            scrapingdog_response = req.get(scrapingdog_url, params=params, timeout=15)
-            if scrapingdog_response.status_code == 200:
-                html_content = scrapingdog_response.text
-                logger.info(f"Successfully fetched {url} using ScrapingDog")
-            else:
-                logger.warning(f"ScrapingDog returned status {scrapingdog_response.status_code}. Falling back to direct request.")
-        except Exception as sd_error:
-            logger.warning(f"ScrapingDog error: {str(sd_error)}. Falling back to direct request.")
+    html_content = _fetch_page_html_via_datablue(url)
 
     if not html_content:
+        # Last resort. Works for ordinary sites and fails on exactly the ones
+        # that need a scraper, which is why it is the fallback and not the path.
         response = req.get(url, headers={
             'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
         }, timeout=15)
@@ -2519,10 +2620,26 @@ def domain_health_check(request, domain_id):
 
         # Run data fetching + checks in parallel
         from concurrent.futures import ThreadPoolExecutor
+        import time as _time
+
+        # Absolute deadline for every wait below. The per-future timeouts are
+        # measured from the moment each .result() is CALLED, so they add up in
+        # wall-clock: a 90s HTML wait followed by a 250s PSI wait can reach 340s
+        # and blow through gunicorn's --timeout 300, which kills the request and
+        # loses the checks that already succeeded. Budgeting against one deadline
+        # keeps the total bounded no matter how the individual waits fall.
+        _deadline = _time.monotonic() + 270
+
+        def _remaining(cap):
+            """Seconds left before the deadline, at most `cap`, never below 1."""
+            return max(1, min(cap, _deadline - _time.monotonic()))
 
         with ThreadPoolExecutor(max_workers=5) as executor:
             # Independent data fetches
-            future_html = executor.submit(_fetch_html_content, url, scrapingdog_api_key)
+            # No ScrapingDog key here — this path is DataBlue-first now. The key
+            # is still resolved above because the Google-search scrapes in
+            # _run_on_page_content_checks / _search_brand_mentions still use it.
+            future_html = executor.submit(_fetch_html_content, url)
             future_mobile = executor.submit(_fetch_pagespeed_data, url, 'mobile')
             future_desktop = executor.submit(_fetch_pagespeed_data, url, 'desktop')
 
@@ -2530,7 +2647,10 @@ def domain_health_check(request, domain_id):
             html_content = ''
             load_time = 0
             try:
-                html_content, load_time = future_html.result(timeout=30)
+                # Must exceed what _fetch_html_content can spend: a DataBlue
+                # scrape (60s cap) plus, if that fails, the direct fetch (15s).
+                # At 30s this cancelled its own fetch and 500'd the whole check.
+                html_content, load_time = future_html.result(timeout=_remaining(90))
             except Exception as e:
                 logger.error(f"Error fetching domain {url}: {str(e)}")
                 future_mobile.cancel()
@@ -2541,15 +2661,21 @@ def domain_health_check(request, domain_id):
                 }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
             # Wait for PageSpeed. Both futures started alongside the HTML fetch, so
-            # the worst case is one PSI timeout (60s) plus a little slack, not two.
+            # the worst case is one PSI timeout plus a little slack, not two.
+            #
+            # Must exceed PAGESPEED_TIMEOUT, and now also cover the single
+            # FAILED_DOCUMENT_REQUEST retry: two passes at 120s. Waiting less than
+            # the work can take just throws away a result that was still coming,
+            # which is what the old 65s did to every site slower than ~60s.
+            psi_wait = (PAGESPEED_TIMEOUT * 2) + 10
             mobile_psi = None
             desktop_psi = None
             try:
-                mobile_psi = future_mobile.result(timeout=65)
+                mobile_psi = future_mobile.result(timeout=_remaining(psi_wait))
             except Exception:
                 logger.warning(f"PageSpeed mobile timed out for {url}")
             try:
-                desktop_psi = future_desktop.result(timeout=65)
+                desktop_psi = future_desktop.result(timeout=_remaining(psi_wait))
             except Exception:
                 logger.warning(f"PageSpeed desktop timed out for {url}")
 
@@ -2561,8 +2687,11 @@ def domain_health_check(request, domain_id):
                 _run_on_page_content_checks, url, html_content, scrapingdog_api_key
             )
 
-            technical_checks = future_technical.result(timeout=60)
-            content_checks = future_content.result(timeout=60)
+            # Also deadline-bounded: these start only after the PSI waits above,
+            # so a fixed 60s each would push the request past gunicorn's limit in
+            # exactly the cases where PSI was slowest.
+            technical_checks = future_technical.result(timeout=_remaining(60))
+            content_checks = future_content.result(timeout=_remaining(60))
 
         # Website Authority — disabled until Moz API is purchased
         # To enable: uncomment the line below and remove the placeholder
