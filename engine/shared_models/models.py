@@ -73,6 +73,12 @@ class Organisation(models.Model):
     dataforseo_login = models.CharField(max_length=255, blank=True, default='', help_text="DataForSEO account login")
     dataforseo_password_enc = models.TextField(blank=True, null=True, help_text="Encrypted DataForSEO API password")
 
+    # Read-only mirror of the backend-owned column. The engine reads it in one
+    # place: the weekly sweep, which is the only job that spends money across a
+    # whole organisation at once. NULL means "never set" and is treated as ON —
+    # only an explicit False opts an org out.
+    using_ai_monitoring = models.BooleanField(blank=True, null=True, help_text="Whether the organisation is actively using AI monitoring")
+
     class Meta:
         app_label = 'shared_models'
         db_table = 'organisations'

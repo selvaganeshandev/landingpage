@@ -393,6 +393,24 @@ WEEKLY_SWEEP_PREFLIGHT_ENABLED = config('WEEKLY_SWEEP_PREFLIGHT_ENABLED', defaul
 # the run in the first place.
 WEEKLY_SWEEP_BEAT_ENABLED = config('WEEKLY_SWEEP_BEAT_ENABLED', default=False, cast=bool)
 
+# Domain IDs swept WEEKLY. Everything else is swept MONTHLY.
+#
+# The sweep cost is linear in prompt count and the corpus is long-tailed: a
+# handful of domains hold most of the prompts, and the rest do not change often
+# enough to be worth four runs a month. Listing the busy domains here keeps them
+# on the weekly cadence and drops the tail to monthly, which is the largest
+# saving available that does not change a single measured value — each result is
+# identical, just produced less often.
+#
+# EMPTY (the default) means NO tiering: one weekly sweep over every domain,
+# exactly as before. That keeps the change inert until an operator opts in, and
+# an unknown or deleted id in the list is harmless — it simply matches nothing.
+WEEKLY_SWEEP_WEEKLY_DOMAIN_IDS = config(
+    'WEEKLY_SWEEP_WEEKLY_DOMAIN_IDS',
+    default='',
+    cast=lambda v: [int(x) for x in str(v).replace(' ', '').split(',') if x],
+)
+
 # ScrapingDog API Configuration (still used by misinformation crawler — /scrape endpoint)
 SCRAPINGDOG_API_KEY = config('SCRAPINGDOG_API_KEY', default=None)
 
@@ -611,10 +629,27 @@ CELERY_BEAT_SCHEDULE = {
 # WEEKLY_SWEEP_BEAT_ENABLED above. Set WEEKLY_SWEEP_BEAT_ENABLED=True in the
 # production .env; leave it unset everywhere else.
 if WEEKLY_SWEEP_BEAT_ENABLED:
-    CELERY_BEAT_SCHEDULE['weekly-prompts-batch'] = {
-        'task': 'core.processing_tasks.schedule_weekly_prompt_batches',
-        'schedule': crontab(day_of_week='sun', hour=0, minute=0),
-    }
+    if WEEKLY_SWEEP_WEEKLY_DOMAIN_IDS:
+        # Tiered: the listed domains every Sunday, the rest on the 1st of the
+        # month. The monthly run sits an hour after the weekly one on the Sundays
+        # the two collide, for the same reason the competitor sweep does — two
+        # full fan-outs starting together would fight for the same worker pool.
+        CELERY_BEAT_SCHEDULE['weekly-prompts-batch'] = {
+            'task': 'core.processing_tasks.schedule_weekly_prompt_batches',
+            'schedule': crontab(day_of_week='sun', hour=0, minute=0),
+            'kwargs': {'tier': 'weekly'},
+        }
+        CELERY_BEAT_SCHEDULE['monthly-prompts-batch'] = {
+            'task': 'core.processing_tasks.schedule_weekly_prompt_batches',
+            'schedule': crontab(day_of_month='1', hour=2, minute=0),
+            'kwargs': {'tier': 'monthly'},
+        }
+    else:
+        # No tiering configured — one sweep over every domain, as before.
+        CELERY_BEAT_SCHEDULE['weekly-prompts-batch'] = {
+            'task': 'core.processing_tasks.schedule_weekly_prompt_batches',
+            'schedule': crontab(day_of_week='sun', hour=0, minute=0),
+        }
     CELERY_BEAT_SCHEDULE['weekly-competitors-batch'] = {
         'task': 'core.processing_tasks.schedule_weekly_competitor_batches',
         'schedule': crontab(day_of_week='sun', hour=1, minute=0),

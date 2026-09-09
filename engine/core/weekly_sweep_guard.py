@@ -57,6 +57,23 @@ logger = logging.getLogger(__name__)
 # Sweep identifiers (also the keys used in the state file).
 PROMPTS = "prompts"
 COMPETITORS = "competitors"
+# Second prompt tier: the domains that are swept monthly rather than weekly.
+# It is a separate identifier ONLY so it gets its own cooldown stamp — see
+# _KILLSWITCH_ALIAS for why it deliberately does not get its own kill switch.
+PROMPTS_MONTHLY = "prompts_monthly"
+
+# Which row's `enabled` flag governs each sweep.
+#
+# _load_state() falls back to enabled=True when a row is MISSING, which is the
+# right default for a DB outage but the wrong one for a brand-new identifier: a
+# fresh 'prompts_monthly' row would not exist, so the tier would start life
+# switched ON and quietly re-open the spend that the 'prompts' kill switch was
+# set to stop on 2026-07-23. Aliasing the monthly tier onto the 'prompts' row
+# means one deliberate switch still governs every prompt sweep, whatever its
+# cadence. Cooldowns stay per-identifier so the two tiers never block each other.
+_KILLSWITCH_ALIAS = {
+    PROMPTS_MONTHLY: PROMPTS,
+}
 
 # ENABLED_PLATFORMS uses pipeline platform names; quota_monitor probes are keyed
 # by provider. Mirrors the dispatch in PromptAnalyticsProcessor._process_prompt.
@@ -194,14 +211,19 @@ def killswitch_block(sweep):
 
     Checked before `force`, so an ad-hoc `force=True` call from any host cannot
     restart a sweep an operator has deliberately turned off.
+
+    Resolved through _KILLSWITCH_ALIAS, so every prompt tier consults the one
+    'prompts' switch rather than each cadence owning a switch of its own.
     """
-    state = _load_state(sweep)
+    governing = _KILLSWITCH_ALIAS.get(sweep, sweep)
+    state = _load_state(governing)
     if state.get("enabled", True):
         return None
     return {
         "skipped": True,
         "reason": "disabled",
         "sweep": sweep,
+        "governed_by": governing,
         "disabled_reason": state.get("disabled_reason") or "",
         "hint": "re-enable with weekly_sweep_guard.enable_sweep(<sweep>)",
     }

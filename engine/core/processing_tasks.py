@@ -123,7 +123,7 @@ def process_prompt_analytics_scheduler(self):
 # would come back with last_id=0 and be refused by the cooldown this same run
 # recorded, silently turning a retry into a no-op.
 @shared_task(bind=True, ignore_result=True, max_retries=3)
-def schedule_weekly_prompt_batches(self, last_id: int = 0, force: bool = False):
+def schedule_weekly_prompt_batches(self, last_id: int = 0, force: bool = False, tier: str = None):
     """
     Weekly batch re-scheduler for prompt analytics.
     - Resets prompts (excluding PROC) to INIT in batches
@@ -133,29 +133,59 @@ def schedule_weekly_prompt_batches(self, last_id: int = 0, force: bool = False):
     A full sweep is ~2,700 prompts x every enabled platform (~10,800 LLM calls),
     so it is cost-guarded on entry: refused inside the cooldown window, or when
     no enabled platform has a usable key. Pass force=True to override.
+
+    `tier` selects which domains this run covers, per
+    settings.WEEKLY_SWEEP_WEEKLY_DOMAIN_IDS:
+      None       — every domain (the untiered default; unchanged behaviour)
+      'weekly'   — only the listed domains
+      'monthly'  — only the domains NOT listed
+    The two tiers carry separate cooldown stamps so neither refuses the other,
+    but they share one kill switch — see weekly_sweep_guard._KILLSWITCH_ALIAS.
     """
+    weekly_ids = list(getattr(settings, 'WEEKLY_SWEEP_WEEKLY_DOMAIN_IDS', []) or [])
+    # An empty list means tiering is not configured, so a 'weekly'/'monthly' run
+    # would otherwise sweep everything (monthly) or nothing (weekly). Collapse to
+    # the untiered sweep rather than silently doing the wrong-sized run.
+    if not weekly_ids:
+        tier = None
+
+    sweep_key = (
+        weekly_sweep_guard.PROMPTS_MONTHLY if tier == 'monthly'
+        else weekly_sweep_guard.PROMPTS
+    )
+    label = f"Weekly Prompts[{tier}]" if tier else "Weekly Prompts"
+
     # Chained continuation batches always carry the last real prompt id (>= 1),
     # so last_id == 0 is the only true entry point. Guarding on that rather than
     # a separate flag also means in-flight chained messages from a previous
     # deploy keep running instead of being blocked by their own sweep's stamp.
     if last_id == 0:
-        blocked = weekly_sweep_guard.sweep_blocked(weekly_sweep_guard.PROMPTS, force=force)
+        blocked = weekly_sweep_guard.sweep_blocked(sweep_key, force=force)
         if blocked:
-            logger.warning(f"[Weekly Prompts] Sweep refused: {blocked}")
+            logger.warning(f"[{label}] Sweep refused: {blocked}")
             return blocked
-        weekly_sweep_guard.record_sweep_start(weekly_sweep_guard.PROMPTS)
+        weekly_sweep_guard.record_sweep_start(sweep_key)
 
+    # Skip organisations that have switched AI monitoring off. A sweep is the one
+    # job that re-queries an entire org at once, so an org that is not using the
+    # feature would otherwise pay for a full platform fan-out nobody reads.
+    # NULL means the flag was never set — treat that as ON, so only an explicit
+    # False opts an org out and no existing client is silently dropped.
     qs = (
         Prompt.objects
         .exclude(track_status='PROC')  # don't clobber in-flight work
+        .exclude(group__domain__organisation__using_ai_monitoring=False)
         .filter(id__gt=last_id)
-        .order_by('id')
-        .values_list('id', flat=True)[:WEEKLY_PROMPT_BATCH_SIZE]
     )
+    if tier == 'weekly':
+        qs = qs.filter(group__domain_id__in=weekly_ids)
+    elif tier == 'monthly':
+        qs = qs.exclude(group__domain_id__in=weekly_ids)
+    qs = qs.order_by('id').values_list('id', flat=True)[:WEEKLY_PROMPT_BATCH_SIZE]
 
     ids = list(qs)
     if not ids:
-        logger.info("[Weekly Prompts] No more prompts to schedule")
+        logger.info(f"[{label}] No more prompts to schedule")
         return {'done': True}
 
     now = timezone.now()
@@ -168,29 +198,34 @@ def schedule_weekly_prompt_batches(self, last_id: int = 0, force: bool = False):
             )
             process_prompt_analytics_task.delay(pid)
 
-        # Chain next batch
-        schedule_weekly_prompt_batches.delay(last_id=ids[-1])
+        # Chain next batch. `tier` MUST ride along: without it the continuation
+        # would drop back to the untiered queryset and sweep the whole corpus,
+        # which is the exact cost this tiering exists to avoid.
+        schedule_weekly_prompt_batches.delay(last_id=ids[-1], tier=tier)
     except Exception:
         # The cooldown was stamped before any work was enqueued, so a crash here
         # leaves a partial sweep that will NOT retry on its own and will be
         # refused for the next WEEKLY_SWEEP_COOLDOWN_DAYS. Say so loudly — a
         # generic task-failure line does not tell an operator what to do.
+        # The recovery commands carry `tier` for the same reason the chain does —
+        # resuming without it would restart as a full-corpus sweep.
+        tier_arg = f", tier={tier!r}" if tier else ""
         if last_id == 0:
             logger.error(
-                "[Weekly Prompts] Entry batch failed AFTER the cooldown was recorded. "
-                "The sweep is partial and will be refused until the cooldown expires. "
-                "Re-run with: schedule_weekly_prompt_batches.delay(force=True)",
+                f"[{label}] Entry batch failed AFTER the cooldown was recorded. "
+                f"The sweep is partial and will be refused until the cooldown expires. "
+                f"Re-run with: schedule_weekly_prompt_batches.delay(force=True{tier_arg})",
                 exc_info=True,
             )
         else:
             logger.error(
-                f"[Weekly Prompts] Batch failed at last_id={last_id}; sweep is incomplete. "
-                f"Resume with: schedule_weekly_prompt_batches.delay(last_id={last_id})",
+                f"[{label}] Batch failed at last_id={last_id}; sweep is incomplete. "
+                f"Resume with: schedule_weekly_prompt_batches.delay(last_id={last_id}{tier_arg})",
                 exc_info=True,
             )
         raise
 
-    logger.info(f"[Weekly Prompts] Scheduled batch of {len(ids)} prompts (last_id={ids[-1]})")
+    logger.info(f"[{label}] Scheduled batch of {len(ids)} prompts (last_id={ids[-1]})")
     return {'queued': len(ids), 'last_id': ids[-1]}
 
 
