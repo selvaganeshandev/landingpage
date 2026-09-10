@@ -86,6 +86,36 @@ const Prompts = () => {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedDomain?.id]);
 
+  // Group tags read group.track_status, which stays COMP while Track Prompts
+  // (or the weekly sweep) re-runs the group's prompts. prompts_in_flight is the
+  // real signal: show "Processing" while it is above 0 and quietly refresh the
+  // loaded groups every 10s (no page loader) until the re-run finishes.
+  useEffect(() => {
+    const domainId = selectedDomain?.id ?? getActiveDomainIdNumber(user);
+    if (!domainId || !promptGroups.some(g => (g.prompts_in_flight ?? 0) > 0)) return;
+    let cancelled = false;
+    const interval = setInterval(async () => {
+      try {
+        const response = await apiClient.getPromptGroups({
+          domain_id: domainId,
+          limit: Math.max(limit, promptGroups.length),
+          offset: 0,
+        });
+        // A project switch or "Load More" since the request started wins.
+        if (cancelled) return;
+        setPromptGroups(response.groups || []);
+        setTotalCount(response.total_count || 0);
+      } catch (error) {
+        console.error("Error polling prompt groups:", error);
+      }
+    }, 10000);
+    return () => {
+      cancelled = true;
+      clearInterval(interval);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [promptGroups, selectedDomain?.id]);
+
   const loadPromptGroups = async (startOffset: number = offset, replace: boolean = false) => {
     try {
       // Only show full page loader on initial load, not on "Load More"
@@ -341,7 +371,7 @@ const Prompts = () => {
                 <div className="space-y-2 flex-1">
                   <div className="flex items-center gap-3">
                     <h3 className="text-xl font-semibold font-inter">{group.group_id}</h3>
-                    {getStatusBadge(group.track_status)}
+                    {getStatusBadge((group.prompts_in_flight ?? 0) > 0 ? 'PROC' : group.track_status)}
                   </div>
                   {group.primary_prompt && (
                     <p className="text-sm text-muted-foreground font-mono bg-gradient-to-br from-muted/30 to-muted/50 px-3 py-2 rounded-xl inline-block border border-border">

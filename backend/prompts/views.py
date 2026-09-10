@@ -1589,6 +1589,12 @@ def prompt_groups_list(request):
                     'created_at': group.created_at.isoformat(),
                     'modified_at': group.modified_at.isoformat(),
                     'prompts_count': len(group_prompts),
+                    # Prompts still being crawled. Track Prompts and the weekly
+                    # sweep re-run prompts without touching the group's
+                    # track_status (it stays COMP), so the Prompts page uses
+                    # this to show "Processing" while a re-run is under way.
+                    'prompts_in_flight': sum(
+                        1 for p in group_prompts if p.track_status in ('INIT', 'SCHD', 'PROC')),
                     'primary_prompt': primary_prompt_text,
                     'secondary_prompts': secondary_prompts_list,
                     'visibility_growth': visibility_growth,
