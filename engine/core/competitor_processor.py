@@ -5,7 +5,7 @@ Handles end-to-end competitor tracking and analytics
 Flow:
 1. Competitor created with track_status='INIT'
 2. Automatic scheduler (Celery Beat) or manual trigger via POST /api/competitors/{id}/process/
-3. Links all prompts with completed PromptAnalytics to competitor (creates CompetitorPromptAnalytics records)
+3. Links every (prompt, platform) answer with completed PromptAnalytics to competitor (creates CompetitorPromptAnalytics records)
 4. Extracts competitor mentions from existing PromptAnalytics.context_summary (no new API calls)
 5. Aggregates results into Competitor and ShareOfVoiceAnalytics
 
@@ -24,7 +24,7 @@ from datetime import date, datetime, timedelta
 from decimal import Decimal
 
 from django.db import transaction
-from django.db.models import Avg, Sum, Count, Q
+from django.db.models import Avg, Sum, Count, Q, F
 from django.utils import timezone
 from django.conf import settings
 
@@ -36,7 +36,6 @@ from shared_models.models import (
     CompetitiveInsight,
     ShareOfVoiceAnalytics,
     Domain,
-    Prompt,
     PromptAnalytics
 )
 
@@ -347,78 +346,76 @@ class CompetitorProcessor:
     
     def _link_prompts_to_competitor(self, competitor: Competitor) -> int:
         """
-        Link all prompts with completed analytics from competitor's domain to this competitor.
-        Only links prompts that have completed PromptAnalytics (track_status='COMP').
-        Creates CompetitorPromptAnalytics records with status='INIT'.
-        
+        Queue one CompetitorPromptAnalytics row per answer: every (prompt,
+        platform) pair in the competitor's domain with a completed PromptAnalytics.
+
+        Rows used to be one per prompt, labelled with whichever platform answered
+        last, so per-platform views (the competitor heatmap, share by platform)
+        showed a competitor on one AI and 0% on the rest. Existing rows are reset
+        to INIT so a re-run re-reads the latest answers; before, a re-run skipped
+        every row already COMP and never refreshed it.
+
         Args:
             competitor: Competitor instance
-        
+
         Returns:
-            int: Number of prompts linked
+            int: Number of rows created
         """
         try:
-            # Ensure competitor.domain is loaded (not lazy)
-            domain = competitor.domain
-            if domain is None:
+            domain_id = competitor.domain_id
+            if domain_id is None:
                 raise ValueError(f"Competitor {competitor.id} has no domain assigned")
-            
-            # Get domain ID to ensure we're using the correct reference
-            domain_id = domain.id if hasattr(domain, 'id') else domain
-            
-            # Get all prompts for this domain that have completed analytics
-            # Note: Prompt doesn't have domain field directly, it's through group.domain
-            # First, get all prompts for the domain
-            domain_prompts = Prompt.objects.filter(
-                group__domain_id=domain_id
-            ).select_related('group').distinct()
-            
-            logger.info(f"Found {domain_prompts.count()} prompts for domain {domain_id}")
-            
-            # Then filter to only those with completed analytics
-            prompts_with_analytics = []
-            for prompt in domain_prompts:
-                # Check if this prompt has any completed PromptAnalytics
-                has_completed_analytics = PromptAnalytics.objects.filter(
-                    prompt=prompt,
-                    track_status='COMP'
-                ).exists()
-                
-                if has_completed_analytics:
-                    prompts_with_analytics.append(prompt)
-            
-            logger.info(f"Found {len(prompts_with_analytics)} prompts with completed analytics for domain {domain_id}")
-            
-            created_count = 0
-            skipped_count = 0
+
+            # (prompt_id, lower-cased platform) -> platform label. Keyed
+            # case-insensitively because some older rows carry 'claude'.
+            answers = {}
+            for prompt_id, platform in (
+                PromptAnalytics.objects.filter(
+                    prompt__group__domain_id=domain_id,
+                    track_status='COMP',
+                )
+                .exclude(platform__isnull=True)
+                .exclude(platform='')
+                .values_list('prompt_id', 'platform')
+                .distinct()
+            ):
+                answers.setdefault((prompt_id, platform.lower()), platform)
+
             with transaction.atomic():
-                for prompt in prompts_with_analytics:
-                    # Ensure prompt is a Prompt instance
-                    if not isinstance(prompt, Prompt):
-                        logger.error(f"Invalid prompt object: {type(prompt)}, skipping")
-                        skipped_count += 1
-                        continue
-                    
-                    # Create CompetitorPromptAnalytics if not exists
-                    try:
-                        _, created = CompetitorPromptAnalytics.objects.get_or_create(
-                            competitor=competitor,
-                            prompt=prompt,
-                            defaults={
-                                'track_status': 'INIT',
-                                'track_message': 'Ready for processing',
-                                'platform': 'ChatGPT',  # Default platform
-                            }
-                        )
-                        if created:
-                            created_count += 1
-                    except Exception as create_error:
-                        logger.error(f"Error creating CompetitorPromptAnalytics for prompt {prompt.id}: {str(create_error)}")
-                        skipped_count += 1
-            
-            logger.info(f"Linked {created_count} new prompts (with completed analytics) to competitor {competitor.id}, skipped {skipped_count}")
-            return created_count
-        
+                existing = {}
+                for row_id, prompt_id, platform in CompetitorPromptAnalytics.objects.filter(
+                    competitor=competitor
+                ).values_list('id', 'prompt_id', 'platform'):
+                    existing.setdefault((prompt_id, (platform or '').lower()), row_id)
+
+                # Rows with no matching answer are left alone: processing them
+                # would only fail.
+                reset_ids = [row_id for key, row_id in existing.items() if key in answers]
+                CompetitorPromptAnalytics.objects.filter(id__in=reset_ids).update(
+                    track_status='INIT',
+                    track_message='Ready for processing',
+                    modified_at=timezone.now(),
+                )
+
+                new_rows = [
+                    CompetitorPromptAnalytics(
+                        competitor=competitor,
+                        prompt_id=key[0],
+                        platform=platform,
+                        track_status='INIT',
+                        track_message='Ready for processing',
+                    )
+                    for key, platform in answers.items()
+                    if key not in existing
+                ]
+                CompetitorPromptAnalytics.objects.bulk_create(new_rows)
+
+            logger.info(
+                f"Linked competitor {competitor.id}: {len(new_rows)} new and "
+                f"{len(reset_ids)} re-queued (prompt, platform) rows"
+            )
+            return len(new_rows)
+
         except Exception as e:
             logger.error(f"Error linking prompts to competitor {competitor.id}: {str(e)}")
             raise
@@ -505,68 +502,37 @@ class CompetitorProcessor:
                 cp.track_message = "Extracting from existing analytics"
                 cp.save(update_fields=['track_status', 'track_message', 'modified_at'])
             
-            # Get existing PromptAnalytics for this prompt
-            # Try to get the most recent completed analytics with context_summary
-            prompt_analytics = PromptAnalytics.objects.filter(
+            # Each row covers one (prompt, platform) pair, so read that
+            # platform's answer only. Rows used to combine every platform into
+            # one record labelled with whichever platform answered last.
+            answers = PromptAnalytics.objects.filter(
                 prompt=comp_prompt.prompt,
-                track_status='COMP'  # Only use completed analytics
-            ).exclude(
-                context_summary__isnull=True
-            ).exclude(
-                context_summary=''
-            ).order_by('-tracked_at', '-created_at').first()
-            
-            # If no analytics with context_summary, try any completed analytics
-            if not prompt_analytics:
-                prompt_analytics = PromptAnalytics.objects.filter(
-                    prompt=comp_prompt.prompt,
-                    track_status='COMP'
-                ).order_by('-tracked_at', '-created_at').first()
-            
-            if not prompt_analytics:
-                raise ValueError(f"No completed PromptAnalytics found for prompt {comp_prompt.prompt.id} (prompt text: {comp_prompt.prompt.prompt[:50]}...)")
-            
-            # Use existing context_summary from PromptAnalytics
-            response_text = prompt_analytics.context_summary or ''
-            
-            # If context_summary is empty, try to use response_text or other fields
-            if not response_text:
-                # Check if there's any text we can use
-                # Some analytics might have the response in a different field
-                logger.warning(f"PromptAnalytics {prompt_analytics.id} has empty context_summary for prompt {comp_prompt.prompt.id}")
-                # Still proceed but with empty text - competitor won't be found, which is correct
-                response_text = ''
-            
-            competitor_name = comp_prompt.competitor.name
-            
-            # Analyse the competitor across EVERY platform's answer, not just one.
-            # Each prompt is answered by every enabled platform (ChatGPT, Claude,
-            # Gemini, Perplexity) and each answer is stored as its own
-            # PromptAnalytics row. This previously read a SINGLE row (.first()),
-            # so a competitor was measured on one model while the brand's own
-            # mentions are counted across all of them — undercounting competitors
-            # roughly four-fold and making share-of-voice comparisons unfair.
-            # Falls back to the single primary row if nothing else is available,
-            # so behaviour is unchanged when only one answer exists.
-            platform_rows = list(
-                PromptAnalytics.objects.filter(
-                    prompt=comp_prompt.prompt,
-                    track_status='COMP'
-                ).exclude(
-                    context_summary__isnull=True
-                ).exclude(
-                    context_summary=''
-                )
+                platform__iexact=comp_prompt.platform or '',
+                track_status='COMP',
+            ).order_by(F('tracked_at').desc(nulls_last=True), '-created_at')
+            prompt_analytics = (
+                answers.exclude(context_summary__isnull=True).exclude(context_summary='').first()
+                or answers.first()
             )
-            if not platform_rows:
-                platform_rows = [prompt_analytics]
 
-            analytics = self._analyze_competitor_mention_across_platforms(
-                analytics_rows=platform_rows,
+            if not prompt_analytics:
+                raise ValueError(
+                    f"No completed {comp_prompt.platform} answer for prompt {comp_prompt.prompt.id} "
+                    f"(prompt text: {comp_prompt.prompt.prompt[:50]}...)"
+                )
+
+            response_text = prompt_analytics.context_summary or ''
+            if not response_text:
+                # Still proceed - the competitor won't be found, which is correct
+                logger.warning(f"PromptAnalytics {prompt_analytics.id} has empty context_summary for prompt {comp_prompt.prompt.id}")
+
+            competitor_name = comp_prompt.competitor.name
+            analytics = self._analyze_competitor_mention(
+                response_text=response_text,
                 competitor_name=competitor_name,
                 competitor_url=comp_prompt.competitor.url,
             )
-            
+
             # Update CompetitorPromptAnalytics with results
             with transaction.atomic():
                 cp = CompetitorPromptAnalytics.objects.select_for_update().get(id=comp_prompt.id)
@@ -579,21 +545,13 @@ class CompetitorProcessor:
                 cp.sentiment_category = analytics['sentiment_category']
                 cp.sentiment_score = analytics['sentiment_score']
                 cp.response_text = response_text  # Store the context_summary we used
-                # Filter citations to only those relevant to this specific
-                # competitor. Gathered from EVERY platform's answer (not just the
-                # primary row) and de-duplicated, to match the multi-platform
-                # mention count above.
-                _all_citations = []
-                for _pa in platform_rows:
-                    for _c in (getattr(_pa, 'citation_list', None) or []):
-                        if _c not in _all_citations:
-                            _all_citations.append(_c)
+                # Filter citations to only those relevant to this specific competitor
                 cp.citation_list = extract_competitor_citations(
-                    _all_citations,
+                    prompt_analytics.citation_list or [],
                     competitor_name,
                     comp_prompt.competitor.url
                 )
-                cp.platform = prompt_analytics.platform  # Use same platform as PromptAnalytics
+                cp.platform = prompt_analytics.platform  # Canonical label ('claude' -> 'Claude')
                 cp.save()
             
             logger.info(f"Completed competitor-prompt {comp_prompt.id}: mentioned={analytics['is_mentioned']}, position={analytics['position']} (from existing analytics)")
@@ -728,89 +686,6 @@ class CompetitorProcessor:
             'sentiment_category': sentiment_category,
             'sentiment_score': Decimal(str(sentiment_score)),
             'citations': citations
-        }
-
-    def _analyze_competitor_mention_across_platforms(
-        self,
-        analytics_rows,
-        competitor_name: str,
-        competitor_url: str
-    ) -> Dict[str, Any]:
-        """
-        Combine per-platform competitor analysis into a single result.
-
-        Every prompt is answered by each enabled platform, so a competitor has to
-        be measured across ALL of them — the brand's own mentions already are.
-        Reading one platform undercounted competitors and made share of voice an
-        unfair comparison.
-
-        Combining rules:
-          - mention_count : SUM across platforms (total times the name appears)
-          - is_mentioned  : True if ANY platform mentioned it
-          - position      : the BEST (lowest) position any platform gave it
-          - sentiment     : average across the platforms that mentioned it
-          - citations     : union across platforms, order preserved
-
-        With a single row this returns the same shape and values as the
-        single-answer analyser, so nothing changes for one-answer prompts.
-        Any per-row failure is logged and skipped rather than failing the job.
-        """
-        total_mentions = 0
-        is_mentioned = False
-        best_position = None
-        sentiment_scores = []
-        citations = []
-
-        for pa in (analytics_rows or []):
-            text = (getattr(pa, 'context_summary', '') or '')
-            if not text:
-                continue
-            try:
-                result = self._analyze_competitor_mention(
-                    response_text=text,
-                    competitor_name=competitor_name,
-                    competitor_url=competitor_url,
-                )
-            except Exception as e:  # never fail the whole prompt on one platform
-                logger.warning(
-                    f"Competitor analysis failed for PromptAnalytics "
-                    f"{getattr(pa, 'id', None)}: {e}"
-                )
-                continue
-
-            total_mentions += int(result.get('mention_count') or 0)
-
-            if result.get('is_mentioned'):
-                is_mentioned = True
-                pos = result.get('position')
-                if pos is not None and (best_position is None or pos < best_position):
-                    best_position = pos
-                try:
-                    sentiment_scores.append(float(result.get('sentiment_score') or 0))
-                except (TypeError, ValueError):
-                    pass
-
-            for c in (result.get('citations') or []):
-                if c not in citations:
-                    citations.append(c)
-
-        avg_sentiment = (
-            sum(sentiment_scores) / len(sentiment_scores) if sentiment_scores else 0.0
-        )
-        if avg_sentiment > 0.05:
-            sentiment_category = 'positive'
-        elif avg_sentiment < -0.05:
-            sentiment_category = 'negative'
-        else:
-            sentiment_category = 'neutral'
-
-        return {
-            'is_mentioned': is_mentioned,
-            'position': best_position,
-            'mention_count': total_mentions,
-            'sentiment_category': sentiment_category,
-            'sentiment_score': Decimal(str(round(avg_sentiment, 2))),
-            'citations': citations,
         }
 
     def _aggregate_competitor_analytics(self, competitor: Competitor) -> None:

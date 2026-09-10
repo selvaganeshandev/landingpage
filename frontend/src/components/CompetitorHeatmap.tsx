@@ -49,7 +49,7 @@ export const CompetitorHeatmap = ({ data, platforms }: CompetitorHeatmapProps) =
                   </button>
                 </TooltipTrigger>
                 <TooltipContent className="max-w-xs text-xs leading-relaxed">
-                  Percentages come from the latest competitor metric snapshots. We total mention counts per AI provider for each brand, compare them to the platform’s overall mentions, then express share as a percentage so every column adds up to 100%.
+                  For each AI provider, we count the answers that mention each brand and show its share of all brand mentions on that provider, so every column adds up to 100%.
                 </TooltipContent>
               </Tooltip>
             </TooltipProvider>
@@ -86,7 +86,7 @@ export const CompetitorHeatmap = ({ data, platforms }: CompetitorHeatmapProps) =
                   </button>
                 </TooltipTrigger>
                 <TooltipContent className="max-w-xs text-xs leading-relaxed">
-                  Percentages come from the latest competitor metric snapshots. We total mention counts per AI provider for each brand, compare them to the platform’s overall mentions, then express share as a percentage so every column adds up to 100%.
+                  For each AI provider, we count the answers that mention each brand and show its share of all brand mentions on that provider, so every column adds up to 100%.
                 </TooltipContent>
               </Tooltip>
             </TooltipProvider>

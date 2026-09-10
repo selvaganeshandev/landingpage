@@ -1751,15 +1751,15 @@ def competitor_heatmap(request):
             if platform_filter and platform_filter.lower() != 'all':
                 comp_analytics = comp_analytics.filter(platform__iexact=platform_filter)
 
-            # Aggregate mentions by platform
+            # Count answers that mention the competitor, one per answer — the
+            # same unit as "Your Brand" below. Summing mention_count (times the
+            # name appears within an answer) against the brand's answer count
+            # shrank the brand's share to near zero.
             platform_mentions = {}
-            for ca in comp_analytics:
-                plat_name = ca.platform or 'Overall'
-                mention_count = ca.mention_count or 0
-                if mention_count <= 0:
-                    continue
-                platform_mentions[plat_name] = platform_mentions.get(plat_name, 0) + mention_count
-                platform_totals[plat_name] += mention_count
+            for plat in comp_analytics.values_list('platform', flat=True):
+                plat_name = plat or 'Overall'
+                platform_mentions[plat_name] = platform_mentions.get(plat_name, 0) + 1
+                platform_totals[plat_name] += 1
 
             if platform_mentions:
                 rows.append({
