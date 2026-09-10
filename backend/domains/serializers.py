@@ -17,6 +17,7 @@ class DomainSerializer(serializers.ModelSerializer):
     latest_health_grade = serializers.SerializerMethodField()
     latest_health_grade_color = serializers.SerializerMethodField()
     prompt_count = serializers.SerializerMethodField()
+    prompts_in_flight = serializers.SerializerMethodField()
 
     class Meta:
         model = Domain
@@ -37,7 +38,7 @@ class DomainSerializer(serializers.ModelSerializer):
             'sentiment_score', 'processing_status', 'track_message', 'tracked_at',
             'created_at', 'modified_at',
             'latest_health_score', 'latest_health_grade', 'latest_health_grade_color',
-            'prompt_count',
+            'prompt_count', 'prompts_in_flight',
         ]
         read_only_fields = ['id', 'created_at', 'modified_at']
 
@@ -54,6 +55,22 @@ class DomainSerializer(serializers.ModelSerializer):
             return annotated
         from prompts.models import Prompt
         return Prompt.objects.filter(group__domain=obj).count()
+
+    def get_prompts_in_flight(self, obj):
+        """Prompts still being crawled (INIT/SCHD/PROC).
+
+        Track Prompts and the weekly sweep re-run prompts without touching the
+        domain's processing_status — flipping that would hide the dashboards and
+        can trigger keyword prompt generation on completion — so the domain row
+        uses this count to show "Processing" while a re-run is under way.
+        """
+        annotated = getattr(obj, 'prompts_in_flight_annotated', None)
+        if annotated is not None:
+            return annotated
+        from prompts.models import Prompt
+        return Prompt.objects.filter(
+            group__domain=obj, track_status__in=['INIT', 'SCHD', 'PROC'],
+        ).count()
 
     def _get_latest_health_check(self, obj):
         """Get the latest health check, using prefetched data if available."""

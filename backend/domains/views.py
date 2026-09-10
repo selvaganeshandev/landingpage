@@ -343,6 +343,13 @@ def domain_list(request):
                 domains.select_related('organisation')
                 .prefetch_related('health_checks')
                 .annotate(prompt_count_annotated=Count('prompt_groups__prompts', distinct=True))
+                # Prompts still being crawled (Track Prompts / weekly sweep). These
+                # re-run prompts without touching processing_status, so the domain
+                # row needs its own signal to show "Processing" while they run.
+                .annotate(prompts_in_flight_annotated=Count(
+                    'prompt_groups__prompts', distinct=True,
+                    filter=Q(prompt_groups__prompts__track_status__in=['INIT', 'SCHD', 'PROC']),
+                ))
                 # Explicit, because annotate() adds a GROUP BY and Django drops
                 # Meta.ordering when it does — which silently flipped the project
                 # switcher to oldest-first. Newest first is what it should be:

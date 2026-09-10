@@ -94,6 +94,7 @@ export default function OrganizationSettings() {
     modified_at: string;
     processing_status?: string;
     track_message?: string;
+    prompts_in_flight?: number;
   }>>([]);
 
   const [newDomainKeywords, setNewDomainKeywords] = useState<string[]>([]);
@@ -584,8 +585,11 @@ export default function OrganizationSettings() {
   useEffect(() => {
     if (selectedTab !== "domains") return;
 
+    // Also poll while a Track Prompts re-run is crawling — it leaves
+    // processing_status untouched, so prompts_in_flight is the signal.
     const hasProcessingDomains = domains.some(d =>
-      d.processing_status && ['INIT', 'SCHD', 'PROC'].includes(d.processing_status)
+      (d.processing_status && ['INIT', 'SCHD', 'PROC'].includes(d.processing_status)) ||
+      (d.prompts_in_flight ?? 0) > 0
     );
 
     if (!hasProcessingDomains) return;
@@ -1233,6 +1237,10 @@ export default function OrganizationSettings() {
     try {
       const res: any = await apiClient.refreshDomainPrompts(trackPromptsDomain.id);
       if (res?.success) {
+        // Show "Processing" straight away; the domain poll then follows the
+        // real count and flips the row back to Ready when the crawl finishes.
+        const id = trackPromptsDomain.id;
+        setDomains(prev => prev.map(d => d.id === id ? { ...d, prompts_in_flight: res.prompts_count || 1 } : d));
         toast({
           title: "Prompt tracking started",
           description: `Re-running ${res.prompts_count ?? ""} prompt(s) for "${trackPromptsDomain.name}". This can take a few minutes.`,
@@ -1648,10 +1656,14 @@ export default function OrganizationSettings() {
             ) : (
               domains.map((domain) => {
                 const isProcessing = domain.processing_status && ['INIT', 'SCHD', 'PROC'].includes(domain.processing_status);
-                const isFailed = domain.processing_status === 'FAIL';
-                const isCompleted = !domain.processing_status || domain.processing_status === 'COMP';
+                // Track Prompts re-runs prompts without changing processing_status,
+                // so a re-run in flight is read from prompts_in_flight instead.
+                const isTrackingPrompts = !isProcessing && (domain.prompts_in_flight ?? 0) > 0;
+                const isFailed = domain.processing_status === 'FAIL' && !isTrackingPrompts;
+                const isCompleted = (!domain.processing_status || domain.processing_status === 'COMP') && !isTrackingPrompts;
 
                 const getStatusLabel = () => {
+                  if (isTrackingPrompts) return 'Processing';
                   if (domain.processing_status === 'INIT') return 'Initializing';
                   if (domain.processing_status === 'SCHD') return 'Scheduled';
                   if (domain.processing_status === 'PROC') return 'Processing';
@@ -1717,7 +1729,7 @@ export default function OrganizationSettings() {
                           variant="outline"
                           size="sm"
                           className="gap-1.5 h-8"
-                          disabled={isProcessing}
+                          disabled={isProcessing || isTrackingPrompts}
                           onClick={() => setTrackPromptsDomain({ id: domain.id, name: domain.name })}
                           title="Re-run this domain's prompts across all platforms (costs tokens)"
                         >
@@ -1727,7 +1739,7 @@ export default function OrganizationSettings() {
                       )}
 
                       {/* Status Badge - Second (hidden for team members) */}
-                      {!isTeamMember && isProcessing && (
+                      {!isTeamMember && (isProcessing || isTrackingPrompts) && (
                         <Badge variant="outline" className="gap-1.5 border-orange-500 text-orange-600 bg-orange-50 px-3 py-1">
                           <Loader2 className="h-3.5 w-3.5 animate-spin" />
                           {getStatusLabel()}
