@@ -661,6 +661,35 @@ def domain_keywords(request, pk):
     return Response(serializer.data)
 
 
+@api_view(['POST'])
+@permission_classes([IsAuthenticated])
+def domain_track_prompts(request, domain_id):
+    """Re-run all of a domain's prompts — the "Track Prompts" action in
+    Organization Settings. Forwards to the engine server-side: the browser
+    can't call the engine directly because it is plain HTTP and the app is
+    served over HTTPS (mixed content). Costs tokens, so admins only."""
+    if request.user.role not in ('admin', 'super_admin'):
+        return Response({'success': False, 'error': 'Only organization administrators can track prompts'},
+                        status=status.HTTP_403_FORBIDDEN)
+    if not Domain.objects.filter(id=domain_id, organisation=request.user.organisation).exists():
+        return Response({'success': False, 'error': 'Domain not found or not in your organization'},
+                        status=status.HTTP_404_NOT_FOUND)
+
+    engine_api_url = getattr(settings, 'ENGINE_API_URL', 'http://localhost:8001').rstrip('/')
+    try:
+        resp = requests.post(f"{engine_api_url}/api/prompts/refresh-domain/",
+                             json={'domain_id': domain_id}, timeout=30)
+    except requests.RequestException as exc:
+        logger.error("Track Prompts: engine unreachable for domain %s: %s", domain_id, exc)
+        return Response({'success': False, 'error': 'Prompt engine is unreachable. Please try again.'},
+                        status=status.HTTP_502_BAD_GATEWAY)
+    try:
+        body = resp.json()
+    except ValueError:
+        body = {'success': False, 'error': f'Prompt engine returned HTTP {resp.status_code}'}
+    return Response(body, status=resp.status_code)
+
+
 # Domain Access Management
 @api_view(['GET', 'POST'])
 @permission_classes([IsAuthenticated])

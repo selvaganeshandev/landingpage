@@ -2558,14 +2558,12 @@ export const apiClient = {
   getOpenRouterBalance: () => apiRequest('/auth/organization/openrouter/balance/'),
 
   // Re-run (refresh) ALL of a domain's prompts on demand — the "Track Prompts"
-  // action in Organization Settings. Hits the engine; costs tokens (each prompt
-  // is re-checked on every platform), so the UI confirms before calling this.
+  // action in Organization Settings. Goes through the backend, which forwards to
+  // the engine server-side (the engine is plain HTTP, so an HTTPS page can't
+  // call it directly). Costs tokens (each prompt is re-checked on every
+  // platform), so the UI confirms before calling this.
   refreshDomainPrompts: (domainId: number) =>
-    apiRequest('/api/prompts/refresh-domain/', {
-      method: 'POST',
-      body: JSON.stringify({ domain_id: domainId }),
-      useEngine: true,
-    }),
+    apiRequest(`/domains/${domainId}/track-prompts/`, { method: 'POST' }),
 
   getDataForSeoCredentials: () => apiRequest('/auth/organization/dataforseo/'),
 
