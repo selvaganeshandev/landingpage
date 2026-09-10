@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback } from "react";
-import { Check, Globe, Loader2, ChevronsUpDown, AlertCircle, Search, Plus } from "lucide-react";
+import { useNavigate } from "react-router-dom";
+import { Check, Globe, Loader2, ChevronsUpDown, AlertCircle, Search, Plus, Settings } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -12,6 +13,7 @@ import { AddDomainDialog } from "@/components/AddDomainDialog";
 import { cn } from "@/lib/utils";
 import { useDomainStore } from "@/stores/domainStore";
 import { useAuth } from "@/contexts/AuthContext";
+import { MODULES } from "@/types/auth";
 import { useToast } from "@/hooks/use-toast";
 import { getFaviconUrl, handleFaviconError } from "@/utils/faviconHelper";
 
@@ -39,7 +41,8 @@ export const DomainSelector = () => {
     setSelectedDomain,
     setDomainSwitching
   } = useDomainStore();
-  const { user } = useAuth();
+  const { user, checkPermission } = useAuth();
+  const navigate = useNavigate();
 
   // Clear stale domains if they don't belong to current user's organization
   useEffect(() => {
@@ -193,6 +196,14 @@ export const DomainSelector = () => {
 
   const canAddDomain = user?.role === 'admin' || user?.role === 'super_admin';
 
+  // Same gate as the /organization-settings/domains/:id route. Team members
+  // land on Integrations, matching the gear in Organization Settings.
+  const canOpenSettings = checkPermission(MODULES.ORGANIZATION_SETTINGS, 'read');
+  const openDomainSettings = (domainId: number) => {
+    setOpen(false);
+    navigate(`/organization-settings/domains/${domainId}${user?.role === 'user' ? '?tab=integrations' : ''}`);
+  };
+
   if (isLoading && domains.length === 0) {
     return (
       <Button
@@ -248,6 +259,99 @@ export const DomainSelector = () => {
       || hostLabel(d.url).toLowerCase().includes(q);
   });
 
+  // The current project sits in its own section above the rest, so it is found
+  // without scanning the grid. It drops out when a search doesn't match it.
+  const currentMatch = filtered.find((d) => d.id === selectedDomain?.id);
+  const otherDomains = filtered.filter((d) => d.id !== selectedDomain?.id);
+
+  const renderDomainCard = (domain: (typeof domains)[number]) => {
+    const faviconUrl = getFaviconUrl(domain.url, 64);
+    const isProcessing = domain.processing_status
+      && ['INIT', 'SCHD', 'PROC'].includes(domain.processing_status);
+    const isFailed = domain.processing_status === 'FAIL';
+    // Processing domains stay selectable — the label and spinner
+    // are the signal, not a lock. Only failed domains are barred.
+    const isDisabled = isFailed;
+    const isActive = selectedDomain?.id === domain.id;
+    const processingLabel = domain.processing_status === 'INIT' ? 'Initializing...' :
+                            domain.processing_status === 'SCHD' ? 'Scheduled...' :
+                            domain.processing_status === 'PROC' ? 'Processing...' : 'Processing...';
+
+    // The gear is a sibling of the select button, not a child — a button
+    // nested in a button is invalid HTML and swallows clicks unpredictably.
+    // It stays enabled on failed projects: settings is where they get fixed.
+    return (
+      <div key={domain.id} className="relative">
+        <button
+          type="button"
+          disabled={isDisabled}
+          onClick={() => handleDomainSelect(domain.id)}
+          className={cn(
+            "flex w-full items-center gap-3 rounded-lg border p-3 text-left transition-colors",
+            canOpenSettings && "pr-12",
+            isActive
+              ? "border-primary/30 bg-primary/5"
+              : "border-border hover:border-primary/40 hover:bg-accent/50",
+            isDisabled && "opacity-60 cursor-not-allowed hover:border-border hover:bg-transparent",
+          )}
+        >
+          {/* The icon fills the tile edge to edge — a 24px glyph
+              floating in a 40px box was hard to pick out when
+              scanning fifty projects by logo. Favicons are square,
+              so object-cover fills without cropping. */}
+          <div className="h-10 w-10 flex-shrink-0 rounded-md border border-border bg-muted flex items-center justify-center overflow-hidden">
+            {faviconUrl ? (
+              <img
+                src={faviconUrl}
+                alt=""
+                className="h-full w-full object-cover"
+                onError={(e) => handleFaviconError(e, domain.url, domain.name, 64)}
+              />
+            ) : (
+              <Globe className="h-5 w-5 text-muted-foreground" />
+            )}
+          </div>
+
+          <div className="min-w-0 flex-1">
+            <p className="truncate text-sm font-semibold">{domain.name}</p>
+            {isProcessing ? (
+              <span className="text-xs text-orange-500 flex items-center gap-1">
+                <Loader2 className="h-3 w-3 animate-spin" />
+                {processingLabel}
+              </span>
+            ) : isFailed ? (
+              <span className="text-xs text-red-500 flex items-center gap-1">
+                <AlertCircle className="h-3 w-3" />
+                Failed
+              </span>
+            ) : (
+              // The host, not a mention count: `total_mentions` is a
+              // denormalized column that drifts, and the host is what
+              // actually tells two similarly named projects apart.
+              <p className="truncate text-xs text-muted-foreground">
+                {hostLabel(domain.url) || " "}
+              </p>
+            )}
+          </div>
+
+          {isActive && <Check className="h-4 w-4 flex-shrink-0 text-primary" />}
+        </button>
+
+        {canOpenSettings && (
+          <button
+            type="button"
+            onClick={() => openDomainSettings(domain.id)}
+            title="Project settings"
+            aria-label={`Settings for ${domain.name}`}
+            className="absolute right-2 top-1/2 -translate-y-1/2 flex h-8 w-8 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+          >
+            <Settings className="h-4 w-4" />
+          </button>
+        )}
+      </div>
+    );
+  };
+
   return (
     <>
       {/* Trigger. The stacked chevrons read as "switch between", which is what
@@ -296,77 +400,27 @@ export const DomainSelector = () => {
                 No projects match that search
               </p>
             ) : (
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-                {filtered.map((domain) => {
-                  const faviconUrl = getFaviconUrl(domain.url, 64);
-                  const isProcessing = domain.processing_status
-                    && ['INIT', 'SCHD', 'PROC'].includes(domain.processing_status);
-                  const isFailed = domain.processing_status === 'FAIL';
-                  // Processing domains stay selectable — the label and spinner
-                  // are the signal, not a lock. Only failed domains are barred.
-                  const isDisabled = isFailed;
-                  const isActive = selectedDomain?.id === domain.id;
-                  const processingLabel = domain.processing_status === 'INIT' ? 'Initializing...' :
-                                          domain.processing_status === 'SCHD' ? 'Scheduled...' :
-                                          domain.processing_status === 'PROC' ? 'Processing...' : 'Processing...';
-
-                  return (
-                    <button
-                      key={domain.id}
-                      type="button"
-                      disabled={isDisabled}
-                      onClick={() => handleDomainSelect(domain.id)}
-                      className={cn(
-                        "flex items-center gap-3 rounded-lg border p-3 text-left transition-colors",
-                        isActive
-                          ? "border-primary/30 bg-primary/5"
-                          : "border-border hover:border-primary/40 hover:bg-accent/50",
-                        isDisabled && "opacity-60 cursor-not-allowed hover:border-border hover:bg-transparent",
-                      )}
-                    >
-                      {/* The icon fills the tile edge to edge — a 24px glyph
-                          floating in a 40px box was hard to pick out when
-                          scanning fifty projects by logo. Favicons are square,
-                          so object-cover fills without cropping. */}
-                      <div className="h-10 w-10 flex-shrink-0 rounded-md border border-border bg-muted flex items-center justify-center overflow-hidden">
-                        {faviconUrl ? (
-                          <img
-                            src={faviconUrl}
-                            alt=""
-                            className="h-full w-full object-cover"
-                            onError={(e) => handleFaviconError(e, domain.url, domain.name, 64)}
-                          />
-                        ) : (
-                          <Globe className="h-5 w-5 text-muted-foreground" />
-                        )}
-                      </div>
-
-                      <div className="min-w-0 flex-1">
-                        <p className="truncate text-sm font-semibold">{domain.name}</p>
-                        {isProcessing ? (
-                          <span className="text-xs text-orange-500 flex items-center gap-1">
-                            <Loader2 className="h-3 w-3 animate-spin" />
-                            {processingLabel}
-                          </span>
-                        ) : isFailed ? (
-                          <span className="text-xs text-red-500 flex items-center gap-1">
-                            <AlertCircle className="h-3 w-3" />
-                            Failed
-                          </span>
-                        ) : (
-                          // The host, not a mention count: `total_mentions` is a
-                          // denormalized column that drifts, and the host is what
-                          // actually tells two similarly named projects apart.
-                          <p className="truncate text-xs text-muted-foreground">
-                            {hostLabel(domain.url) || " "}
-                          </p>
-                        )}
-                      </div>
-
-                      {isActive && <Check className="h-4 w-4 flex-shrink-0 text-primary" />}
-                    </button>
-                  );
-                })}
+              <div className="space-y-5">
+                {currentMatch && (
+                  <section>
+                    <h3 className="mb-2 text-xs font-medium uppercase tracking-wide text-muted-foreground">
+                      Current project
+                    </h3>
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                      {renderDomainCard(currentMatch)}
+                    </div>
+                  </section>
+                )}
+                {otherDomains.length > 0 && (
+                  <section>
+                    <h3 className="mb-2 text-xs font-medium uppercase tracking-wide text-muted-foreground">
+                      Other projects
+                    </h3>
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                      {otherDomains.map(renderDomainCard)}
+                    </div>
+                  </section>
+                )}
               </div>
             )}
           </div>
