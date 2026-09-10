@@ -573,6 +573,19 @@ def process_gsc_insights_task(self, integration_id: int, days_back: int = 30):
     return processor.process_integration(integration_id, days_back)
 
 
+@shared_task(bind=True, ignore_result=True, max_retries=1)
+def sync_gsc_keyword_metrics_task(self, integration_id: int):
+    """Copy per-keyword Search Console clicks/impressions onto tracked SEO keywords.
+
+    Dispatched by schedule_all_rolling_insights_task. Also callable ad hoc to
+    refresh one integration.
+    """
+    processor = GSCInsightsProcessor()
+    result = processor.sync_keyword_metrics(integration_id)
+    logger.info(f"[GSC Keywords] integration={integration_id} result={result}")
+    return result
+
+
 @shared_task(bind=True, ignore_result=True, max_retries=3)
 def process_ga_insight_task(self, insight_id: int):
     """Process a single GA insight record"""
@@ -782,9 +795,12 @@ def schedule_all_rolling_insights_task(self):
     ).exclude(provider_id='')
     for integration in gsc_integrations:
         process_gsc_insights_task.delay(integration.id)
+        # Keyword table CLKS/IMPS. Separate task so a failure in one never
+        # blocks the other.
+        sync_gsc_keyword_metrics_task.delay(integration.id)
         scheduled['gsc'] += 1
 
-    logger.info(f"[Rolling Insights] Scheduled GA={scheduled['ga']} GSC={scheduled['gsc']} integrations")
+    logger.info(f"[Rolling Insights] Scheduled GA={scheduled['ga']} GSC={scheduled['gsc']} integrations (GSC incl. keyword metrics)")
     return scheduled
 
 

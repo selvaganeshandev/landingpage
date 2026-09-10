@@ -2,6 +2,7 @@
 GSC Insights Processor: Fetches and stores Google Search Console traffic data
 """
 import logging
+from collections import defaultdict
 from typing import Dict, Any
 from datetime import datetime, timedelta, date
 import calendar
@@ -13,6 +14,7 @@ from django.utils import timezone
 # Import from engine's integrations app
 from integrations.models import Integration, GSCTrafficInsight
 from shared_models.models import Domain
+from shared_models.seo_models import SeoKeywordRank
 from integrations.google_oauth_helper import get_credentials_from_integration
 from google.oauth2.credentials import Credentials
 from googleapiclient.discovery import build
@@ -24,6 +26,30 @@ logger = logging.getLogger(__name__)
 # pages, device breakdown, country breakdown. If every one of them fails there
 # is no data at all, so the insight is marked FAIL rather than an empty COMP.
 TOTAL_GSC_SECTIONS = 5
+
+# Keyword-level sync window. Search Console finalises data on a ~2-3 day lag, so
+# it reads 7 complete days ending 3 days back — the window the keyword table's
+# CLKS/IMPS tooltip describes ("last 7 days").
+GSC_KEYWORD_WINDOW_DAYS = 7
+GSC_KEYWORD_LAG_DAYS = 3
+GSC_MAX_PAGE_ROWS = 25000  # Search Analytics API maximum rowLimit
+
+# Search Console filters by ISO 3166-1 alpha-3; keyword rows store the alpha-2
+# code the rank crawl uses. A code missing here is skipped (and reported)
+# rather than synced without a country filter, which would show worldwide
+# numbers under a single-country keyword.
+GSC_COUNTRY_CODES = {
+    'in': 'ind', 'us': 'usa', 'ae': 'are', 'sa': 'sau', 'kw': 'kwt', 'qa': 'qat',
+    'om': 'omn', 'bh': 'bhr', 'sg': 'sgp', 'gb': 'gbr', 'uk': 'gbr', 'au': 'aus',
+    'ca': 'can', 'nz': 'nzl', 'ie': 'irl', 'de': 'deu', 'fr': 'fra', 'es': 'esp',
+    'it': 'ita', 'nl': 'nld', 'my': 'mys', 'id': 'idn', 'ph': 'phl', 'pk': 'pak',
+    'bd': 'bgd', 'lk': 'lka', 'np': 'npl', 'za': 'zaf', 'eg': 'egy', 'jo': 'jor',
+}
+
+
+def _normalise_query(text) -> str:
+    """Match key for a keyword or GSC query: lower-cased, whitespace collapsed."""
+    return ' '.join((text or '').lower().split())
 
 
 def _completion_message(partial_failures) -> str:
@@ -339,6 +365,128 @@ class GSCInsightsProcessor:
         except Exception as e:
             logger.error(f"Error scheduling monthly GSC insights for integration {integration_id}: {e}", exc_info=True)
             return {'success': False, 'error': str(e)}
+
+    def sync_keyword_metrics(self, integration_id: int) -> Dict[str, Any]:
+        """
+        Copy per-keyword clicks and impressions from Search Console onto the
+        domain's tracked SEO keywords (SeoKeywordRank.gsc_clicks/gsc_impressions).
+
+        Nothing wrote those columns before — only the one-off Rankmax import —
+        so the keyword table showed 0 for every domain even with GSC connected.
+        The stored insights keep only the top 100 queries, which miss most
+        tracked keywords, so this pulls every query in the window instead.
+
+        Matching is exact on the normalised text, per keyword country. Devices
+        are combined, so a keyword's desktop and mobile rows show the same
+        figures. A keyword with no matching query had no impressions and gets 0;
+        a country whose fetch failed is left untouched.
+        """
+        try:
+            integration = Integration.objects.get(
+                id=integration_id, type='search_console', status='active'
+            )
+        except Integration.DoesNotExist:
+            return {'success': False, 'error': f'Integration {integration_id} not found or not active'}
+
+        # Report-only secondary integrations have no domain and no tracked keywords.
+        if not integration.provider_id or not integration.domain_id:
+            return {'success': False, 'error': 'No site or domain for this integration'}
+
+        rows = list(
+            SeoKeywordRank.objects.filter(domain_id=integration.domain_id)
+            .select_related('keyword')
+            .only('id', 'isocode', 'gsc_clicks', 'gsc_impressions', 'keyword__keyword')
+        )
+        if not rows:
+            return {'success': True, 'keywords': 0, 'updated': 0}
+
+        try:
+            credentials = get_credentials_from_integration(integration)
+            if not credentials:
+                return {'success': False, 'error': 'No valid credentials found'}
+            service = build('searchconsole', 'v1', credentials=credentials)
+        except Exception as e:
+            logger.error(f"[GSC Keywords] Could not build GSC client for integration {integration_id}: {e}")
+            return {'success': False, 'error': str(e)}
+
+        end_date = date.today() - timedelta(days=GSC_KEYWORD_LAG_DAYS)
+        start_date = end_date - timedelta(days=GSC_KEYWORD_WINDOW_DAYS - 1)
+
+        rows_by_country = defaultdict(list)
+        for row in rows:
+            rows_by_country[(row.isocode or '').lower()].append(row)
+
+        changed, skipped, failed = [], [], []
+        for isocode, country_rows in rows_by_country.items():
+            country = GSC_COUNTRY_CODES.get(isocode)
+            if not country:
+                skipped.append(isocode)
+                continue
+            try:
+                metrics = self._fetch_query_metrics(
+                    service, integration.provider_id, start_date, end_date, country
+                )
+            except Exception as e:
+                logger.error(
+                    f"[GSC Keywords] Query fetch failed for integration {integration_id} "
+                    f"country {country}: {e}"
+                )
+                failed.append(isocode)
+                continue
+
+            for row in country_rows:
+                clicks, impressions = metrics.get(_normalise_query(row.keyword.keyword), (0, 0))
+                if (row.gsc_clicks, row.gsc_impressions) != (clicks, impressions):
+                    row.gsc_clicks, row.gsc_impressions = clicks, impressions
+                    changed.append(row)
+
+        SeoKeywordRank.objects.bulk_update(changed, ['gsc_clicks', 'gsc_impressions'], batch_size=500)
+
+        if skipped:
+            logger.warning(
+                f"[GSC Keywords] integration {integration_id}: no GSC country code for {skipped}, skipped"
+            )
+        return {
+            'success': not failed,
+            'keywords': len(rows),
+            'updated': len(changed),
+            'window': f'{start_date}..{end_date}',
+            'skipped_countries': skipped,
+            'failed_countries': failed,
+        }
+
+    def _fetch_query_metrics(self, service, site_url: str, start_date: date, end_date: date,
+                             country: str) -> Dict[str, tuple]:
+        """
+        Every query's (clicks, impressions) for one country, keyed by normalised
+        text. Pages past the API's 25,000-row cap up to GSC_KEYWORD_SYNC_MAX_ROWS.
+        Raises on API errors so the caller can leave that country untouched.
+        """
+        max_rows = getattr(settings, 'GSC_KEYWORD_SYNC_MAX_ROWS', 100000)
+        metrics = {}
+        start_row = 0
+        while start_row < max_rows:
+            response = service.searchanalytics().query(siteUrl=site_url, body={
+                'startDate': start_date.strftime('%Y-%m-%d'),
+                'endDate': end_date.strftime('%Y-%m-%d'),
+                'dimensions': ['query'],
+                'dimensionFilterGroups': [{
+                    'filters': [{'dimension': 'country', 'operator': 'equals', 'expression': country}],
+                }],
+                'rowLimit': GSC_MAX_PAGE_ROWS,
+                'startRow': start_row,
+            }).execute()
+
+            page = response.get('rows', [])
+            for r in page:
+                key = _normalise_query((r.get('keys') or [''])[0])
+                clicks, impressions = metrics.get(key, (0, 0))
+                metrics[key] = (clicks + int(r.get('clicks', 0)), impressions + int(r.get('impressions', 0)))
+
+            if len(page) < GSC_MAX_PAGE_ROWS:
+                break
+            start_row += GSC_MAX_PAGE_ROWS
+        return metrics
 
     def _fetch_gsc_data(self, insight: GSCTrafficInsight, integration: Integration,
                        start_date: date, end_date: date) -> Dict[str, Any]:
