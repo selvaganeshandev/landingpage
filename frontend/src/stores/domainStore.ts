@@ -66,6 +66,15 @@ export const useDomainStore = create<DomainState>()(
       setDomains: (domains) => set({ domains }),
 
       setSelectedDomain: (domain) => {
+        // Switching project must drop every cached read, or the new project's
+        // pages would render the previous one's numbers until the entries aged
+        // out. Guarded on the id actually changing: this setter is also called
+        // by the server-sync effect with the SAME domain on every load, and
+        // clearing there would defeat the cache entirely.
+        const previousId = get().selectedDomain?.id;
+        if (previousId !== domain?.id) {
+          void import('@/services/api').then(({ clearApiCache }) => clearApiCache());
+        }
         set({ selectedDomain: domain });
         // Sync with active_domain_id localStorage when domain is set
         // NOTE: This only updates active_domain_id key, not the legacy key

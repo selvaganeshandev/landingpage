@@ -14,6 +14,52 @@ interface RequestOptions extends RequestInit {
   skipAuth?: boolean;
   useEngine?: boolean;
   timeout?: number;
+  /** Serve this GET from the in-memory cache for up to N ms.
+   *
+   *  OPT-IN ON PURPOSE. A blanket cache keyed on URL cannot go here: the
+   *  progress pollers (DomainSelector, Prompts, Competitors) re-request the
+   *  SAME urls — `/domains/`, `/prompts/groups/`,
+   *  `/competitors/competitors/by_domain/` — every 10s to watch a status
+   *  change, so caching by default would freeze every "Processing" spinner
+   *  until the entry expired. Only set this on read-only endpoints that
+   *  nothing polls. */
+  cache_ttl?: number;
+  /** Skip the cache for this call and refill it — the Refresh buttons. */
+  force_refresh?: boolean;
+}
+
+/** Read caches, keyed by method+url. Invalidated wholesale by any write and by
+ *  a project switch, which is blunt but keeps "I saved something and the number
+ *  did not move" from ever happening. */
+const readCache = new Map<string, { at: number; data: any }>();
+/** GETs currently on the wire, so N identical simultaneous calls make 1 request.
+ *  Always safe — it merges concurrent calls, it never returns an older answer —
+ *  which is why it applies to every GET, cached or not. Boot alone fires
+ *  `/domains/` four times (AuthContext x2, Layout, DomainSelector). */
+const inFlight = new Map<string, Promise<any>>();
+
+/** Default lifetime for a cached read. Long enough that navigating away and
+ *  back is instant, short enough that a sweep landing mid-session shows up
+ *  without a hard reload. */
+const READ_TTL = 60_000;
+
+/** Drop cached reads. Call after any write, and on project switch. */
+export function clearApiCache(): void {
+  readCache.clear();
+}
+
+/** Where to send someone a 401 just bounced.
+ *
+ *  `hadToken` is read BEFORE any clean-up, because the refresh path wipes
+ *  localStorage on its way out and would make every caller look signed-out.
+ *
+ *  Layout wraps the protected routes, so its DomainSelector calls `/domains/`
+ *  before ProtectedRoute can redirect. For a first-time visitor that 401s and
+ *  lands here — which is why opening the app link used to greet new users with
+ *  "Session Expired". No token ever present means nobody signed in: send them
+ *  to sign-in. A token that stopped working is a real expiry. */
+function redirectAfter401(hadToken: boolean): void {
+  window.location.href = hadToken ? '/session-expired' : '/signin';
 }
 
 /**
@@ -91,7 +137,65 @@ async function apiRequest<T>(
   endpoint: string,
   options: RequestOptions = {}
 ): Promise<T> {
-  const { skipAuth, useEngine, timeout, ...fetchOptions } = options;
+  const { skipAuth, useEngine, timeout, cache_ttl, force_refresh, ...fetchOptions } = options;
+
+  const method = (fetchOptions.method || 'GET').toUpperCase();
+
+  // Any write invalidates every cached read. A write is rare and a wrong number
+  // after saving is not, so the whole map goes rather than guessing which keys
+  // the write touched.
+  if (method !== 'GET') {
+    readCache.clear();
+  }
+
+  const cacheKey = `${useEngine ? 'E' : 'B'} ${endpoint}`;
+
+  // A caller-supplied AbortController opts this call out of sharing. Competitors
+  // aborts its in-flight load when the filters change; if a second caller were
+  // holding that same promise, someone else's cancel would surface as their
+  // error. Such calls still READ the cache (a resolved value cannot be
+  // aborted) — they just never join or populate the in-flight map.
+  const shareable = method === 'GET' && !fetchOptions.signal;
+
+  if (method === 'GET' && cache_ttl && !force_refresh) {
+    const hit = readCache.get(cacheKey);
+    if (hit && Date.now() - hit.at < cache_ttl) {
+      return hit.data as T;
+    }
+  }
+
+  if (shareable && !force_refresh) {
+    const running = inFlight.get(cacheKey);
+    if (running) return running as Promise<T>;
+  }
+
+  const pending = apiRequestUncached<T>(endpoint, options);
+
+  if (method === 'GET') {
+    pending
+      .then((data) => {
+        if (cache_ttl) readCache.set(cacheKey, { at: Date.now(), data });
+      })
+      // Must not surface as an unhandled rejection here; the caller still gets
+      // the error because `pending` itself is what we return.
+      .catch(() => {});
+  }
+
+  if (shareable) {
+    inFlight.set(cacheKey, pending);
+    pending.catch(() => {}).finally(() => {
+      if (inFlight.get(cacheKey) === pending) inFlight.delete(cacheKey);
+    });
+  }
+
+  return pending;
+}
+
+async function apiRequestUncached<T>(
+  endpoint: string,
+  options: RequestOptions = {}
+): Promise<T> {
+  const { skipAuth, useEngine, timeout, cache_ttl: _c, force_refresh: _f, ...fetchOptions } = options;
 
   const headers: HeadersInit = {
     // Don't set Content-Type for FormData - let browser set it with boundary
@@ -99,7 +203,10 @@ async function apiRequest<T>(
     ...fetchOptions.headers,
   };
 
-  // Add auth token if not skipped
+  // Add auth token if not skipped. `hadToken` is recorded here, before the
+  // refresh path can clear localStorage, so a 401 can tell "never signed in"
+  // from "signed in and expired".
+  const hadToken = !!getAuthToken();
   if (!skipAuth) {
     const token = getAuthToken();
     if (token) {
@@ -195,16 +302,17 @@ async function apiRequest<T>(
           headers: newHeaders,
         });
       } else {
-        // Refresh failed, redirect to session expired page
-        window.location.href = '/session-expired';
-        throw new Error('Session expired. Please login again.');
+        // Refresh failed. A first-time visitor has no token to refresh and
+        // arrives here too, so pick the destination by whether one existed.
+        redirectAfter401(hadToken);
+        throw new Error(hadToken ? 'Session expired. Please login again.' : 'Unauthorized');
       }
     } else {
       // For login/logout endpoints, don't try to refresh
       if (!endpoint.includes('/auth/login/')) {
         localStorage.removeItem('access_token');
         localStorage.removeItem('refresh_token');
-        window.location.href = '/session-expired';
+        redirectAfter401(hadToken);
       }
       throw new Error('Unauthorized');
     }
@@ -785,7 +893,7 @@ export const apiClient = {
       });
     }
     const queryParams = Object.keys(cleaned).length ? `?${new URLSearchParams(cleaned).toString()}` : '';
-    return apiRequest(`/prompts/mentions/${queryParams}`);
+    return apiRequest(`/prompts/mentions/${queryParams}`, { cache_ttl: READ_TTL });
   },
 
   getMentionFilters: () => apiRequest('/prompts/mentions/filters/'),
@@ -1122,7 +1230,7 @@ export const apiClient = {
   },
 
   getTopicsByDomain: (domainId: number) => {
-    return apiRequest(`/topics/topics/by_domain/?domain_id=${domainId}`);
+    return apiRequest(`/topics/topics/by_domain/?domain_id=${domainId}`, { cache_ttl: READ_TTL });
   },
 
   /**
@@ -1279,7 +1387,7 @@ export const apiClient = {
       ...(params.platform ? { platform: params.platform } : {}),
       ...(params.scope ? { scope: params.scope } : {}),
     }).toString()}`;
-    return apiRequest(`/analytics/share-of-voice/by_domain/${queryParams}`, options);
+    return apiRequest(`/analytics/share-of-voice/by_domain/${queryParams}`, { cache_ttl: READ_TTL, ...options });
   },
 
   getShareOfVoiceComparison: (params: { domain_id: string; date?: string; platform?: string }) => {
@@ -1293,7 +1401,7 @@ export const apiClient = {
 
   getShareOfVoiceLatestEngine: (params: { domain_id: string }, options?: RequestOptions) => {
     const queryParams = `?${new URLSearchParams({ domain_id: params.domain_id }).toString()}`;
-    return apiRequest(`/analytics/share-of-voice/by_domain/${queryParams}`, options);
+    return apiRequest(`/analytics/share-of-voice/by_domain/${queryParams}`, { cache_ttl: READ_TTL, ...options });
   },
 
   // ===== Engine (port 8001) helpers for competitor sentiment (optional for Sentiment page)
@@ -1326,7 +1434,7 @@ export const apiClient = {
       ...(params.platform ? { platform: params.platform } : {}),
       ...(params.page ? { page: params.page.toString() } : {}),
     }).toString()}`;
-    return apiRequest(`/competitors/competitor-prompt-analytics/${queryParams}`, options);
+    return apiRequest(`/competitors/competitor-prompt-analytics/${queryParams}`, { cache_ttl: READ_TTL, ...options });
   },
 
   getCompetitorGapsEngine: (params: { domain_id: string; competitor_id?: string }) => {
@@ -1343,7 +1451,7 @@ export const apiClient = {
       ...(params.days ? { days: String(params.days) } : {}),
       ...(params.platform ? { platform: params.platform } : {}),
     }).toString()}`;
-    return apiRequest(`/competitors/heatmap/${queryParams}`, options);
+    return apiRequest(`/competitors/heatmap/${queryParams}`, { cache_ttl: READ_TTL, ...options });
   },
 
   getCompetitorMetricSnapshots: (params: { domain_id: string; days?: number; competitor_id?: string; platform?: string }, options?: RequestOptions) => {
@@ -1353,7 +1461,7 @@ export const apiClient = {
       ...(params.competitor_id ? { competitor_id: params.competitor_id } : {}),
       ...(params.platform ? { platform: params.platform } : {}),
     }).toString()}`;
-    return apiRequest(`/competitors/competitor-metric-snapshots/${queryParams}`, options);
+    return apiRequest(`/competitors/competitor-metric-snapshots/${queryParams}`, { cache_ttl: READ_TTL, ...options });
   },
 
   getEngineCompetitors: (params: { domain_id: string; platform?: string }, options?: RequestOptions) => {
@@ -1392,7 +1500,7 @@ export const apiClient = {
       domain_id: params.domain_id,
       ...(params.platform ? { platform: params.platform } : {}),
     }).toString()}`;
-    return apiRequest(`/competitors/competitive-strength-analysis${queryParams}`, options);
+    return apiRequest(`/competitors/competitive-strength-analysis/${queryParams}`, { cache_ttl: READ_TTL, ...options });
   },
 
   getCompetitiveInsights: (params: { domain_id: string; platform?: string }, options?: RequestOptions) => {
@@ -1400,7 +1508,7 @@ export const apiClient = {
       domain_id: params.domain_id,
       ...(params.platform ? { platform: params.platform } : {}),
     }).toString()}`;
-    return apiRequest(`/competitors/competitive-insights${queryParams}`, options);
+    return apiRequest(`/competitors/competitive-insights/${queryParams}`, { cache_ttl: READ_TTL, ...options });
   },
 
   getAnswerGapAnalysis: (params: { domain_id: string; competitor_id?: string; platform?: string }, options?: RequestOptions) => {
@@ -1409,7 +1517,7 @@ export const apiClient = {
       ...(params.competitor_id ? { competitor_id: params.competitor_id } : {}),
       ...(params.platform ? { platform: params.platform } : {}),
     }).toString()}`;
-    return apiRequest(`/competitors/answer-gap-analysis${queryParams}`, options);
+    return apiRequest(`/competitors/answer-gap-analysis/${queryParams}`, { cache_ttl: READ_TTL, ...options });
   },
 
   // ===== Content Gaps =====
@@ -1441,7 +1549,7 @@ export const apiClient = {
   },
 
   // ===== Dashboard =====
-  getDashboardSummary: (params: { domain_id: string; days?: number; llm_model?: string; start_date?: string; end_date?: string }) => {
+  getDashboardSummary: (params: { domain_id: string; days?: number; llm_model?: string; start_date?: string; end_date?: string }, options?: RequestOptions) => {
     const queryParams = new URLSearchParams({
       domain_id: params.domain_id,
       ...(params.days ? { days: String(params.days) } : {}),
@@ -1449,8 +1557,10 @@ export const apiClient = {
       ...(params.start_date ? { start_date: params.start_date } : {}),
       ...(params.end_date ? { end_date: params.end_date } : {}),
     });
-    // Use backend API endpoint
-    return apiClient.get(`/analytics/dashboard/summary/?${queryParams.toString()}`);
+    // Use backend API endpoint. Cached: the filters are part of the url, so a
+    // different range or model is a different key and still hits the server.
+    // Dashboard's Refresh button passes force_refresh to bypass it.
+    return apiRequest(`/analytics/dashboard/summary/?${queryParams.toString()}`, { cache_ttl: READ_TTL, ...options });
   },
 
   exportDashboardReport: (params: { domain_id: string; days?: number; llm_model?: string; start_date?: string; end_date?: string; filename?: string }) => {

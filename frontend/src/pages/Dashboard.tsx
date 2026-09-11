@@ -287,7 +287,9 @@ const Dashboard = () => {
         ...(useRange ? {} : { days: Number(timePeriod) }),
         llm_model: selectedLLM !== 'all' ? selectedLLM : undefined,
         ...(useRange ? { start_date: startStr, end_date: endStr } : {}),
-      }));
+      // Refresh must reach the server. Everything else may be served from the
+      // read cache, which is what makes navigating back to Insights instant.
+      }, { force_refresh: forceRefresh }));
       setSummary(data);
 
       // The two GA-backed series (AI Traffic tab, Visibility vs Traffic tab)

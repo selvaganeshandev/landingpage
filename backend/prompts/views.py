@@ -380,13 +380,13 @@ def _get_time_ago(created_at):
 
 def _get_available_platforms():
     """Get list of available platforms for filtering"""
-    platforms = PromptAnalytics.objects.filter(is_mention=True, is_published=True).values_list('platform', flat=True).distinct()
+    platforms = PromptAnalytics.objects.filter(is_mention=True, is_published=True).order_by().values_list('platform', flat=True).distinct()
     return list(platforms)
 
 
 def _get_available_sentiments():
     """Get list of available sentiments for filtering"""
-    sentiments = PromptAnalytics.objects.filter(is_mention=True, is_published=True).values_list('sentiment_category', flat=True).distinct()
+    sentiments = PromptAnalytics.objects.filter(is_mention=True, is_published=True).order_by().values_list('sentiment_category', flat=True).distinct()
     return list(sentiments)
 
 
@@ -403,10 +403,10 @@ def get_mention_filters(request):
     #     base_query = base_query.filter()
     
     # Get available platforms
-    platforms = list(base_query.values_list('platform', flat=True).distinct())
+    platforms = list(base_query.order_by().values_list('platform', flat=True).distinct())
     
     # Get available sentiments
-    sentiments = list(base_query.values_list('sentiment_category', flat=True).distinct())
+    sentiments = list(base_query.order_by().values_list('sentiment_category', flat=True).distinct())
     
     # Get total counts by platform
     platform_counts = {}
@@ -2246,8 +2246,8 @@ def prompt_group_detail(request, group_id):
                     'analytics_summary': {
                         'total_analytics': analytics.count(),
                         'mentions_count': analytics.filter(is_mention=True, is_published=True).count(),
-                        'platforms': list(analytics.values_list('platform', flat=True).distinct()),
-                        'sentiments': list(analytics.values_list('sentiment_category', flat=True).distinct())
+                        'platforms': list(analytics.order_by().values_list('platform', flat=True).distinct()),
+                        'sentiments': list(analytics.order_by().values_list('sentiment_category', flat=True).distinct())
                     },
                     'platform_distribution': platform_dist,
                     'variants_performance': variants_perf,
@@ -2609,7 +2609,7 @@ def prompt_detail(request, prompt_id):
                     'analytics_summary': {
                         'total_analytics': analytics.count(),
                         'mentions_count': analytics.filter(is_mention=True, is_published=True).count(),
-                        'platforms': list(analytics.values_list('platform', flat=True).distinct()),
+                        'platforms': list(analytics.order_by().values_list('platform', flat=True).distinct()),
                         'avg_position': float(analytics.aggregate(avg_pos=Avg('position'))['avg_pos'] or 0),
                         'avg_sentiment': float(analytics.aggregate(avg_sent=Avg('sentiment_score'))['avg_sent'] or 0)
                     }
@@ -2790,7 +2790,7 @@ def prompt_analytics(request, prompt_id):
             'summary': {
                 'total_analytics': analytics.count(),
                 'mentions_count': analytics.filter(is_mention=True, is_published=True).count(),
-                'platforms': list(analytics.values_list('platform', flat=True).distinct()),
+                'platforms': list(analytics.order_by().values_list('platform', flat=True).distinct()),
                 'avg_position': float(analytics.aggregate(avg_pos=Avg('position'))['avg_pos'] or 0),
                 'avg_sentiment': float(analytics.aggregate(avg_sent=Avg('sentiment_score'))['avg_sent'] or 0)
             }

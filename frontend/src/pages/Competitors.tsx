@@ -882,21 +882,21 @@ const Competitors = () => {
       try {
         // Load main competitor data first (in parallel)
         const batchStartTime = performance.now();
-        const [list, latest, byDomain, snapshotHistory, heatmapResponse] = await Promise.all([
+        // One batch, not two. The three analysis calls below do not consume
+        // anything the first five return, so awaiting the first group before
+        // starting them just added a second round-trip to every page load.
+        setIsLoadingAnalysis(true);
+        const analysisStartTime = performance.now();
+
+        const [
+          list, latest, byDomain, snapshotHistory, heatmapResponse,
+          strengthAnalysis, insights, gaps,
+        ] = await Promise.all([
           apiClient.getEngineCompetitors({ domain_id: domainId }, { signal: controller.signal }),
           apiClient.getShareOfVoiceLatestEngine({ domain_id: domainId }, { signal: controller.signal }),
           apiClient.getShareOfVoiceByDomain({ domain_id: domainId, days: Number(timePeriod) }, { signal: controller.signal }),
           apiClient.getCompetitorMetricSnapshots({ domain_id: domainId, days: Number(timePeriod) }, { signal: controller.signal }),
           apiClient.getCompetitorHeatmap({ domain_id: domainId, days: Number(timePeriod) }, { signal: controller.signal }),
-        ] as any);
-
-        // Prompts are now loaded separately by the pagination useEffect
-
-        // Load competitive analysis APIs IN PARALLEL with better error handling
-        setIsLoadingAnalysis(true);
-        const analysisStartTime = performance.now();
-
-        const [strengthAnalysis, insights, gaps] = await Promise.all([
           apiClient.getCompetitiveStrengthAnalysis({
             domain_id: domainId
           }, { signal: controller.signal }).catch((e: any) => {
