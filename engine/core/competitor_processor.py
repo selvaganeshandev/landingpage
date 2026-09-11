@@ -971,11 +971,19 @@ class CompetitorProcessor:
 
         platforms = sorted(set(own_by_platform) | set(comp_by_platform))
 
-        # Aggregate totals keep using Competitor.total_mentions so the headline
-        # figures stay consistent with the rest of the product, which reads that
-        # field directly.
-        own_total = own_qs.aggregate(total=Sum('total_mentions'))['total'] or 0
-        comp_totals = {c.id: int(c.total_mentions or 0) for c in competitor_rows}
+        # Aggregate totals are DERIVED from the per-platform numbers computed
+        # above, so the "Overall" row is always exactly the sum of its platform
+        # rows. It used to read the denormalised Competitor.total_mentions, which
+        # is only refreshed when a competitor is reprocessed — so whenever
+        # reprocessing lagged, the two disagreed and the platform breakdown no
+        # longer added up to the headline (PayTM Money: platforms summed to
+        # 5,089 while Overall reported 1,723). Deriving it here makes the two
+        # consistent by construction, whatever the stored field says.
+        own_total = sum(own_by_platform.values())
+        comp_totals = {c.id: 0 for c in competitor_rows}
+        for per_competitor in comp_by_platform.values():
+            for comp_id, mentions in per_competitor.items():
+                comp_totals[comp_id] = comp_totals.get(comp_id, 0) + int(mentions or 0)
 
         written = 0
         scopes = []

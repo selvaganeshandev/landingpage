@@ -17,6 +17,11 @@ from core.queryset_scoping import user_can_access_domain
 from prompts.models import PromptAnalytics, DomainMetricSnapshot, PromptGroupMetricSnapshot, PromptGroup, Prompt
 from competitors.models import Competitor
 from .models import ShareOfVoiceAnalytics, SentimentAnalytics
+
+# Platform label the engine stamps on aggregate ("one row per brand") share-of-
+# voice rows. Must stay in sync with SOV_OVERALL_PLATFORM in the engine's
+# core/competitor_processor.py, which writes them.
+SOV_OVERALL_PLATFORM = 'Overall'
 from .window_utils import InvalidWindow, parse_days, previous_window
 
 # 'Mentions by Country' (Insights). Prompts are run for the India market and the
@@ -1317,7 +1322,18 @@ def dashboard_summary(request):
         if platform_filter:
             latest_rows = latest_rows_all
         else:
-            overall_rows = latest_rows_all.filter(platform__isnull=True)
+            # The aggregate row is written two different ways depending on when
+            # it was created: older rows carry platform IS NULL, while the engine
+            # now stamps them platform='Overall' (SOV_OVERALL_PLATFORM in
+            # core/competitor_processor.py). Matching only the NULL form found
+            # nothing on every modern domain, so this fell through to
+            # latest_rows_all — which holds the per-platform rows AND the
+            # aggregate that already sums them, double-counting every brand
+            # (Shobha IVF reported 656 for a true 328; Kotak Bank 13,342 for
+            # 6,671). Accept BOTH spellings so the aggregate is actually found.
+            overall_rows = latest_rows_all.filter(
+                Q(platform__isnull=True) | Q(platform=SOV_OVERALL_PLATFORM)
+            )
             latest_rows = overall_rows if overall_rows.exists() else latest_rows_all
 
         # Aggregate by brand, so a fallback across several platforms yields one

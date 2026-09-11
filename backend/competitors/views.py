@@ -787,7 +787,14 @@ def competitive_strength_analysis(request):
         position_data['you'] = round(position_score, 0)
         for idx, comp in enumerate(competitors):
             comp_name = normalize_brand_name(comp.name)
-            comp_pos_score = 100.0 - (float(comp.average_position or 0) * 10.0)
+            # Mirror the own-brand guard directly above: a competitor with no
+            # measured position (average_position 0/NULL) must score 0, not the
+            # perfect 100 that `100 - 0*10` produces. Without this a competitor
+            # that was never ranked outscored every competitor that actually was.
+            comp_avg_position = float(comp.average_position or 0)
+            comp_pos_score = (
+                100.0 - (comp_avg_position * 10.0) if comp_avg_position > 0 else 0.0
+            )
             comp_pos_score = max(0.0, min(100.0, comp_pos_score))
             position_data[comp_name] = round(comp_pos_score, 0)
         metrics.append(position_data)

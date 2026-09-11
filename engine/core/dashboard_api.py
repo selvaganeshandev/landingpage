@@ -75,6 +75,27 @@ def get_period_type(days):
         return 'monthly'
 
 
+def latest_day_total(snapshot_qs, field):
+    """Sum `field` across platforms on the MOST RECENT snapshot date in `snapshot_qs`.
+
+    Headline mentions/citations used to be Sum() over the whole window, which
+    added every tracking run together: a domain swept four times in 30 days
+    reported roughly four periods stacked (~19k where the latest run was ~5k),
+    and the figure grew with how often tracking ran rather than with visibility.
+    Snapshots are per (platform x date), so the current standing is the latest
+    date summed across its platforms — which is also what the Share of Voice
+    card reports, so the two screens finally agree.
+
+    Returns 0 for an empty queryset.
+    """
+    latest = snapshot_qs.aggregate(d=Max('snapshot_date'))['d']
+    if latest is None:
+        return 0
+    return snapshot_qs.filter(snapshot_date=latest).aggregate(
+        total=Sum(field)
+    )['total'] or 0
+
+
 def get_period_types_for_query(days):
     """
     Get list of period_types to query based on requested days.
@@ -178,23 +199,14 @@ def dashboard_summary(request):
         period_type__in=period_types
     ).exclude(platform__isnull=True).exclude(platform='')  # Only use platform-specific snapshots
     
-    # Aggregate metrics from snapshots (will be recalculated from raw data if snapshots have no mentions)
-    total_mentions = snapshot_qs.aggregate(
-        total=Sum('mentions')
-    )['total'] or 0
-    
-    total_citations = snapshot_qs.aggregate(
-        total=Sum('citations')
-    )['total'] or 0
-    
-    # Previous period metrics for change calculation
-    prev_total_mentions = prev_snapshot_qs.aggregate(
-        total=Sum('mentions')
-    )['total'] or 0
-    
-    prev_total_citations = prev_snapshot_qs.aggregate(
-        total=Sum('citations')
-    )['total'] or 0
+    # Headline metrics: the latest tracking date in the window, NOT every date
+    # summed. See latest_day_total() for why stacking was wrong.
+    total_mentions = latest_day_total(snapshot_qs, 'mentions')
+    total_citations = latest_day_total(snapshot_qs, 'citations')
+
+    # Previous period, measured the same way so the change is like-for-like.
+    prev_total_mentions = latest_day_total(prev_snapshot_qs, 'mentions')
+    prev_total_citations = latest_day_total(prev_snapshot_qs, 'citations')
     
     # Calculate weighted average position and visibility score
     # First check if we have snapshots with actual mentions
