@@ -47,6 +47,14 @@ export interface AuthState {
   refreshToken: string | null;
   isAuthenticated: boolean;
   isLoading: boolean;
+  /** This browser held a session that has since gone away — an expiry.
+   *
+   *  Distinguishes the two reasons `isAuthenticated` can be false. Without it
+   *  a first-time visitor opening the app was told "Session Expired — your
+   *  session has timed out", about a session they never had. Set when stored
+   *  tokens are found at startup, and on a successful login; stays false for
+   *  someone who has never signed in on this browser. */
+  sessionEnded: boolean;
 }
 
 export interface ApiError {

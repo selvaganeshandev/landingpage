@@ -20,7 +20,10 @@ type AuthAction =
   | { type: 'LOGOUT' }
   | { type: 'UPDATE_USER'; payload: User }
   | { type: 'UPDATE_PERMISSIONS'; payload: Permission[] }
-  | { type: 'SET_LOADING'; payload: boolean };
+  | { type: 'SET_LOADING'; payload: boolean }
+  // This browser had a session and no longer does, so the guard can say
+  // "expired" instead of greeting a first-time visitor with it.
+  | { type: 'SESSION_ENDED' };
 
 // Action rights that sit under a parent module rather than granting page
 // access of their own. Kept in sync with UserPermission.MODULE_CHOICES.
@@ -41,6 +44,7 @@ const initialState: AuthState = {
   refreshToken: null,
   isAuthenticated: false,
   isLoading: true,
+  sessionEnded: false,
 };
 
 // Auth reducer
@@ -60,6 +64,8 @@ function authReducer(state: AuthState, action: AuthAction): AuthState {
         refreshToken: action.payload.refreshToken,
         isAuthenticated: true,
         isLoading: false,
+        // From here on, losing auth means it expired rather than never existed.
+        sessionEnded: true,
       };
     case 'LOGIN_FAILURE':
       return {
@@ -80,6 +86,10 @@ function authReducer(state: AuthState, action: AuthAction): AuthState {
         refreshToken: null,
         isAuthenticated: false,
         isLoading: false,
+        // Signing out on purpose is not an expiry. Without this reset, logging
+        // out and then opening any app link showed "your session has timed out
+        // for security reasons" to someone who simply clicked Log out.
+        sessionEnded: false,
       };
     case 'UPDATE_USER':
       return {
@@ -95,6 +105,11 @@ function authReducer(state: AuthState, action: AuthAction): AuthState {
       return {
         ...state,
         isLoading: action.payload,
+      };
+    case 'SESSION_ENDED':
+      return {
+        ...state,
+        sessionEnded: true,
       };
     default:
       return state;
@@ -180,12 +195,18 @@ export function AuthProvider({ children }: AuthProviderProps) {
             }
           }
         } catch (error) {
-          // Token is invalid, clear it and require re-login
+          // Token is invalid, clear it and require re-login. This browser DID
+          // hold a session, so this is a genuine expiry and the guard should
+          // say so.
           localStorage.removeItem('access_token');
           localStorage.removeItem('refresh_token');
+          dispatch({ type: 'SESSION_ENDED' });
           dispatch({ type: 'SET_LOADING', payload: false });
         }
       } else {
+        // No tokens at all: nobody has signed in on this browser. A first-time
+        // visitor lands here, and must be sent to sign-in — not told that a
+        // session they never had has timed out.
         dispatch({ type: 'SET_LOADING', payload: false });
       }
     };
@@ -403,14 +424,19 @@ export function ProtectedRoute({
   requiredRoles,
   fallback = <div>Access denied</div>
 }: ProtectedRouteProps) {
-  const { isAuthenticated, isLoading, checkPermission, user } = useAuth();
+  const { isAuthenticated, isLoading, checkPermission, user, sessionEnded } = useAuth();
 
   if (isLoading) {
     return <PageLoader />;
   }
 
   if (!isAuthenticated) {
-    return <Navigate to="/session-expired" replace />;
+    // "Not signed in" has two causes and they need different answers. Someone
+    // whose session ran out gets told that; a first-time visitor — who reaches
+    // this guard just by opening the app link before signing in — gets the
+    // sign-in page, not "your session has timed out for security reasons"
+    // about a session they never had.
+    return <Navigate to={sessionEnded ? '/session-expired' : '/signin'} replace />;
   }
 
   if (requiredRoles && !requiredRoles.includes(user?.role ?? '')) {
