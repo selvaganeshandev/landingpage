@@ -1296,6 +1296,22 @@ class PromptAnalyticsProcessor:
                 except Exception as sync_error:
                     logger.error(f"[Followups] Competitor sync failed for {domain.id}: {sync_error}")
 
+                # ---- Share of voice ------------------------------------------
+                # Rewrite the domain's share-of-voice snapshot from the fresh
+                # counts NOW, rather than waiting for a competitor to be
+                # processed. That only happened when the run surfaced a NEW
+                # competitor: re-running the same prompts (a weekly sweep, or a
+                # duplicate upload) found none, so the dashboard kept showing
+                # last month's share beside this month's mentions — Kotak Bank
+                # ran on 17 Aug and its share stayed dated 11 Aug. No AI calls;
+                # it sums mention counts already in the analytics tables.
+                try:
+                    from .competitor_processor import CompetitorProcessor
+                    sov = CompetitorProcessor().recalculate_share_of_voice(domain.id)
+                    logger.info(f"✅ [Followups] Share of voice rewritten for domain {domain.id}: {sov}")
+                except Exception as sov_error:
+                    logger.error(f"[Followups] Share of voice rewrite failed for {domain.id}: {sov_error}")
+
             # ---- Misinformation / citations ----------------------------------
             # The processor skips any URL crawled in the last 24h, so a rerun
             # costs fetches only for citations that are actually new.

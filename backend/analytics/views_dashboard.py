@@ -1306,7 +1306,75 @@ def dashboard_summary(request):
         return round(current_share - baseline_shares[competitor_id], 2)
 
     share_of_voice = None
-    if sov_qs.exists():
+
+    # Live share of voice over the SAME window the mentions card uses.
+    #
+    # The card used to read the latest stored snapshot, which is a cumulative
+    # all-time count taken whenever a competitor last happened to be processed.
+    # Beside a mentions card that counts only the selected window, that produced
+    # "Mentions 20 / Share of Voice 1875" for Hinduja Hospital — two honest
+    # numbers answering different questions. Whenever the window holds live
+    # data (the same condition under which the mentions card is live), share is
+    # now computed from the analytics tables for that window: your mentions are
+    # the very figure the mentions card shows, competitors' come from their
+    # analytics over the same dates, so the two cards agree by construction.
+    # Historical windows with no live rows keep the stored-snapshot path below.
+    if total_mentions > 0 and not using_snapshot_history:
+        from competitors.models import CompetitorPromptAnalytics
+        from django.db.models.functions import Coalesce as _Coalesce
+        start_dt_sov = timezone.make_aware(datetime.combine(start_date, datetime.min.time()))
+        end_dt_sov = timezone.make_aware(datetime.combine(end_date, datetime.max.time()))
+        comp_qs = CompetitorPromptAnalytics.objects.annotate(
+            _window_dt=_Coalesce('tracked_at', 'created_at'),
+        ).filter(
+            competitor__domain_id=domain_id,
+            track_status='COMP',
+            _window_dt__gte=start_dt_sov,
+            _window_dt__lte=end_dt_sov,
+        )
+        if platform_filter:
+            comp_qs = comp_qs.filter(platform=platform_filter)
+        comp_mentions = {
+            r['competitor_id']: int(r['total'] or 0)
+            for r in comp_qs.values('competitor_id').annotate(total=Sum('mention_count'))
+        }
+        live_total = int(total_mentions) + sum(comp_mentions.values())
+
+        def _live_share(m):
+            return round(m / live_total * 100, 2) if live_total else 0.0
+
+        _competitors_by_id = Competitor.objects.in_bulk(list(comp_mentions))
+        live_competitors = []
+        for cid, m in comp_mentions.items():
+            c = _competitors_by_id.get(cid)
+            if c is None or m <= 0:
+                continue
+            share = _live_share(m)
+            live_competitors.append({
+                'competitor_id': cid, 'name': c.name, 'url': c.url,
+                'share_percentage': share, 'mention_count': m,
+                'market_position': None, 'trend': _share_trend(cid, share),
+            })
+        live_competitors.sort(key=lambda c: c['share_percentage'], reverse=True)
+        for rank, c in enumerate(live_competitors, start=2):
+            c['market_position'] = rank
+        your_share = _live_share(int(total_mentions))
+        share_of_voice = {
+            'date': end_date.isoformat(),
+            'brands': [{
+                'competitor_id': None, 'name': 'You', 'url': '',
+                'share_percentage': your_share, 'mention_count': int(total_mentions),
+                'market_position': 1, 'trend': _share_trend(None, your_share), 'is_you': True,
+            }] + [dict(c, is_you=False) for c in live_competitors],
+            'your_brand': {
+                'share_percentage': your_share,
+                'mention_count': int(total_mentions),
+                'market_position': 1,
+            },
+            'competitors': live_competitors,
+        }
+
+    if share_of_voice is None and sov_qs.exists():
         latest_day = sov_qs.order_by('-timestamp').first().timestamp
         latest_rows_all = sov_qs.filter(timestamp=latest_day)
 
