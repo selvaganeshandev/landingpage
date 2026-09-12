@@ -4,7 +4,7 @@ from rest_framework.response import Response
 from rest_framework.permissions import IsAuthenticated
 from datetime import timedelta
 from django.utils import timezone
-from django.db.models import Sum, Avg, Count
+from django.db.models import Sum, Avg, Count, Max
 from domains.models import Domain
 from .models import SentimentAnalytics, ShareOfVoiceAnalytics
 from .serializers import SentimentAnalyticsSerializer, ShareOfVoiceAnalyticsSerializer
@@ -27,6 +27,33 @@ class SentimentAnalyticsViewSet(viewsets.ModelViewSet):
             SentimentAnalytics.objects.all(), user, self.request
         )
     
+    def _sentiment_window(self, domain_id, days):
+        """The date window the page should read, and whether it had to fall back.
+
+        The page asks for the last `days` days. Sentiment rows are only written
+        when a domain is processed, so a domain that has not been swept recently
+        has nothing in that window — and 28 of 74 production domains were showing
+        0% across every card while months of real sentiment sat just outside it.
+
+        When the requested window is empty, anchor the same-length window on the
+        newest snapshot the domain has instead, and say so: the caller gets
+        `as_of` (the snapshot date) and `stale=True`, and shows the figures with
+        that date rather than a blank page. A domain with no rows at all still
+        returns nothing.
+        """
+        today = timezone.now().date()
+        start = today - timedelta(days=days)
+        in_window = self.get_queryset().filter(
+            domain_id=domain_id, snapshot_date__gte=start, snapshot_date__lte=today,
+        ).exists()
+        if in_window:
+            return start, today, today, False
+        latest = self.get_queryset().filter(domain_id=domain_id).aggregate(
+            m=Max('snapshot_date'))['m']
+        if latest is None:
+            return start, today, None, False
+        return latest - timedelta(days=days), latest, latest, True
+
     @action(detail=False, methods=['get'])
     def by_domain(self, request):
         """Get sentiment analytics for a specific domain."""
@@ -39,13 +66,16 @@ class SentimentAnalyticsViewSet(viewsets.ModelViewSet):
                 status=status.HTTP_400_BAD_REQUEST
             )
         
-        start_date = timezone.now().date() - timedelta(days=days)
+        start_date, end_date, as_of, stale = self._sentiment_window(domain_id, days)
         queryset = self.get_queryset().filter(
             domain_id=domain_id,
-            snapshot_date__gte=start_date
+            snapshot_date__gte=start_date,
+            snapshot_date__lte=end_date,
         ).order_by('-snapshot_date', 'theme')
         
         serializer = self.get_serializer(queryset, many=True)
+        # A list response cannot carry the window; the page reads `as_of` from
+        # /summary/, which is always requested alongside this one.
         return Response(serializer.data)
     
     @action(detail=False, methods=['get'])
@@ -60,15 +90,22 @@ class SentimentAnalyticsViewSet(viewsets.ModelViewSet):
                 status=status.HTTP_400_BAD_REQUEST
             )
         
-        today = timezone.now().date()
-        start_date = today - timedelta(days=days)
+        start_date, end_date, as_of, stale = self._sentiment_window(domain_id, days)
         
-        # Current period
-        queryset = self.get_queryset().filter(
+        # Current period: the NEWEST snapshot inside the window, not every row in
+        # it. Each snapshot's mention_count is a cumulative total re-recorded on
+        # every processing day, so summing across days counted the same mentions
+        # once per snapshot — two days in the window read 660 for a true 330,
+        # and a weekly sweep would have read ~4x. Same rule views_dashboard uses.
+        in_window = self.get_queryset().filter(
             domain_id=domain_id,
             snapshot_date__gte=start_date,
-            snapshot_date__lte=today
+            snapshot_date__lte=end_date
         )
+        newest = in_window.aggregate(d=Max('snapshot_date'))['d']
+        queryset = in_window.filter(snapshot_date=newest) if newest else in_window.none()
+        if newest:
+            as_of = newest
         
         # Calculate weighted averages for current period
         total_mentions = queryset.aggregate(Sum('mention_count'))['mention_count__sum'] or 0
@@ -82,7 +119,9 @@ class SentimentAnalyticsViewSet(viewsets.ModelViewSet):
                 'positive_change': 0,
                 'neutral_change': 0,
                 'negative_change': 0,
-                'themes': []
+                'themes': [],
+                'as_of': as_of,
+                'stale': stale,
             })
         
         # Calculate weighted percentages for current period
@@ -96,13 +135,17 @@ class SentimentAnalyticsViewSet(viewsets.ModelViewSet):
             (float(item.negative_percentage) * item.mention_count) for item in queryset
         ) / total_mentions
         
-        # Previous period (same duration before current period)
+        # Previous period (same duration before current period) — likewise the
+        # newest snapshot in THAT window, so the change compares one reading
+        # against one reading rather than one against a pile.
         prev_start_date = start_date - timedelta(days=days)
-        prev_queryset = self.get_queryset().filter(
+        prev_window = self.get_queryset().filter(
             domain_id=domain_id,
             snapshot_date__gte=prev_start_date,
             snapshot_date__lt=start_date
         )
+        prev_newest = prev_window.aggregate(d=Max('snapshot_date'))['d']
+        prev_queryset = prev_window.filter(snapshot_date=prev_newest) if prev_newest else prev_window.none()
         
         # Calculate weighted averages for previous period
         prev_total_mentions = prev_queryset.aggregate(Sum('mention_count'))['mention_count__sum'] or 0
@@ -140,7 +183,11 @@ class SentimentAnalyticsViewSet(viewsets.ModelViewSet):
             'positive_change': positive_change,
             'neutral_change': neutral_change,
             'negative_change': negative_change,
-            'themes': list(themes)
+            'themes': list(themes),
+            # Date the figures describe, and whether the requested window was
+            # empty and the newest snapshot was used instead.
+            'as_of': as_of,
+            'stale': stale,
         })
 
 

@@ -26,6 +26,27 @@ from .telemetry import observe, trace_metadata
 
 logger = logging.getLogger(__name__)
 
+# Theme that sentiment for an UNTHEMED prompt group is filed under. Sentiment is
+# aggregated per theme, and the writer used to return early when a group had
+# none — so every mention in such a group was scored and then silently dropped.
+# Uploaded prompts land in a single unthemed group whenever AI theme-grouping
+# fails, which is how 12 production domains (Kotak Bank, Kia Motors, Shobha IVF
+# ...) came to have 1,200+ scored mentions and an empty Sentiment page.
+SENTIMENT_FALLBACK_THEME = 'General'
+
+
+def sentiment_theme_for(group) -> str:
+    """The theme this group's sentiment is filed under."""
+    return group.theme or SENTIMENT_FALLBACK_THEME
+
+
+def sentiment_group_filter(group) -> Q:
+    """Q selecting every group in the domain that shares this group's sentiment
+    theme — the real theme, or all untitled groups for the fallback."""
+    if group.theme:
+        return Q(prompt__group__theme=group.theme)
+    return Q(prompt__group__theme__isnull=True) | Q(prompt__group__theme='')
+
 
 def _extract_competitors_for_domain(domain: Domain) -> Tuple[int, List[str]]:
     """
@@ -988,13 +1009,13 @@ class PromptAnalyticsProcessor:
             today = date.today()
             self._create_group_metric_snapshots(group, analytics, today, period_type='daily')
             
-            # Update SentimentAnalytics for this group's theme
-            if group.theme:
-                try:
-                    self._update_sentiment_analytics_for_theme(group, analytics)
-                except Exception as sentiment_error:
-                    logger.error(f"Error updating sentiment analytics for group {group.id}: {str(sentiment_error)}")
-                    # Don't fail the entire aggregation if sentiment update fails
+            # Update SentimentAnalytics for this group's theme. Untitled groups
+            # are filed under SENTIMENT_FALLBACK_THEME rather than skipped.
+            try:
+                self._update_sentiment_analytics_for_theme(group, analytics)
+            except Exception as sentiment_error:
+                logger.error(f"Error updating sentiment analytics for group {group.id}: {str(sentiment_error)}")
+                # Don't fail the entire aggregation if sentiment update fails
 
             # Update domain aggregating across all completed analytics
             # Use select_for_update to prevent concurrent updates from overwriting each other
@@ -1335,19 +1356,16 @@ class PromptAnalyticsProcessor:
         Aggregates sentiment data from ALL groups with the same theme in the domain
         """
         try:
-            theme = group.theme
+            theme = sentiment_theme_for(group)
             domain = group.domain
             today = date.today()
-            
-            if not theme:
-                return
             
             # Query ALL PromptAnalytics for ALL groups with this theme in the domain
             # This ensures we aggregate across all groups, not just one group
             from shared_models.models import PromptAnalytics as PA
             analytics_qs = PA.objects.filter(
+                sentiment_group_filter(group),
                 prompt__group__domain=domain,
-                prompt__group__theme=theme,
                 prompt__track_status='COMP'
             )
             
@@ -1565,7 +1583,7 @@ class PromptAnalyticsProcessor:
             )
             
         except Exception as e:
-            logger.error(f"Error updating sentiment analytics for theme '{group.theme}': {str(e)}")
+            logger.error(f"Error updating sentiment analytics for theme '{sentiment_theme_for(group)}': {str(e)}")
     
     def _calculate_visibility_score(
         self, 

@@ -66,6 +66,11 @@ const Sentiment = () => {
     positive_change?: number;
     neutral_change?: number;
     negative_change?: number;
+    /** Snapshot date the figures describe. When `stale` is true the last 30
+     *  days held nothing and the backend fell back to the newest snapshot, so
+     *  the page says which date it is showing instead of a blank 0%. */
+    as_of?: string | null;
+    stale?: boolean;
   } | null>(null);
   const [rows, setRows] = useState<SentimentRow[]>([]);
   const [competitorRows, setCompetitorRows] = useState<any[]>([]);
@@ -310,6 +315,13 @@ const Sentiment = () => {
           <p className="text-muted-foreground mt-2">
             Deep dive into brand sentiment across AI platforms
           </p>
+          {summary?.stale && summary.as_of && (
+            // Honest about age: these are real figures, just not from the last
+            // 30 days. Better than the 0% every card showed before.
+            <p className="mt-2 inline-flex items-center rounded-md border border-amber-300 bg-amber-50 px-2.5 py-1 text-xs font-medium text-amber-800 dark:border-amber-700 dark:bg-amber-950 dark:text-amber-200">
+              Showing the latest available sentiment, recorded {new Date(summary.as_of).toLocaleDateString(undefined, { day: 'numeric', month: 'short', year: 'numeric' })}. No new prompt runs in the last {DAYS} days.
+            </p>
+          )}
         </div>
         <div className="flex items-center gap-4">
           {/* Outline, like the export buttons on Citations, Mentions, Prompts
