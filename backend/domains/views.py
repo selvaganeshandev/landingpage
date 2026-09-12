@@ -93,6 +93,10 @@ FREE_INTERNAL_MODELS = [
     'minimax/minimax-m3:free',
     'google/gemma-4-31b-it:free',
     'z-ai/glm-5.2:free',
+    # Free slugs get retired without notice (minimax-m3 already 404s). One more
+    # rung at the bottom, verified against OpenRouter on 2026-09-11, so the
+    # ladder still has a working step when the ones above it are gone.
+    'nex-agi/nex-n2.5-mini:free',
 ]
 
 
