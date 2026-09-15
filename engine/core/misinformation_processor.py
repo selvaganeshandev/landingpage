@@ -688,7 +688,11 @@ class MisinformationProcessor:
                 self._create_alert(
                     pa=pa,
                     citation_url=citation_url,
-                    alert_type=result.alert_type,
+                    # The model occasionally flags an issue but leaves alert_type
+                    # null; the column is NOT NULL and the insert failed, losing
+                    # the finding (2 such rows in the production log). A flagged
+                    # issue with no category is still misinformation.
+                    alert_type=result.alert_type or 'misinformation',
                     severity=result.severity,
                     llm_claim=result.llm_claim,
                     source_content=result.source_content,
