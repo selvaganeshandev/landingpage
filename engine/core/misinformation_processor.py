@@ -3,8 +3,11 @@ Misinformation Processing Module
 Handles misinformation detection and citation scanning in the engine.
 """
 import logging
+import re
+import threading
 from datetime import date
 from typing import Optional, List
+from django.conf import settings
 from django.db import transaction
 from django.utils import timezone
 from django.apps import apps
@@ -21,6 +24,39 @@ from .misinformation_services import (
 from .telemetry import observe, trace_metadata
 
 logger = logging.getLogger(__name__)
+
+
+# Scan tunables. All read from settings so production can turn a knob
+# without a deploy; the defaults are the values measured to matter.
+#
+# A scan is one crawl plus one model call per cited URL, done strictly one
+# after another. On production that meant UPES University (78 answers,
+# ~1,000 distinct citations) had run for 4.5 hours with 913 URLs still to go,
+# and earlier domains took 9-43 hours. Four things bring that to minutes:
+#   MISINFO_MAX_URLS_PER_ANSWER  answers cite ~17 URLs; the first few are what
+#                                the model relied on, the tail is padding.
+#   MISINFO_RECRAWL_HOURS        a source checked this week does not need
+#                                checking again on the next run.
+#   MISINFO_SKIP_IF_BRAND_ABSENT a page that never names the brand has nothing
+#                                to be wrong about it, so the model call —
+#                                the slow, paid step — is skipped.
+#   MISINFO_SCAN_CONCURRENCY     every (answer, URL) pair in the scan is queued
+#                                to one pool. Two answers often cite the same
+#                                page, so work on a given URL is serialised with
+#                                a per-URL lock — different URLs run in parallel,
+#                                the same URL never does, and the second caller
+#                                finds it already crawled and skips.
+MISINFO_MAX_URLS_PER_ANSWER = int(getattr(settings, 'MISINFO_MAX_URLS_PER_ANSWER', 10))
+MISINFO_RECRAWL_HOURS = int(getattr(settings, 'MISINFO_RECRAWL_HOURS', 168))
+MISINFO_SKIP_IF_BRAND_ABSENT = bool(getattr(settings, 'MISINFO_SKIP_IF_BRAND_ABSENT', True))
+MISINFO_SCAN_CONCURRENCY = int(getattr(settings, 'MISINFO_SCAN_CONCURRENCY', 8))
+
+# Words that are part of many brand names and prove nothing on their own.
+_GENERIC_BRAND_WORDS = frozenset((
+    'the', 'and', 'of', 'ltd', 'limited', 'inc', 'llc', 'pvt', 'private', 'co',
+    'company', 'group', 'india', 'bank', 'university', 'hospital', 'insurance',
+    'motors', 'services', 'solutions', 'technologies', 'international', 'global',
+))
 
 
 class MisinformationProcessor:
@@ -116,18 +152,57 @@ class MisinformationProcessor:
             citations_found = 0
             alerts_generated = 0
 
+            # Gather every (answer, URL) pair up front, then push them all through
+            # one pool. Doing answers one at a time — even with the URLs inside
+            # each answer in parallel — left most workers idle, since an answer
+            # cites only a handful of pages.
+            work = []
             for pa in prompt_analytics_qs:
                 try:
-                    result = self._process_prompt_analytics(
-                        pa, domain, CitationURL, CitationContent, CitationMention, MisinformationAlert, scan,
-                        own_links_only=own_links_only
-                    )
-                    prompts_scanned += 1
-                    citations_found += result['citations']
-                    alerts_generated += result['alerts']
+                    urls = self._urls_for(pa, domain, own_links_only)
                 except Exception as e:
-                    logger.error(f"Error processing prompt analytics {pa.id}: {e}")
+                    logger.error(f"Error extracting URLs for prompt analytics {pa.id}: {e}")
                     continue
+                prompts_scanned += 1
+                citations_found += len(urls)
+                for position, url_data in enumerate(urls, start=1):
+                    work.append((pa, position, url_data))
+
+            self._url_locks = {}
+            self._url_locks_guard = threading.Lock()
+
+            def _one(item):
+                pa, position, url_data = item
+                key = url_data['url'].strip().lower()
+                with self._url_locks_guard:
+                    lock = self._url_locks.setdefault(key, threading.Lock())
+                try:
+                    with lock:
+                        return self._process_url(
+                            pa, url_data, position, domain,
+                            CitationURL, CitationContent, CitationMention, MisinformationAlert, scan
+                        )
+                except Exception as e:
+                    logger.error(f"Error processing URL {url_data['url']}: {e}")
+                    return False
+                finally:
+                    # Each worker thread holds its own DB connection; hand it
+                    # back rather than letting it idle until the thread dies.
+                    from django.db import connection
+                    connection.close()
+
+            workers = max(1, min(MISINFO_SCAN_CONCURRENCY, len(work)))
+            logger.info(f"Scanning {len(work)} URL(s) across {prompts_scanned} answer(s) with {workers} worker(s)")
+            if workers == 1:
+                for item in work:
+                    if _one(item):
+                        alerts_generated += 1
+            else:
+                from concurrent.futures import ThreadPoolExecutor
+                with ThreadPoolExecutor(max_workers=workers, thread_name_prefix='misinfo') as pool:
+                    for created in pool.map(_one, work):
+                        if created:
+                            alerts_generated += 1
 
             # Update scan record
             scan.status = 'completed'
@@ -171,6 +246,24 @@ class MisinformationProcessor:
                 domain_fresh.save(update_fields=['misinformation_scan_status'])
             raise
 
+    def _urls_for(self, pa: PromptAnalytics, domain: Domain, own_links_only: bool = False) -> list:
+        """The URLs to check for one answer, after the own-site filter and the
+        per-answer cap. Shared by the scan loop and _process_prompt_analytics."""
+        response_text = pa.context_summary or ""
+        citation_list = pa.citation_list or []
+        urls = self.url_extractor.extract_all(response_text, citation_list)
+        if own_links_only:
+            urls = [u for u in urls if self._is_own_site_url(u['url'], domain)]
+        if MISINFO_MAX_URLS_PER_ANSWER > 0 and len(urls) > MISINFO_MAX_URLS_PER_ANSWER:
+            logger.info(
+                f"Prompt analytics {pa.id}: {len(urls)} URLs, checking the first "
+                f"{MISINFO_MAX_URLS_PER_ANSWER} (MISINFO_MAX_URLS_PER_ANSWER)"
+            )
+            urls = urls[:MISINFO_MAX_URLS_PER_ANSWER]
+        if urls:
+            logger.info(f"Found {len(urls)} URLs in prompt analytics {pa.id}")
+        return urls
+
     def _process_prompt_analytics(
         self, pa: PromptAnalytics, domain: Domain,
         CitationURL, CitationContent, CitationMention, MisinformationAlert, scan,
@@ -188,37 +281,39 @@ class MisinformationProcessor:
         Returns:
             Dict with 'citations' and 'alerts' counts
         """
-        # Extract URLs from response
-        response_text = pa.context_summary or ""
-        citation_list = pa.citation_list or []
-
-        urls = self.url_extractor.extract_all(response_text, citation_list)
-
-        if own_links_only:
-            # Own-site host match, not _is_brand_related_url: that also accepts
-            # any URL with the brand name in its path, which is a third-party
-            # article about the brand — not a link we own or can fix.
-            urls = [u for u in urls if self._is_own_site_url(u['url'], domain)]
-
+        urls = self._urls_for(pa, domain, own_links_only)
         if not urls:
             logger.debug(f"No URLs found in prompt analytics {pa.id}")
             return {'citations': 0, 'alerts': 0}
-
-        logger.info(f"Found {len(urls)} URLs in prompt analytics {pa.id}")
         citations_count = len(urls)
         alerts_count = 0
 
-        for position, url_data in enumerate(urls, start=1):
+        def _one(position, url_data):
             try:
-                alert_created = self._process_url(
+                return self._process_url(
                     pa, url_data, position, domain,
                     CitationURL, CitationContent, CitationMention, MisinformationAlert, scan
                 )
-                if alert_created:
-                    alerts_count += 1
             except Exception as e:
                 logger.error(f"Error processing URL {url_data['url']}: {e}")
-                continue
+                return False
+            finally:
+                # Each worker thread gets its own DB connection; return it to
+                # the pool rather than letting it idle until the thread dies.
+                from django.db import connection
+                connection.close()
+
+        workers = max(1, min(MISINFO_SCAN_CONCURRENCY, len(urls)))
+        if workers == 1:
+            for position, url_data in enumerate(urls, start=1):
+                if _one(position, url_data):
+                    alerts_count += 1
+        else:
+            from concurrent.futures import ThreadPoolExecutor
+            with ThreadPoolExecutor(max_workers=workers, thread_name_prefix='misinfo') as pool:
+                for created in pool.map(lambda pu: _one(*pu), enumerate(urls, start=1)):
+                    if created:
+                        alerts_count += 1
 
         return {'citations': citations_count, 'alerts': alerts_count}
 
@@ -275,9 +370,9 @@ class MisinformationProcessor:
         if not created and citation_url.crawl_status == 'success':
             # URL already processed successfully, check if content is fresh
             if citation_url.last_crawled_at:
-                # Skip if crawled within last 24 hours
+                # Skip if crawled recently (MISINFO_RECRAWL_HOURS, default a week)
                 age = timezone.now() - citation_url.last_crawled_at
-                if age.total_seconds() < 86400:
+                if age.total_seconds() < MISINFO_RECRAWL_HOURS * 3600:
                     logger.debug(f"Skipping recently crawled URL: {url}")
                     return False
 
@@ -411,11 +506,46 @@ class MisinformationProcessor:
         # Compare LLM claims against source content
         alert_created = False
         if extracted:
+            if MISINFO_SKIP_IF_BRAND_ABSENT and not self._mentions_brand(extracted, domain):
+                logger.info(f"Source never names the brand, comparison skipped: {url}")
+                return False
             alert_created = self._compare_content(
                 pa, citation_url, extracted, url, domain, MisinformationAlert, scan
             )
 
         return alert_created
+
+    def _mentions_brand(self, text: str, domain: Domain) -> bool:
+        """Does this page mention the brand at all?
+
+        A page that never names the brand cannot carry misinformation about it,
+        and the comparison model call is the slow, paid step of the scan — so
+        it is only made when there is something to compare. Matches the full
+        name, the site's host label ("upes" for upes.ac.in), or any
+        distinctive word of the name; generic words ("university", "bank")
+        do not count on their own. Errs towards checking: anything ambiguous
+        returns True.
+        """
+        t = (text or '').lower()
+        if not t:
+            return False
+        name = (domain.name or '').strip().lower()
+        if name and name in t:
+            return True
+        host = self._bare_host(domain.url or '')
+        label = host.split('.')[0] if host else ''
+        if label and len(label) >= 3 and label in t:
+            return True
+        words = [w for w in re.findall(r'[a-z0-9]+', name) if len(w) >= 3 and w not in _GENERIC_BRAND_WORDS]
+        if not words:
+            return True   # nothing distinctive to test against; do not skip
+        return any(w in t for w in words)
+
+    @staticmethod
+    def _bare_host(url: str) -> str:
+        h = (url or '').strip().lower()
+        h = re.sub(r'^[a-z]+://', '', h).split('/')[0].split('@')[-1].split(':')[0]
+        return h[4:] if h.startswith('www.') else h
 
     def _is_own_site_url(self, url: str, domain: Domain) -> bool:
         """True only when the URL is on the brand's own host (or a subdomain)."""

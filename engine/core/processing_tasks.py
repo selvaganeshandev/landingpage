@@ -1239,54 +1239,73 @@ def sync_domain_volume_task(self, domain_id: int):
 
 @shared_task(bind=True, ignore_result=True, max_retries=2)
 def reap_stale_domain_scans(self):
-    """Release domains whose scan task died mid-run.
+    """Fail misinformation scans whose task died, and release their domains.
 
-    A misinformation scan sets misinformation_scan_status='SCANNING' and only
-    clears it on completion. If the worker is restarted while the task is in
-    flight — a deploy, an OOM, a kill -9 — the status stays SCANNING forever.
-    Nothing retries it, because the trigger skips domains that are already
-    scanning, so the domain is permanently locked out and the UI shows
-    "Processing Your Brand" indefinitely.
+    A scan writes a MisinformationScan row at 'running' and the domain's
+    misinformation_scan_status='SCANNING', and clears both only on completion.
+    If the worker is restarted mid-run — a deploy, an OOM, a kill -9 — nothing
+    ever finishes them, and the trigger skips domains with a running scan, so
+    the domain is locked out for good and the UI shows "Processing" forever.
+    UTI Mutual Fund and Racold were stranded this way, Racold for 13 days.
 
-    UTI Mutual Fund and Racold were both stranded this way, Racold for
-    thirteen days. This is the same idea as the prompt scheduler's reaper for
-    groups stuck in SCHD.
+    The earlier version of this task keyed off the DOMAIN field alone, on a
+    60-minute threshold, and reset it to READY while leaving the scan row at
+    'running'. Two things went wrong with that once scans started taking
+    hours: a healthy long scan had its domain flipped to READY an hour in (so
+    the field could no longer tell "queued" from "running for hours"), and the
+    stranded rows were never failed — three sat at 'running' for five days.
 
-    Anything still SCANNING past STALE_SCAN_MINUTES with no completion
-    timestamp is assumed dead and reset to READY so it can be picked up again.
+    Now the SCAN ROW is the source of truth. A row still 'running' after
+    STALE_SCAN_HOURS is marked failed and its domain released; a row younger
+    than that is left alone, and so is its domain, however long SCANNING has
+    been showing. Domains at SCANNING with no running row at all (died before
+    the row was written) are released as before.
+
+    Reset rather than re-dispatch: the next completion cycle, or a user
+    pressing Scan, starts it cleanly. Re-queuing from a reaper risks stacking
+    duplicate scans if the original is merely slow.
     """
     from django.utils import timezone
     from datetime import timedelta
-    from shared_models.models import Domain
+    from shared_models.models import Domain, MisinformationScan
 
-    minutes = getattr(settings, 'STALE_SCAN_MINUTES', 60)
-    cutoff = timezone.now() - timedelta(minutes=minutes)
+    hours = getattr(settings, 'STALE_SCAN_HOURS', 12)
+    cutoff = timezone.now() - timedelta(hours=hours)
+    now = timezone.now()
 
     try:
-        stale = Domain.objects.filter(
-            misinformation_scan_status='SCANNING',
-            modified_at__lt=cutoff,
-        )
-        ids = list(stale.values_list('id', flat=True))
-        if not ids:
-            return {'reaped': 0}
+        stale_scans = MisinformationScan.objects.filter(status='running', started_at__lt=cutoff)
+        scan_ids = list(stale_scans.values_list('id', flat=True))
+        dead_domain_ids = list(stale_scans.values_list('domain_id', flat=True).distinct())
+        if scan_ids:
+            stale_scans.update(
+                status='failed',
+                completed_at=now,
+                error_message=f'Reaped: still running after {hours}h, worker presumed dead',
+            )
 
-        # Reset rather than re-dispatch here: the next completion cycle, or a
-        # user pressing Scan, will start it cleanly. Re-queuing from a reaper
-        # risks stacking duplicate scans if the original task is merely slow.
-        Domain.objects.filter(id__in=ids).update(
-            misinformation_scan_status='READY',
-            modified_at=timezone.now(),
+        # Domains showing SCANNING with no live scan row behind them.
+        live_domain_ids = set(
+            MisinformationScan.objects.filter(status='running').values_list('domain_id', flat=True)
         )
-        logger.warning(
-            "[Reaper] Reset %s domain(s) stuck in SCANNING for over %s min: %s",
-            len(ids), minutes, ids,
-        )
-        return {'reaped': len(ids), 'domain_ids': ids}
+        orphaned = Domain.objects.filter(misinformation_scan_status='SCANNING').exclude(id__in=live_domain_ids)
+        orphan_ids = list(orphaned.values_list('id', flat=True))
+
+        release = set(dead_domain_ids) | set(orphan_ids)
+        if release:
+            Domain.objects.filter(id__in=release, misinformation_scan_status='SCANNING').update(
+                misinformation_scan_status='READY',
+                modified_at=now,
+            )
+        if scan_ids or orphan_ids:
+            logger.warning(
+                "[Reaper] Failed %s scan(s) running over %sh: %s; released %s domain(s): %s",
+                len(scan_ids), hours, scan_ids, len(release), sorted(release),
+            )
+        return {'reaped': len(scan_ids), 'scan_ids': scan_ids, 'domain_ids': sorted(release)}
     except Exception as e:
         logger.error(f"[Reaper] Error reaping stale scans: {e}", exc_info=True)
         raise self.retry(exc=e, countdown=120)
-
 
 @shared_task(bind=True, ignore_result=True, max_retries=2)
 def process_prompt_generation(self, run_id: int):

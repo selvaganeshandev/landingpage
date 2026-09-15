@@ -198,6 +198,9 @@ STALE_SCHD_MINUTES = config('STALE_SCHD_MINUTES', default=60, cast=int)
 # Without a reaper the status never clears, the trigger refuses to start a new
 # scan while one is "running", and the domain shows as processing forever.
 STALE_SCAN_MINUTES = config('STALE_SCAN_MINUTES', default=60, cast=int)
+# A misinformation scan still 'running' past this is presumed dead and failed by
+# the reaper. Hours, not minutes: real scans have run for most of a day.
+STALE_SCAN_HOURS = config('STALE_SCAN_HOURS', default=12, cast=int)
 
 # Prompt engine knobs
 # Number of prompts to generate per keyword

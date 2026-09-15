@@ -146,6 +146,12 @@ Be thorough but fair. Only flag genuine issues ABOUT {brand_name}, not minor wor
         except Exception as e:
             raise Exception(f"Failed to initialize internal LLM client: {e}")
 
+    @staticmethod
+    def _reasoning_kwargs() -> dict:
+        """OpenRouter-only `reasoning` hint; api.openai.com rejects the key."""
+        base = getattr(settings, 'OPENROUTER_BASE_URL', '') or ''
+        return {'extra_body': {"reasoning": {"effort": "low"}}} if 'openrouter' in base else {}
+
     def compare(
         self,
         llm_claim: str,
@@ -198,8 +204,16 @@ Be thorough but fair. Only flag genuine issues ABOUT {brand_name}, not minor wor
                     }
                 ],
                 temperature=0.1,  # Low temperature for consistency
-                max_tokens=1000,
-                response_format={"type": "json_object"}
+                # The comparison model (gpt-5-mini via OpenRouter) is a reasoning
+                # model: max_tokens covers its reasoning AND the answer, and the
+                # reasoning is spent first. At 1000 the JSON was routinely cut
+                # off mid-string — 8,068 "Failed to parse LLM response as JSON"
+                # in the production worker log, each one a comparison thrown
+                # away after paying for the crawl and the call. Budget for both
+                # and ask for low reasoning effort, as prompt_generation does.
+                max_tokens=4000,
+                response_format={"type": "json_object"},
+                **self._reasoning_kwargs(),
             )
 
             result_text = response.choices[0].message.content

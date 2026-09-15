@@ -22,6 +22,7 @@ from typing import Optional, Tuple
 from urllib.parse import urlparse, urlencode
 
 import requests
+import threading
 from django.conf import settings
 
 logger = logging.getLogger(__name__)
@@ -73,6 +74,7 @@ class WebCrawler:
         self.use_dynamic = use_dynamic
 
         self._last_request_time = 0
+        self._rate_lock = threading.Lock()
         self._request_count = 0
 
         # Create requests session
@@ -86,14 +88,16 @@ class WebCrawler:
             return
 
         min_interval = 60.0 / self.rate_limit  # seconds between requests
-        elapsed = time.time() - self._last_request_time
-
-        if elapsed < min_interval:
-            sleep_time = min_interval - elapsed
-            logger.debug(f"Rate limiting: sleeping for {sleep_time:.2f}s")
-            time.sleep(sleep_time)
-
-        self._last_request_time = time.time()
+        # The scan now crawls several URLs at once from one crawler instance;
+        # without the lock every thread reads the same _last_request_time and
+        # they all fire together, so the limit is enforced across threads.
+        with self._rate_lock:
+            elapsed = time.time() - self._last_request_time
+            if elapsed < min_interval:
+                sleep_time = min_interval - elapsed
+                logger.debug(f"Rate limiting: sleeping for {sleep_time:.2f}s")
+                time.sleep(sleep_time)
+            self._last_request_time = time.time()
 
     def crawl(self, url: str, dynamic: bool = None) -> Tuple[Optional[str], int, Optional[str]]:
         """
