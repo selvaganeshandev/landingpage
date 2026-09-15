@@ -8,7 +8,7 @@ import { Outlet, useLocation } from "react-router-dom";
 import { useSidebar } from "@/contexts/SidebarContext";
 import { useDomainStore } from "@/stores/domainStore";
 import { useAuth } from "@/contexts/AuthContext";
-import { isDomainProcessing, isCompetitorProcessing, isMisinformationProcessing } from "@/utils/processingStatus";
+import { isDomainProcessing, isCompetitorProcessing } from "@/utils/processingStatus";
 
 export const Layout = () => {
   const [showOnboarding, setShowOnboarding] = useState(false);
@@ -89,7 +89,10 @@ export const Layout = () => {
     }
 
     if (misinformationPages.some(page => currentPath.startsWith(page))) {
-      return isMisinformationProcessing(selectedDomain) || isDomainProcessing(selectedDomain);
+      // Only while the domain's PROMPTS are still processing. A running
+      // misinformation scan no longer hides the page: the scan can take hours,
+      // and the page shows the alerts found so far with a banner instead.
+      return isDomainProcessing(selectedDomain);
     }
 
     if (promptDataPages.some(page => currentPath.startsWith(page))) {

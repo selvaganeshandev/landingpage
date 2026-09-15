@@ -12,7 +12,7 @@ import { NoPromptsYet } from "@/components/NoPromptsYet";
 import { InfoHint, MetricHint } from "@/components/InfoHint";
 import { ProcessingStateCard } from "@/components/ProcessingStateCard";
 import { MisinformationDetailDialog } from "@/components/MisinformationDetailDialog";
-import { isDomainProcessing, isMisinformationProcessing } from "@/utils/processingStatus";
+import { isDomainProcessing } from "@/utils/processingStatus";
 import { ConfigureDetectionDialog } from "@/components/ConfigureDetectionDialog";
 import { ContentComparisonDialog } from "@/components/ContentComparisonDialog";
 import {
@@ -77,6 +77,9 @@ interface DashboardData {
     resolved_change: number;
   };
   scan_status: 'NOT_READY' | 'READY' | 'SCANNING' | 'SCANNED' | 'NO_ISSUES';
+  /** True while a scan row is genuinely running (last 24h). The status field
+   *  alone cannot tell "queued" from "running for hours" — see the backend. */
+  scan_running?: boolean;
   last_scan_at: string | null;
 }
 
@@ -453,10 +456,18 @@ const MisinformationAlerts = () => {
     return <PageLoader />;
   }
 
-  // Show ProcessingStateCard when domain or misinformation scan is processing
-  if (isDomainProcessing(selectedDomain) || isMisinformationProcessing(selectedDomain)) {
+  // Only the domain's own prompt processing hides the page. A misinformation
+  // scan in progress is shown as a banner over the results so far (below):
+  // the scan crawls every cited URL and has run for a working day on
+  // production, and hiding a page of real alerts behind "1-3 minutes" for
+  // that long is what clients reported as "still processing".
+  if (isDomainProcessing(selectedDomain)) {
     return <ProcessingStateCard domain={selectedDomain!} />;
   }
+  const scanInProgress =
+    scanning ||
+    dashboardData?.scan_running === true ||
+    dashboardData?.scan_status === 'SCANNING';
 
 
   // The scan compares cited pages against what AI answers claim; with no prompts
@@ -502,14 +513,6 @@ const MisinformationAlerts = () => {
     );
   }
 
-  // Show scanning progress state (fallback if ProcessingStateCard didn't catch it)
-  // This should rarely be needed since ProcessingStateCard handles SCANNING status
-  if (dashboardData?.scan_status === 'SCANNING' || scanning) {
-    if (selectedDomain) {
-      return <ProcessingStateCard domain={selectedDomain} />;
-    }
-  }
-
   return (
     <div className="p-8 space-y-8 bg-background animate-fade-in">
       <div className="flex items-center justify-between">
@@ -518,6 +521,12 @@ const MisinformationAlerts = () => {
           <p className="text-muted-foreground mt-2">
             Detect and correct AI hallucinations about your brand
           </p>
+          {scanInProgress && (
+            <p className="mt-2 inline-flex items-center gap-2 rounded-md border border-amber-300 bg-amber-50 px-2.5 py-1 text-xs font-medium text-amber-800 dark:border-amber-700 dark:bg-amber-950 dark:text-amber-200">
+              <Loader2 className="h-3.5 w-3.5 animate-spin" />
+              Misinformation scan in progress — it checks every source the AI cited and can take several hours. Alerts below are what it has found so far.
+            </p>
+          )}
         </div>
         {/* Export only. A Run Scan button was added here and removed: the scan
             fires automatically when a domain finishes processing, and the

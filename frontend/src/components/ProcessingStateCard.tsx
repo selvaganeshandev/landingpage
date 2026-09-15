@@ -32,17 +32,16 @@ const getProcessingProgress = (
 
   // After prompt processing completes (60-100%)
   if (status === 'COMP') {
-    // Competitor analysis (60-80%)
-    if (competitorStatus === 'ANALYZING' || competitorStatus === 'READY') return 70;
+    // Competitor analysis (60-80%). Only ANALYZING is in flight. READY is the
+    // resting state of a finished domain: nothing ever writes COMPLETED (grep
+    // it — it is not assigned anywhere), so waiting for it pinned every domain
+    // at 65% with "Analyzing competitors" unticked, hours after the competitors
+    // had finished. UPES University sat like that for a working day.
+    if (competitorStatus === 'ANALYZING') return 70;
 
     // Misinformation scanning (80-100%)
-    if (competitorStatus === 'COMPLETED') {
-      if (misinfoStatus === 'SCANNING' || misinfoStatus === 'READY') return 90;
-      if (misinfoStatus === 'SCANNED' || misinfoStatus === 'NO_ISSUES') return 100;
-    }
-
-    // Default after COMP
-    return 65;
+    if (misinfoStatus === 'SCANNING' || misinfoStatus === 'READY') return 90;
+    return 100;
   }
 
   return 30;
@@ -92,8 +91,10 @@ const getProcessingSteps = (
     },
     {
       label: "Analyzing competitors",
-      completed: competitorStatus === 'COMPLETED',
-      current: competitorStatus === 'ANALYZING' || competitorStatus === 'READY',
+      // Done unless actively running — see getProcessingProgress for why
+      // COMPLETED cannot be the test.
+      completed: isPromptComplete && competitorStatus !== 'ANALYZING',
+      current: competitorStatus === 'ANALYZING',
     },
     {
       label: "Scanning misinformation",
@@ -110,7 +111,15 @@ export const ProcessingStateCard = ({ domain }: ProcessingStateCardProps) => {
     domain.competitor_analysis_status,
     domain.misinformation_scan_status
   );
-  const estimatedTime = getEstimatedTime(progress);
+  // The misinformation scan crawls every cited URL and asks the model about
+  // each one; on production it has taken from minutes to a working day. A
+  // fixed "1-3 minutes" beside it was the single most-reported confusion, so
+  // once that is the only step left the card says what is true instead.
+  const onlyMisinfoLeft =
+    domain.processing_status === 'COMP' && domain.competitor_analysis_status !== 'ANALYZING';
+  const estimatedTime = onlyMisinfoLeft
+    ? 'misinformation scan runs in the background and can take several hours'
+    : getEstimatedTime(progress);
   const steps = getProcessingSteps(
     domain.processing_status || 'INIT',
     domain.track_message,

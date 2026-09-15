@@ -23,7 +23,6 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { PageLoader } from "@/components/PageLoader";
 import { ProcessingStateCard } from "@/components/ProcessingStateCard";
 import { useDomainStore } from "@/stores/domainStore";
-import { isDomainProcessing, isMisinformationProcessing } from "@/utils/processingStatus";
 import { apiClient } from "@/services/api";
 import { useToast } from "@/hooks/use-toast";
 import {
@@ -174,15 +173,14 @@ const Citations = () => {
     return <PageLoader />;
   }
 
-  // Show ProcessingStateCard when:
-  // 1. Domain is processing prompts (INIT, SCHD, PROC)
-  // 2. Misinformation is still processing (READY or SCANNING)
-  // Otherwise (misinformation is done - SCANNED/NO_ISSUES, or not started), show page with empty data
-  const isPromptProcessing = selectedDomain?.processing_status && 
+  // Show ProcessingStateCard only while the domain is processing prompts
+  // (INIT, SCHD, PROC). Citations come from those answers, so once they exist
+  // the page has real data — a misinformation scan still running in the
+  // background (hours, on production) no longer hides it.
+  const isPromptProcessing = selectedDomain?.processing_status &&
     ['INIT', 'SCHD', 'PROC'].includes(selectedDomain.processing_status);
-  const isMisinfoStillProcessing = isMisinformationProcessing(selectedDomain);
-  
-  if (isPromptProcessing || isMisinfoStillProcessing) {
+
+  if (isPromptProcessing) {
     return <ProcessingStateCard domain={selectedDomain!} />;
   }
 

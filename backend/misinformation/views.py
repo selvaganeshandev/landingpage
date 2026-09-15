@@ -184,6 +184,16 @@ def dashboard(request):
         # Domain scan status info
         'scan_status': domain.misinformation_scan_status,
         'last_scan_at': domain.last_misinformation_scan_at,
+        # Whether a scan is ACTUALLY running, from the scan table. The status
+        # field above is not reliable for this: UPES University sat at READY
+        # for a whole working day with a scan mid-flight, so a page keyed on
+        # the field alone could not tell "queued" from "running for hours".
+        # Scans older than a day are not counted — a worker restart leaves
+        # rows stranded at 'running' and three such rows sat for five days.
+        'scan_running': MisinformationScan.objects.filter(
+            domain=domain, status='running',
+            started_at__gte=timezone.now() - timedelta(hours=24),
+        ).exists(),
     }
 
     return Response(data)
