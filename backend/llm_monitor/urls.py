@@ -40,6 +40,9 @@ urlpatterns = [
     path('misinformation/', include('misinformation.urls')),
     path('content/', include('content.urls')),
     path('seo/', include('seo_rankings.urls')),
+    # Audit Engine. /audits/ POST and /audits/public/<token>/ are AllowAny by
+    # design (landing-page visitors); everything else under it requires auth.
+    path('audits/', include('audits.urls')),
     # Public v1 surface for external consumers (workspace picker + key verification)
     path('v1/', include('public_api.urls')),
     path('', include('chat.urls')),

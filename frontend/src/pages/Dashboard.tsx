@@ -573,22 +573,7 @@ const Dashboard = () => {
         </div>
       </div>
 
-      {/* ROW 2 — Distribution by LLM & Mentions by Country */}
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-        <PlatformMentions data={
-          Array.isArray(summary?.platforms)
-            ? summary.platforms.map((p: any) => ({
-                platform: p.platform ?? 'Platform',
-                count: p.mention_count ?? 0,
-                citations: p.cited_pages ?? 0,
-                avg_position: p.avg_position ?? 0,
-              }))
-            : undefined
-        } totalCitedPages={summary?.metrics?.total_cited_pages} />
-        <MentionsByCountry data={summary?.countries} />
-      </div>
-
-      {/* ROW 3 — Key Metrics (moved below the hero) */}
+      {/* ROW 2 — Key Metrics, directly under the AI Visibility hero */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-6">
         <MetricCard
           title="Total Prompts"
@@ -631,6 +616,21 @@ const Dashboard = () => {
           icon={<TrendingUp className="h-4 w-4" />}
           tooltip={METRIC_HINTS.avgPosition}
         />
+      </div>
+
+      {/* ROW 3 — Distribution by LLM & Mentions by Country */}
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+        <PlatformMentions data={
+          Array.isArray(summary?.platforms)
+            ? summary.platforms.map((p: any) => ({
+                platform: p.platform ?? 'Platform',
+                count: p.mention_count ?? 0,
+                citations: p.cited_pages ?? 0,
+                avg_position: p.avg_position ?? 0,
+              }))
+            : undefined
+        } totalCitedPages={summary?.metrics?.total_cited_pages} />
+        <MentionsByCountry data={summary?.countries} />
       </div>
 
       {/* ROW 4 — Competitive context (moved below, full width) */}

@@ -372,6 +372,66 @@ QUOTA_PROBE_PERPLEXITY_MODEL = config('QUOTA_PROBE_PERPLEXITY_MODEL', default='p
 QUOTA_PROBE_XAI_MODEL = config('QUOTA_PROBE_XAI_MODEL', default='grok-2-latest')
 QUOTA_PROBE_DEEPSEEK_MODEL = config('QUOTA_PROBE_DEEPSEEK_MODEL', default='deepseek-chat')
 
+# ==================== AUDIT ENGINE (public URL -> GEO + SEO audit) ====================
+# Mirrors the backend's AUDIT_* block: the backend creates the audit row, the
+# worker here runs it, and each reads its own .env. Off by default — the task
+# exits without doing anything while this is False, so shipping the code
+# changes nothing until the flag is flipped on both sides.
+AUDIT_ENGINE_ENABLED = config('AUDIT_ENGINE_ENABLED', default=False, cast=bool)
+AUDIT_PUBLIC_TTL_DAYS = config('AUDIT_PUBLIC_TTL_DAYS', default=30, cast=int)
+AUDIT_PROMPT_COUNT = config('AUDIT_PROMPT_COUNT', default=12, cast=int)
+# How many times each prompt is asked on each engine. 1 = a directional
+# snapshot (the free public audit); 3+ turns single answers into rates and
+# multiplies the LLM cost by the same factor.
+AUDIT_RUNS_PER_PROMPT = config('AUDIT_RUNS_PER_PROMPT', default=1, cast=int)
+AUDIT_ENGINES = [
+    s.strip() for s in config(
+        'AUDIT_ENGINES', default='openai,gemini,anthropic,perplexity',
+    ).split(',') if s.strip()
+]
+AUDIT_SEO_ENABLED = config('AUDIT_SEO_ENABLED', default=False, cast=bool)
+AUDIT_KEYWORD_COUNT = config('AUDIT_KEYWORD_COUNT', default=50, cast=int)
+# The crawl stage (Findable pillar): plain-HTTP sample of the site's own pages
+# for schema, bylines, citations and dates. No paid API. Time-boxed so a slow
+# site cannot stall an audit; off = the four Findable measures stay "not measured".
+AUDIT_CRAWL_ENABLED = config('AUDIT_CRAWL_ENABLED', default=True, cast=bool)
+AUDIT_CRAWL_PAGES = config('AUDIT_CRAWL_PAGES', default=20, cast=int)
+AUDIT_CRAWL_BUDGET_SECONDS = config('AUDIT_CRAWL_BUDGET_SECONDS', default=60, cast=int)
+# Technical-SEO layer of the crawl: HEAD-checks a sample of internal links the
+# crawl did not fetch (inside the crawl budget) and, when enabled, asks Google
+# PageSpeed Insights for the homepage's Core Web Vitals. PSI is free but Google
+# now gives keyless calls a quota of zero, so set a key (Google Cloud console →
+# enable "PageSpeed Insights API" → Credentials → API key; 25,000 calls/day).
+# Off or no key = Core Web Vitals reads "not measured".
+AUDIT_CRAWL_LINK_CHECKS = config('AUDIT_CRAWL_LINK_CHECKS', default=True, cast=bool)
+AUDIT_CRAWL_LINK_CHECK_LIMIT = config('AUDIT_CRAWL_LINK_CHECK_LIMIT', default=25, cast=int)
+# Deep crawl for audits a team member or an API key runs (source manual / api):
+# more pages, a longer budget, more links checked, PageSpeed on a few key
+# pages. Landing-page (lead) audits keep the small, fast sample above.
+AUDIT_CRAWL_PAGES_DEEP = config('AUDIT_CRAWL_PAGES_DEEP', default=60, cast=int)
+AUDIT_CRAWL_BUDGET_SECONDS_DEEP = config('AUDIT_CRAWL_BUDGET_SECONDS_DEEP', default=150, cast=int)
+AUDIT_CRAWL_LINK_CHECK_LIMIT_DEEP = config('AUDIT_CRAWL_LINK_CHECK_LIMIT_DEEP', default=100, cast=int)
+AUDIT_CWV_PAGES_DEEP = config('AUDIT_CWV_PAGES_DEEP', default=3, cast=int)
+# Follow links from sampled pages until the page limit is reached (sites with a
+# thin or missing sitemap still yield a real sample). Parameter URLs are skipped.
+AUDIT_CRAWL_FOLLOW_LINKS = config('AUDIT_CRAWL_FOLLOW_LINKS', default=True, cast=bool)
+AUDIT_CWV_ENABLED = config('AUDIT_CWV_ENABLED', default=False, cast=bool)
+AUDIT_PAGESPEED_API_KEY = config('AUDIT_PAGESPEED_API_KEY', default='')
+# Backlink authority: one DataForSEO Backlinks Summary call per audit (paid,
+# ~$0.02-0.03) using the product's DATAFORSEO_LOGIN / PASSWORD. Off = the
+# "Backlink authority" row reads "not measured" and nothing is billed.
+AUDIT_BACKLINKS_ENABLED = config('AUDIT_BACKLINKS_ENABLED', default=False, cast=bool)
+# Brand narrative: one internal LLM call over the answers that name the brand
+# (how it is framed, which descriptors appear / are missing, tone per engine).
+AUDIT_NARRATIVE_ENABLED = config('AUDIT_NARRATIVE_ENABLED', default=True, cast=bool)
+# Executive summary: one internal LLM call over a numbers-only digest of the
+# report (headline, five key findings, section intros). Off = a deterministic
+# rules-based summary is used instead; the section always exists.
+AUDIT_SUMMARY_ENABLED = config('AUDIT_SUMMARY_ENABLED', default=True, cast=bool)
+# Comma-separated team addresses that hear about new landing-page audits the
+# moment they publish. Empty = no alerts. Requester emails need only Mailgun.
+AUDIT_LEAD_ALERT_EMAILS = config('AUDIT_LEAD_ALERT_EMAILS', default='')
+
 # ==================== WEEKLY SWEEP COST GUARDS ====================
 # A weekly sweep resets EVERY prompt/competitor and re-queries every enabled
 # platform — roughly 10,800 LLM calls per run. These guard against paying for

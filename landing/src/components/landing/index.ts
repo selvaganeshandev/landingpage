@@ -9,3 +9,4 @@ export { CTA } from "./CTA";
 export { Pricing } from "./Pricing";
 export { FAQ } from "./FAQ";
 export { Footer } from "./Footer";
+export { AuditForm } from "./AuditForm";

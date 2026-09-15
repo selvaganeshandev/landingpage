@@ -20,6 +20,9 @@ const ContentGaps = lazy(() => import("./pages/ContentGaps"));
 const HistoricalTrends = lazy(() => import("./pages/HistoricalTrends"));
 const Topics = lazy(() => import("./pages/Topics"));
 const Alerts = lazy(() => import("./pages/Alerts"));
+const AuditEngine = lazy(() => import("./pages/AuditEngine"));
+const AuditDetail = lazy(() => import("./pages/AuditDetail"));
+const PublicAudit = lazy(() => import("./pages/PublicAudit"));
 const Competitors = lazy(() => import("./pages/Competitors"));
 const CompetitorDetail = lazy(() => import("./pages/CompetitorDetail"));
 const Reports = lazy(() => import("./pages/Reports"));
@@ -87,6 +90,9 @@ const App = () => (
             <Route path="/reset-password/:tokenId" element={<ResetPassword />} />
             <Route path="/accept-invitation/:invitationId" element={<AcceptInvitation />} />
             <Route path="/session-expired" element={<SessionExpired />} />
+            {/* Public audit report — outside the app shell and unauthenticated by
+                design: it is opened from the landing page and from shared links. */}
+            <Route path="/audit/:token" element={<PublicAudit />} />
             <Route element={<Layout />}>
               {/* Chat - Landing Page (accessible to all authenticated users) */}
               <Route path="/" element={
@@ -101,6 +107,16 @@ const App = () => (
               } />
 
               {/* Overview */}
+              <Route path="/audits" element={
+                <ProtectedRoute requiredPermission={MODULES.ORGANIZATION_SETTINGS}>
+                  <AuditEngine />
+                </ProtectedRoute>
+              } />
+              <Route path="/audits/:id" element={
+                <ProtectedRoute requiredPermission={MODULES.ORGANIZATION_SETTINGS}>
+                  <AuditDetail />
+                </ProtectedRoute>
+              } />
               <Route path="/insights" element={
                 <ProtectedRoute requiredPermission={MODULES.DASHBOARD}>
                   <Dashboard />

@@ -2747,6 +2747,75 @@ export const apiClient = {
     return response.blob();
   },
 
+  // ----- Audit Engine -----
+  // POST /audits/ and GET /audits/public/<token>/ are AllowAny on the backend;
+  // the public read is called with skipAuth so an expired session never turns
+  // a shareable report link into a login redirect.
+  getAuditConfig: () =>
+    apiRequest<import('@/types/audit').AuditConfig>('/audits/config/', { cache_ttl: 60_000 }),
+
+  getAudits: (params: import('@/types/audit').AuditListParams = {}) => {
+    const sp = new URLSearchParams();
+    if (params.page) sp.append('page', String(params.page));
+    if (params.page_size) sp.append('page_size', String(params.page_size));
+    if (params.source) sp.append('source', params.source);
+    if (params.status) sp.append('status', params.status);
+    if (params.geo_stage) sp.append('geo_stage', params.geo_stage);
+    if (params.claimed) sp.append('claimed', params.claimed);
+    if (params.search) sp.append('search', params.search);
+    if (params.ordering) sp.append('ordering', params.ordering);
+    const qs = sp.toString();
+    return apiRequest<import('@/types/audit').AuditListResponse>(`/audits/${qs ? `?${qs}` : ''}`);
+  },
+
+  createAudit: (payload: { url: string; country?: string; email?: string; force?: boolean }) =>
+    apiRequest<import('@/types/audit').AuditCreateResponse>('/audits/', {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    }),
+
+  getAudit: (id: number | string) =>
+    apiRequest<import('@/types/audit').AuditDetail>(`/audits/${id}/`),
+
+  deleteAudit: (id: number | string) =>
+    apiRequest<void>(`/audits/${id}/`, { method: 'DELETE' }),
+
+  claimAudit: (id: number | string) =>
+    apiRequest<import('@/types/audit').AuditClaimResponse>(`/audits/${id}/claim/`, { method: 'POST' }),
+
+  rerunAudit: (id: number | string) =>
+    apiRequest<{ success: boolean; audit: import('@/types/audit').AuditListRow }>(`/audits/${id}/rerun/`, { method: 'POST' }),
+
+  claimAuditByToken: (token: string) =>
+    apiRequest<import('@/types/audit').AuditClaimResponse>(`/audits/claim/${encodeURIComponent(token)}/`, { method: 'POST' }),
+
+  /** Authenticated PDF (leads table / detail). Returns the bytes; the caller saves them. */
+  downloadAuditPdf: async (id: number | string): Promise<Blob> => {
+    const token = getAuthToken();
+    const headers: HeadersInit = {};
+    if (token) headers['Authorization'] = `Bearer ${token}`;
+    const response = await fetch(`${API_BASE_URL}/audits/${id}/pdf/`, { method: 'GET', headers });
+    if (!response.ok) throw new Error(response.status === 409 ? 'The audit has not finished yet.' : 'PDF download failed');
+    return response.blob();
+  },
+
+  /** Public PDF link — no auth, safe to open in a new tab or put in an email. */
+  publicAuditPdfUrl: (token: string) => `${API_BASE_URL}/audits/public/${encodeURIComponent(token)}/pdf/`,
+
+  /** Technical-SEO issue list as CSV (one row per affected URL). */
+  downloadAuditIssuesCsv: async (id: number | string): Promise<Blob> => {
+    const token = getAuthToken();
+    const headers: HeadersInit = {};
+    if (token) headers['Authorization'] = `Bearer ${token}`;
+    const response = await fetch(`${API_BASE_URL}/audits/${id}/issues.csv`, { method: 'GET', headers });
+    if (!response.ok) throw new Error(response.status === 404 ? 'This audit has no technical issue list.' : 'CSV download failed');
+    return response.blob();
+  },
+  publicAuditIssuesCsvUrl: (token: string) => `${API_BASE_URL}/audits/public/${encodeURIComponent(token)}/issues.csv`,
+
+  getPublicAudit: (token: string) =>
+    apiRequest<import('@/types/audit').PublicAudit>(`/audits/public/${encodeURIComponent(token)}/`, { skipAuth: true }),
+
   exportSeoReportXlsx: async (domainId: number): Promise<Blob> => {
     const token = getAuthToken();
     const headers: HeadersInit = {};

@@ -1370,3 +1370,46 @@ def fetch_backlinks_task(self, snapshot_id: int):
         logger.error(f"[BL] Snapshot {snapshot_id} failed: {e}", exc_info=True)
         # run_snapshot already marked the row FAIL and stored the message.
         return {'snapshot_id': snapshot_id, 'status': 'FAIL', 'error': str(e)}
+
+
+@shared_task(
+    bind=True,
+    ignore_result=True,
+    max_retries=0,
+    soft_time_limit=1500,   # 25 min: an audit is ~3 min; anything near this is stuck
+    time_limit=1800,
+)
+def run_audit_task(self, audit_id: int):
+    """Run one Audit Engine audit end to end (core.audit_processor).
+
+    max_retries=0 for the same reason as fetch_backlinks_task: every attempt
+    spends LLM and SERP money, so a failure is written to the audit row and
+    surfaced, never silently retried. Re-running is an explicit action that
+    re-enqueues the task; the processor resumes from whatever stage output is
+    already stored.
+
+    Deliberately on the default `celery` queue with no beat entry: an audit runs
+    only when the backend enqueues it, and shipping this task changes nothing
+    about the existing worker layout. AUDIT_ENGINE_ENABLED=False makes it a
+    no-op.
+    """
+    from celery.exceptions import SoftTimeLimitExceeded
+    from core.audit_processor import run_audit
+
+    try:
+        result = run_audit(int(audit_id))
+        logger.info(f"[Audit] audit {audit_id} finished: {result}")
+        return result
+    except SoftTimeLimitExceeded:
+        logger.error(f"[Audit] audit {audit_id} exceeded its time limit")
+        try:
+            from shared_models.audit_models import Audit
+            Audit.objects.get(pk=audit_id).mark_failed('Audit took too long and was stopped.')
+        except Exception:  # noqa: BLE001
+            pass
+        return {'audit_id': audit_id, 'status': 'failed', 'error': 'time limit'}
+    except Exception as e:  # noqa: BLE001
+        # run_audit already marked the row FAIL for anything inside the stages;
+        # this catches failures before the row was loaded.
+        logger.error(f"[Audit] audit {audit_id} failed: {e}", exc_info=True)
+        return {'audit_id': audit_id, 'status': 'failed', 'error': str(e)}

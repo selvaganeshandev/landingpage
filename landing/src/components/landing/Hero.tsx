@@ -1,6 +1,7 @@
 import { Button } from "@/components/ui/button";
 import { ArrowRight } from "lucide-react";
 import Image from "next/image";
+import { AuditForm } from "./AuditForm";
 
 export function Hero() {
   return (
@@ -27,11 +28,15 @@ export function Hero() {
           </p>
         </div>
 
-        {/* CTA Button */}
+        {/* Free audit — the lead-capture form. The trial CTA stays as the
+            secondary action underneath it. */}
+        <div className="mb-6">
+          <AuditForm />
+        </div>
         <div className="flex items-center justify-center mb-16">
           <a href="https://app.promptmaxx.co/">
-            <Button className="bg-primary text-white hover:bg-primary/90 rounded-full h-12 !px-8 text-base font-medium cursor-pointer">
-              <span>Start free trial</span>
+            <Button variant="ghost" className="rounded-full h-10 !px-6 text-sm font-medium text-gray-600 hover:text-gray-900 cursor-pointer">
+              <span>or start a free trial</span>
               <ArrowRight className="w-4 h-4" />
             </Button>
           </a>

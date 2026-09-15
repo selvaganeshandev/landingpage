@@ -67,6 +67,7 @@ INSTALLED_APPS = [
     'content',
     'chat',
     'seo_rankings',
+    'audits',
 ]
 # Site URL for building absolute links in emails
 SITE_URL = config('SITE_URL', default='http://localhost:8080')
@@ -420,6 +421,59 @@ AVI_PROMPTS_PER_STAGE = config('AVI_PROMPTS_PER_STAGE', default=3, cast=int)
 # and stops heavy runs from exhausting web workers; the legacy backend has no Celery, so
 # this runs in-process. Excess jobs queue.
 AVI_JOB_WORKERS = config('AVI_JOB_WORKERS', default=2, cast=int)
+
+# ==================== AUDIT ENGINE (public URL -> GEO + SEO audit) ====================
+# Master switch. Off by default so a deploy that carries the audit code changes
+# nothing until this is flipped in .env; the public create endpoint answers 503
+# and the engine task refuses to run while it is False. Also the rollback lever.
+AUDIT_ENGINE_ENABLED = config('AUDIT_ENGINE_ENABLED', default=False, cast=bool)
+# How long a public report link resolves. Claimed audits never expire.
+AUDIT_PUBLIC_TTL_DAYS = config('AUDIT_PUBLIC_TTL_DAYS', default=30, cast=int)
+# Size of one audit. Each prompt is asked ONCE per engine, so cost scales as
+# AUDIT_PROMPT_COUNT x len(AUDIT_ENGINES) live LLM calls per audit.
+AUDIT_PROMPT_COUNT = config('AUDIT_PROMPT_COUNT', default=12, cast=int)
+# How many times each prompt is asked on each engine. 1 = a directional
+# snapshot (the free public audit); 3+ turns single answers into rates and
+# multiplies the LLM cost by the same factor.
+AUDIT_RUNS_PER_PROMPT = config('AUDIT_RUNS_PER_PROMPT', default=1, cast=int)
+# Provider keys as client_factory knows them: openai, gemini, anthropic,
+# perplexity, xai, deepseek.
+AUDIT_ENGINES = [
+    s.strip() for s in config(
+        'AUDIT_ENGINES', default='openai,gemini,anthropic,perplexity',
+    ).split(',') if s.strip()
+]
+# The SEO half (keyword discovery + SERP fetch) spends DataBlue/DataForSEO
+# quota; kept behind its own flag so GEO-only audits can ship first.
+AUDIT_SEO_ENABLED = config('AUDIT_SEO_ENABLED', default=False, cast=bool)
+AUDIT_KEYWORD_COUNT = config('AUDIT_KEYWORD_COUNT', default=50, cast=int)
+# The crawl stage (Findable pillar): plain-HTTP sample of the site's own pages
+# for schema, bylines, citations and dates. No paid API. Time-boxed so a slow
+# site cannot stall an audit; off = the four Findable measures stay "not measured".
+AUDIT_CRAWL_ENABLED = config('AUDIT_CRAWL_ENABLED', default=True, cast=bool)
+AUDIT_CRAWL_PAGES = config('AUDIT_CRAWL_PAGES', default=20, cast=int)
+AUDIT_CRAWL_BUDGET_SECONDS = config('AUDIT_CRAWL_BUDGET_SECONDS', default=60, cast=int)
+# Brand narrative: one internal LLM call over the answers that name the brand
+# (how it is framed, which descriptors appear / are missing, tone per engine).
+AUDIT_NARRATIVE_ENABLED = config('AUDIT_NARRATIVE_ENABLED', default=True, cast=bool)
+# Executive summary: one internal LLM call over a numbers-only digest of the
+# report (headline, five key findings, section intros). Off = a deterministic
+# rules-based summary is used instead; the section always exists.
+AUDIT_SUMMARY_ENABLED = config('AUDIT_SUMMARY_ENABLED', default=True, cast=bool)
+# On claim, create the new project's prompt groups from the audit's prompts so
+# tracking starts with the questions the audit measured (Day 0). The groups
+# start in INIT and the engine runs them like any newly added prompts.
+AUDIT_CLAIM_SEEDS_PROMPTS = config('AUDIT_CLAIM_SEEDS_PROMPTS', default=True, cast=bool)
+# Abuse limits for the public endpoint: same host at most once per window,
+# per-IP daily cap, and a global daily cap. All three are cheap DB counts.
+AUDIT_REPEAT_HOURS = config('AUDIT_REPEAT_HOURS', default=24, cast=int)
+AUDIT_PER_IP_DAILY = config('AUDIT_PER_IP_DAILY', default=3, cast=int)
+AUDIT_GLOBAL_DAILY = config('AUDIT_GLOBAL_DAILY', default=50, cast=int)
+# Lead alerts. Comma-separated team addresses; empty = no alerts. The engine
+# mails "new lead" on publish; the backend mails "claimed" and "warm" (an
+# unclaimed landing-page report opened this many times).
+AUDIT_LEAD_ALERT_EMAILS = config('AUDIT_LEAD_ALERT_EMAILS', default='')
+AUDIT_WARM_LEAD_OPENS = config('AUDIT_WARM_LEAD_OPENS', default=5, cast=int)
 
 # Moz API Configuration (for Website Authority - free tier: 2,500 rows/month)
 MOZ_ACCESS_ID = config('MOZ_ACCESS_ID', default=None)

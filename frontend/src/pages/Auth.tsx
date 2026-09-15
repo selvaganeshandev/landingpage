@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { useNavigate, Link } from "react-router-dom";
+import { useNavigate, Link, useSearchParams } from "react-router-dom";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -11,6 +11,12 @@ import { useAuth } from "@/contexts/AuthContext";
 
 export default function Auth() {
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
+  // Where to go after signing in. Only same-origin paths are honoured so a
+  // crafted link cannot bounce a user to another site. Set by the public audit
+  // page's "Claim this audit" button; everything else lands on the dashboard.
+  const next = searchParams.get("next");
+  const afterLogin = next && next.startsWith("/") && !next.startsWith("//") ? next : "/insights";
   const { toast } = useToast();
   const { login, isLoading } = useAuth();
   const [formData, setFormData] = useState({
@@ -56,7 +62,7 @@ export default function Auth() {
       
       // Land on the Dashboard rather than "/" (which renders the chat) — the
       // overview is what you want first on signing in.
-      navigate("/insights");
+      navigate(afterLogin);
     } catch (error) {
       // Extract error message
       let errorMessage = "Login failed. Please try again.";

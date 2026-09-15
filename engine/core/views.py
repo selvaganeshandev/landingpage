@@ -2086,3 +2086,35 @@ def seo_analyze_competitors(request):
             {'error': str(e)},
             status=status.HTTP_500_INTERNAL_SERVER_ERROR
         )
+
+
+@api_view(['POST'])
+@permission_classes([AllowAny])
+def audits_run(request):
+    """Queue one Audit Engine audit (core.audit_processor).
+
+    Body: { audit_id: int }
+
+    The backend creates the `audits` row and applies the public rate limits;
+    this only dispatches run_audit_task. Refuses while AUDIT_ENGINE_ENABLED is
+    off so a stray call cannot spend money on a disabled feature.
+    """
+    from .processing_tasks import run_audit_task
+
+    if not getattr(settings, 'AUDIT_ENGINE_ENABLED', False):
+        return Response({'error': 'Audit engine is disabled'}, status=status.HTTP_503_SERVICE_UNAVAILABLE)
+
+    audit_id = request.data.get('audit_id')
+    if not audit_id:
+        return Response({'error': 'audit_id is required'}, status=status.HTTP_400_BAD_REQUEST)
+
+    try:
+        task = run_audit_task.delay(int(audit_id))
+        return Response({
+            'message': f'Audit {audit_id} queued',
+            'audit_id': int(audit_id),
+            'task_id': task.id,
+        })
+    except Exception as e:
+        logger.error(f"[Audit] Error queuing audit {audit_id}: {e}")
+        return Response({'error': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)

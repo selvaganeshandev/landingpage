@@ -25,7 +25,6 @@ import {
   Activity,
   Lightbulb,
   Zap,
-  LogOut,
   Calendar,
   ChevronsLeft,
   ChevronsRight,
@@ -62,6 +61,7 @@ import {
   TooltipTrigger,
 } from "@/components/ui/tooltip";
 import { ConfirmDialog } from "@/components/ConfirmDialog";
+import { UserMenu } from "@/components/UserMenu";
 import { getFaviconUrl, handleFaviconError } from "@/utils/faviconHelper";
 
 // Icons are passed as components from the navigation store; fall back to LayoutDashboard when missing
@@ -291,6 +291,32 @@ export const Sidebar = () => {
     // Close any open popovers when clicking on items
   };
 
+  /** Switch the active project — shared by the project popover and the account menu. */
+  const switchDomain = async (domain: (typeof domains)[number]) => {
+    const isProcessing = domain.processing_status && ['INIT', 'SCHD', 'PROC'].includes(domain.processing_status);
+    const isFailed = domain.processing_status === 'FAIL';
+    if (isProcessing || isFailed) {
+      toast({
+        title: isFailed ? "Domain Processing Failed" : "Domain Processing",
+        description: isFailed
+          ? `Processing failed: ${domain.track_message || 'Unknown error'}. Please try re-adding this domain.`
+          : "This domain is still being processed. Please wait until processing completes.",
+        variant: isFailed ? "destructive" : "default",
+      });
+      return;
+    }
+    setDomainSwitching(true);
+    setSelectedDomain(domain);
+    setDomainPopoverOpen(false);
+    if (user) {
+      // Use updateActiveDomain to sync both systems properly
+      const { updateActiveDomain } = await import('@/utils/activeDomain');
+      await updateActiveDomain(user.id, domain.id, domain);
+    }
+    // Hide page loader after data has had time to load
+    setTimeout(() => setDomainSwitching(false), 1000);
+  };
+
   const handleLogoutClick = () => {
     setLogoutDialogOpen(true);
   };
@@ -389,32 +415,7 @@ export const Sidebar = () => {
                               <CommandItem
                                 key={domain.id}
                                 value={domain.name}
-                                onSelect={async () => {
-                                  // Don't allow selecting processing or failed domains
-                                  if (isDisabled) {
-                                    toast({
-                                      title: isFailed ? "Domain Processing Failed" : "Domain Processing",
-                                      description: isFailed
-                                        ? `Processing failed: ${domain.track_message || 'Unknown error'}. Please try re-adding this domain.`
-                                        : "This domain is still being processed. Please wait until processing completes.",
-                                      variant: isFailed ? "destructive" : "default",
-                                    });
-                                    return;
-                                  }
-
-                                  setDomainSwitching(true);
-                                  setSelectedDomain(domain);
-                                  setDomainPopoverOpen(false);
-                                  if (user) {
-                                    // Use updateActiveDomain to sync both systems properly
-                                    const { updateActiveDomain } = await import('@/utils/activeDomain');
-                                    await updateActiveDomain(user.id, domain.id, domain);
-                                  }
-                                  // Hide page loader after data has had time to load
-                                  setTimeout(() => {
-                                    setDomainSwitching(false);
-                                  }, 1000);
-                                }}
+                                onSelect={() => switchDomain(domain)}
                                 className={cn(
                                   "flex items-center justify-between gap-2",
                                   isDisabled && "opacity-60 cursor-not-allowed"
@@ -516,63 +517,27 @@ export const Sidebar = () => {
 
       </nav>
 
-      <div className={cn("border-t border-border mt-auto space-y-0.5 pt-0", isOpen ? "px-3 pb-2" : "px-2 pb-2")}>
-          {/* Organization and Profile collapsed into one "Settings" entry —
-              two near-identical cog/person rows in the footer read as clutter,
-              and both are settings. Rendered through NavGroup so the flyout is
-              styled exactly like the ones in the nav above; NavGroup also falls
-              back to a flat link automatically when permissions leave only one
-              item. isDomainProcessing is passed false deliberately: settings
-              must stay reachable while a domain is being processed. */}
+      <div className={cn("border-t border-border mt-auto pt-1.5", isOpen ? "px-2 pb-2" : "px-2 pb-2")}>
+          {/* Account menu: name, email · role, then Settings / Switch project /
+              What's new / Sign out. The Settings targets are the same the old
+              fly-out had (Organization / Billing / Profile, gated by role). */}
           {user && (
-            <div className="space-y-0.5 mt-1.5">
-              <NavGroup
-                group={{
-                  name: "Settings",
-                  icon: Settings,
-                  items: [
-                    ...((user.role === 'admin' || user.role === 'super_admin' || (user.role === 'user' && checkPermission && checkPermission('organization_settings', 'read')))
-                      ? [{ name: "Organization", path: "/organization-settings", icon: Settings }]
-                      : []),
-                    // Super admin only, matching the route guard on /billing.
-                    ...(user.role === 'super_admin'
-                      ? [{ name: "Billing", path: "/billing", icon: CreditCard }]
-                      : []),
-                    { name: "Profile", path: "/profile", icon: User },
-                  ],
-                }}
-                location={location}
-                isSidebarOpen={isOpen}
-                onItemClick={handleItemClick}
-                navigate={navigate}
-                isDomainProcessing={false}
-                popoverAlign="end"
-              />
-            </div>
-          )}
-
-          {!isOpen ? (
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <button
-                  onClick={handleLogoutClick}
-                  className={cn(ROW_BASE, ROW_COLLAPSED, ROW_IDLE)}
-                >
-                  <LogOut className="h-4 w-4 flex-shrink-0" />
-                </button>
-              </TooltipTrigger>
-              <TooltipContent side="right">
-                <p>Sign Out</p>
-              </TooltipContent>
-            </Tooltip>
-          ) : (
-            <button
-              onClick={handleLogoutClick}
-              className={cn(ROW_BASE, ROW_OPEN, ROW_IDLE)}
-            >
-              <LogOut className="h-4 w-4 flex-shrink-0" />
-              <span>Sign Out</span>
-            </button>
+            <UserMenu
+              user={user}
+              collapsed={!isOpen}
+              settingsTargets={[
+                ...((user.role === 'admin' || user.role === 'super_admin' || (user.role === 'user' && checkPermission && checkPermission('organization_settings', 'read')))
+                  ? [{ name: "Organization", path: "/organization-settings", icon: Settings }]
+                  : []),
+                // Super admin only, matching the route guard on /billing.
+                ...(user.role === 'super_admin' ? [{ name: "Billing", path: "/billing", icon: CreditCard }] : []),
+                { name: "Profile", path: "/profile", icon: User },
+              ]}
+              domains={domains}
+              selectedDomain={selectedDomain}
+              onSwitchDomain={switchDomain}
+              onSignOut={handleLogoutClick}
+            />
           )}
       </div>
     </aside>

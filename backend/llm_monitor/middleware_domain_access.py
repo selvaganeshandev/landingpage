@@ -58,6 +58,10 @@ _CLIENT_WRITE_EXEMPT_PATHS = frozenset({
     "/auth/logout/",
     "/auth/token/refresh/",
     "/auth/active-domain/",
+    # Running an audit is open to anonymous visitors (AllowAny); a service
+    # API key resolves to a client-role account and must not be treated more
+    # strictly than a stranger. The view applies its own caps and flag.
+    "/audits/",
 })
 
 

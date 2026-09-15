@@ -24,6 +24,7 @@ import {
   Link as LinkIcon,
   SearchCheck,
   MessageSquareText,
+  ScanSearch,
 } from 'lucide-react';
 
 export interface NavItem {
@@ -67,6 +68,16 @@ const allNavGroups: NavGroup[] = [
     name: "Overview",
     sectionLabel: true,
     items: [],
+  },
+  // Audit Engine leads the Overview group. It is an admin tool (the backend
+  // scopes the leads table to admin / super_admin), so it rides on the
+  // organization_settings module rather than a new one: super_admin always
+  // passes, admins pass unless explicitly restricted, clients never do.
+  {
+    name: "Audit Engine",
+    items: [
+      { name: "Audit Engine", path: "/audits", icon: ScanSearch, module: MODULES.ORGANIZATION_SETTINGS },
+    ],
   },
   {
     name: "Dashboard",

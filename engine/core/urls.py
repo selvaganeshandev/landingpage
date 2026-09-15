@@ -62,4 +62,7 @@ urlpatterns = [
     path('seo/fetch-backlinks/', views.seo_fetch_backlinks, name='seo_fetch_backlinks'),
     path('seo/sync-volume/', views.seo_sync_volume, name='seo_sync_volume'),
     path('seo/analyze-competitors/', views.seo_analyze_competitors, name='seo_analyze_competitors'),
+
+    # Audit Engine
+    path('audits/run/', views.audits_run, name='audits_run'),
 ]

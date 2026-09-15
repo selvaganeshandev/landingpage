@@ -25,6 +25,10 @@ downloads/
 eggs/
 .eggs/
 lib/
+# `lib/` above is the Python-venv rule; it also swallowed the landing site's
+# src/lib/utils.ts (the cn() helper every shadcn component imports), so a
+# clean clone could not build the landing site.
+!landing/src/lib/
 lib64/
 parts/
 sdist/
