@@ -1214,18 +1214,45 @@ PAGESPEED_TIMEOUT = 120
 _PSI_RETRYABLE = 'FAILED_DOCUMENT_REQUEST'
 
 
+def _resolve_final_url(url):
+    """Follow redirects and return the URL the site actually serves.
+
+    Lighthouse fails on a redirecting entry URL behind some CDNs: Sleepwell's
+    stored https://mysleepwell.com 301s to https://www.mysleepwell.com/ and PSI
+    returned FAILED_DOCUMENT_REQUEST on every run, while the final URL scored 92
+    in 24s. Any failure here keeps the original URL, so this can only help.
+    """
+    import requests as req
+    try:
+        resp = req.get(url, allow_redirects=True, stream=True, timeout=10, headers={
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
+        })
+        final = resp.url
+        resp.close()
+        if final and final != url:
+            logger.info(f"PageSpeed: {url} redirects to {final}; testing the final URL")
+        return final or url
+    except Exception as e:
+        logger.warning(f"PageSpeed: could not resolve redirects for {url} ({e}); using it as-is")
+        return url
+
+
 def _fetch_pagespeed_data(url, strategy='mobile', _attempt=1):
     """
     Call Google PageSpeed Insights API.
     Returns dict with score, CWV metrics, speed_index, or None on failure.
 
-    Retries once on FAILED_DOCUMENT_REQUEST (see _PSI_RETRYABLE).
+    Tests the post-redirect URL (see _resolve_final_url) and retries once on
+    FAILED_DOCUMENT_REQUEST (see _PSI_RETRYABLE).
     """
     import requests as req
     api_key = getattr(settings, 'GOOGLE_PAGESPEED_API_KEY', None)
     if not api_key:
         logger.warning("GOOGLE_PAGESPEED_API_KEY not configured")
         return None
+
+    if _attempt == 1:
+        url = _resolve_final_url(url)
 
     psi_url = 'https://www.googleapis.com/pagespeedonline/v5/runPagespeed'
     params = {
