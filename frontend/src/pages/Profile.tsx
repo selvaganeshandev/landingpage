@@ -230,7 +230,15 @@ export default function Profile() {
                 <div>
                   <p className="text-sm font-medium">Role</p>
                   <Badge variant={user.role === 'super_admin' || user.role === 'admin' ? 'default' : 'secondary'}>
-                    {user.role === 'super_admin' ? 'Super Admin' : user.role === 'admin' ? 'Administrator' : 'User'}
+                    {/* 'client' fell through to 'User', so a client account was
+                        labelled as a team member on its own profile. */}
+                    {user.role === 'super_admin'
+                      ? 'Super Admin'
+                      : user.role === 'admin'
+                      ? 'Administrator'
+                      : user.role === 'client'
+                      ? 'Client'
+                      : 'User'}
                   </Badge>
                 </div>
               </div>

@@ -66,6 +66,7 @@ import {
 import { PageLoader } from "@/components/PageLoader";
 import { getFaviconUrl, handleFaviconError } from "@/utils/faviconHelper";
 import { useDomainStore } from "@/stores/domainStore";
+import { CADENCE_OPTIONS, cadenceOf, type Cadence } from "@/lib/sweep-cadence";
 import { useAuth } from "@/contexts/AuthContext";
 
 export default function DomainSettings() {
@@ -73,9 +74,18 @@ export default function DomainSettings() {
   const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
   const { toast } = useToast();
-  const { setSelectedDomain, domains } = useDomainStore();
+  const { setSelectedDomain, domains, setDomains } = useDomainStore();
+  // Draft state, like every other field in Basic Information: choosing a
+  // cadence arms Save, and nothing reaches the server until Save is pressed.
+  // It used to write immediately, which made it the one control on the card
+  // that behaved differently from its neighbours.
+  const [sweepCadence, setSweepCadence] = useState<Cadence>("weekly");
   const { user } = useAuth();
   const isTeamMember = user?.role === 'user';
+  // A client opens this page for the health report and nothing else. Brand
+  // identity, content guidelines, internal links, integrations, the reference
+  // repository and client access are all agency-side configuration.
+  const isClient = user?.role === 'client';
 
   // Domain state
   const [domain, setDomain] = useState<{
@@ -103,6 +113,8 @@ export default function DomainSettings() {
     modified_at: string;
     processing_status?: string;
     track_message?: string;
+    /** Sweep schedule, edited on this page and applied by Save. */
+    sweep_cadence?: Cadence;
   } | null>(null);
 
   // Basic Info edit state
@@ -205,10 +217,22 @@ export default function DomainSettings() {
   const [contentViewerText, setContentViewerText] = useState("");
   const [isLoadingContent, setIsLoadingContent] = useState(false);
 
-  const initialTab = isTeamMember ? "integrations" : (searchParams.get("tab") || "basic-info");
+  // Health is the only tab a client is offered, so it is also the only tab a
+  // client may land on. Without this, arriving without ?tab would select
+  // basic-info - a tab whose trigger is hidden from them - and the page would
+  // render an empty panel.
+  const initialTab = isClient
+    ? "health"
+    : isTeamMember
+    ? "integrations"
+    : (searchParams.get("tab") || "basic-info");
   const [activeTab, setActiveTab] = useState(initialTab);
 
   useEffect(() => {
+    if (isClient) {
+      setActiveTab("health");
+      return;
+    }
     if (isTeamMember) {
       setActiveTab("integrations");
       return;
@@ -217,7 +241,7 @@ export default function DomainSettings() {
     if (tabParam && tabParam !== activeTab) {
       setActiveTab(tabParam);
     }
-  }, [searchParams, activeTab, isTeamMember]);
+  }, [searchParams, activeTab, isTeamMember, isClient]);
 
   // Fetch health data when health tab is active (including on initial load with ?tab=health)
   useEffect(() => {
@@ -916,6 +940,7 @@ export default function DomainSettings() {
       setDomain(foundDomain);
       setShortDescription(foundDomain.short_description || "");
       setDomainName(foundDomain.name || "");
+      setSweepCadence(cadenceOf(foundDomain));
       setToneOfVoice(foundDomain.tone_of_voice || "");
       setContentStyle(foundDomain.content_style || "");
       setKeyMessages(foundDomain.key_messages || "");
@@ -944,13 +969,24 @@ export default function DomainSettings() {
       await apiClient.updateDomain(domain.id, {
         name: domainName.trim(),
         short_description: shortDescription.trim() || null,
+        sweep_cadence: sweepCadence,
       });
 
       setDomain({
         ...domain,
         name: domainName.trim(),
         short_description: shortDescription.trim() || null,
+        sweep_cadence: sweepCadence,
       });
+
+      // The domain store holds its own copy, and Organization Settings >
+      // Schedules reads the cadence from there. Without this the list would
+      // keep showing the old schedule until a full reload.
+      setDomains(
+        useDomainStore.getState().domains.map((d) =>
+          d.id === domain.id ? { ...d, sweep_cadence: sweepCadence } : d,
+        ),
+      );
 
       toast({
         title: "Basic info saved",
@@ -971,7 +1007,8 @@ export default function DomainSettings() {
     if (!domain) return false;
     return (
       domainName !== domain.name ||
-      shortDescription !== (domain.short_description || "")
+      shortDescription !== (domain.short_description || "") ||
+      sweepCadence !== cadenceOf(domain)
     );
   };
 
@@ -1688,48 +1725,50 @@ export default function DomainSettings() {
       {/* Tabs */}
       <Tabs value={activeTab} onValueChange={handleTabChange} className="w-full">
         <TabsList className="bg-muted/50 p-1 border border-border">
-          {!isTeamMember && (
-            <TabsTrigger value="basic-info" className="gap-2 data-[state=active]:gradient-primary data-[state=active]:shadow-md data-[state=active]:shadow-primary/20 data-[state=active]:text-white">
+          {!isTeamMember && !isClient && (
+              <TabsTrigger value="basic-info" className="gap-2 data-[state=active]:gradient-primary data-[state=active]:shadow-md data-[state=active]:shadow-primary/20 data-[state=active]:text-white">
               <Info className="h-4 w-4" />
               Basic Info
             </TabsTrigger>
           )}
-          {!isTeamMember && (
-            <TabsTrigger value="content-guidelines" className="gap-2 data-[state=active]:gradient-primary data-[state=active]:shadow-md data-[state=active]:shadow-primary/20 data-[state=active]:text-white">
+          {!isTeamMember && !isClient && (
+              <TabsTrigger value="content-guidelines" className="gap-2 data-[state=active]:gradient-primary data-[state=active]:shadow-md data-[state=active]:shadow-primary/20 data-[state=active]:text-white">
               <FileText className="h-4 w-4" />
               Content Guidelines
             </TabsTrigger>
           )}
-          {!isTeamMember && (
-            <TabsTrigger value="internal-links" className="gap-2 data-[state=active]:gradient-primary data-[state=active]:shadow-md data-[state=active]:shadow-primary/20 data-[state=active]:text-white">
+          {!isTeamMember && !isClient && (
+              <TabsTrigger value="internal-links" className="gap-2 data-[state=active]:gradient-primary data-[state=active]:shadow-md data-[state=active]:shadow-primary/20 data-[state=active]:text-white">
               <Link2 className="h-4 w-4" />
               Internal Links
             </TabsTrigger>
           )}
-          {!isTeamMember && (
-            <TabsTrigger value="brand-identity" className="gap-2 data-[state=active]:gradient-primary data-[state=active]:shadow-md data-[state=active]:shadow-primary/20 data-[state=active]:text-white">
+          {!isTeamMember && !isClient && (
+              <TabsTrigger value="brand-identity" className="gap-2 data-[state=active]:gradient-primary data-[state=active]:shadow-md data-[state=active]:shadow-primary/20 data-[state=active]:text-white">
               <Palette className="h-4 w-4" />
               Brand Identity
             </TabsTrigger>
           )}
-          <TabsTrigger value="integrations" className="gap-2 data-[state=active]:gradient-primary data-[state=active]:shadow-md data-[state=active]:shadow-primary/20 data-[state=active]:text-white">
+            {!isClient && (
+            <TabsTrigger value="integrations" className="gap-2 data-[state=active]:gradient-primary data-[state=active]:shadow-md data-[state=active]:shadow-primary/20 data-[state=active]:text-white">
             <Link2 className="h-4 w-4" />
             Integrations
           </TabsTrigger>
+            )}
           {!isTeamMember && (
             <TabsTrigger value="health" className="gap-2 data-[state=active]:gradient-primary data-[state=active]:shadow-md data-[state=active]:shadow-primary/20 data-[state=active]:text-white">
               <Activity className="h-4 w-4" />
               Health
             </TabsTrigger>
           )}
-          {!isTeamMember && (
-            <TabsTrigger value="reference-repository" className="gap-2 data-[state=active]:gradient-primary data-[state=active]:shadow-md data-[state=active]:shadow-primary/20 data-[state=active]:text-white">
+          {!isTeamMember && !isClient && (
+              <TabsTrigger value="reference-repository" className="gap-2 data-[state=active]:gradient-primary data-[state=active]:shadow-md data-[state=active]:shadow-primary/20 data-[state=active]:text-white">
               <BookOpen className="h-4 w-4" />
               Reference Repository
             </TabsTrigger>
           )}
-          {!isTeamMember && (
-            <TabsTrigger value="client-access" className="gap-2 data-[state=active]:gradient-primary data-[state=active]:shadow-md data-[state=active]:shadow-primary/20 data-[state=active]:text-white">
+          {!isTeamMember && !isClient && (
+              <TabsTrigger value="client-access" className="gap-2 data-[state=active]:gradient-primary data-[state=active]:shadow-md data-[state=active]:shadow-primary/20 data-[state=active]:text-white">
               <ShieldCheck className="h-4 w-4" />
               Client Access
             </TabsTrigger>
@@ -1775,6 +1814,29 @@ export default function DomainSettings() {
                     disabled
                     className="bg-muted"
                   />
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="sweep-cadence">Sweep schedule</Label>
+                  <div className="flex items-center gap-2">
+                    <Select
+                      value={sweepCadence}
+                      onValueChange={(v) => setSweepCadence(v as Cadence)}
+                    >
+                      <SelectTrigger id="sweep-cadence">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {CADENCE_OPTIONS.map((o) => (
+                          <SelectItem key={o.value} value={o.value}>
+                            {o.label}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  <p className="text-xs text-muted-foreground">
+                    How often the full sweep re-runs this domain's prompts.
+                  </p>
                 </div>
               </div>
               <div className="space-y-2">

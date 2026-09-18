@@ -231,14 +231,33 @@ export const DomainSelector = () => {
   }
 
   // Clients with a single domain get a static label instead of a switcher —
-  // there is nothing to switch to.
+  // there is nothing to switch to. The gear beside it is their only route into
+  // the project, which is why it lives here rather than in the footer: a client
+  // has one project, so "settings" and "this project" are the same thing.
   if (user?.role === 'client' && domains.length === 1) {
     const only = domains[0];
     return (
-      <Button variant="outline" className="w-full justify-start" disabled>
-        <Globe className="mr-2 h-4 w-4 flex-shrink-0" />
-        <span className="text-left flex-1 truncate">{only.name}</span>
-      </Button>
+      <div className="relative">
+        <Button
+          variant="outline"
+          className="w-full justify-start pr-12 pointer-events-none"
+          tabIndex={-1}
+        >
+          <Globe className="mr-2 h-4 w-4 flex-shrink-0" />
+          <span className="text-left flex-1 truncate">{only.name}</span>
+        </Button>
+        {canOpenSettings && (
+          <button
+            type="button"
+            onClick={() => openDomainSettings(only.id)}
+            title="Project health report"
+            aria-label={`Health report for ${only.name}`}
+            className="absolute right-2 top-1/2 -translate-y-1/2 flex h-8 w-8 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+          >
+            <Settings className="h-4 w-4" />
+          </button>
+        )}
+      </div>
     );
   }
 

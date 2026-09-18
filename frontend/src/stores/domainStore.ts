@@ -31,12 +31,34 @@ export interface Domain {
    *  are all derived from prompt responses, so 0 means those pages can only be
    *  empty and should point the user at Prompts first. */
   prompt_count?: number;
+  /** Prompt groups in this project - what a sweep actually walks. */
+  group_count?: number;
+  /** How often the full sweep re-runs this project's prompts. Set on the
+   *  Schedules screen and saved through PUT /domains/<id>/; the engine reads
+   *  the same column to decide which projects a sweep run covers. */
+  sweep_cadence?: 'weekly' | 'biweekly' | 'monthly' | 'off';
+  /** When the sweep last covered this project. Written by the engine, so it is
+   *  read-only here; null means it has not run since the field existed. */
+  last_swept_at?: string | null;
   created_at: string;
   modified_at: string;
 }
 
+/** Sweep context that applies to the whole organisation, delivered on the same
+ *  /domains/ response rather than from a second request. */
+export interface SweepContext {
+  /** AI platforms the engine has actually queried, from the analytics rows. */
+  platforms: string[];
+  /** The engine's kill switch. While false a sweep is refused even when forced,
+   *  so the Schedules screen must not promise a next run. */
+  enabled: boolean;
+  disabled_reason: string;
+  last_started_at: string | null;
+}
+
 interface DomainState {
   domains: Domain[];
+  sweep: SweepContext | null;
   selectedDomain: Domain | null;
   isLoading: boolean;
   isDomainSwitching: boolean;
@@ -58,6 +80,7 @@ export const useDomainStore = create<DomainState>()(
   persist(
     (set, get) => ({
       domains: [],
+      sweep: null,
       selectedDomain: null,
       isLoading: false,
       isDomainSwitching: false,
@@ -115,7 +138,12 @@ export const useDomainStore = create<DomainState>()(
 
           // Import apiClient dynamically to avoid circular dependencies
           const { apiClient } = await import('@/services/api');
-          const response = await apiClient.getDomains();
+          // apiRequest resolves to `unknown`; name the shape once here so every
+          // read below is checked rather than each one reaching into an any.
+          const response = (await apiClient.getDomains()) as {
+            domains: Domain[];
+            sweep?: SweepContext;
+          };
 
           // Get user ID to restore active domain
           let activeDomainId: string | null = null;
@@ -150,6 +178,9 @@ export const useDomainStore = create<DomainState>()(
 
           set({
             domains: response.domains,
+            // Absent on the `fields=minimal` variant, so keep whatever we had
+            // rather than blanking the Schedules screen mid-session.
+            sweep: response.sweep ?? get().sweep,
             selectedDomain: selectedDomain,
             isLoading: false
           });
@@ -180,6 +211,7 @@ export const useDomainStore = create<DomainState>()(
       clearDomainStore: () => {
         set({ 
           domains: [], 
+          sweep: null,
           selectedDomain: null, 
           error: null 
         });

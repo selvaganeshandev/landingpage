@@ -49,6 +49,7 @@ import { cn } from "@/lib/utils";
 import { ProjectAccessManager } from "@/components/ProjectAccessManager";
 import { AddDomainDialog } from "@/components/AddDomainDialog";
 import { PageLoader } from "@/components/PageLoader";
+import { DomainSweepCadence } from "@/components/DomainSweepCadence";
 import {
   Table,
   TableBody,
@@ -65,6 +66,11 @@ export default function OrganizationSettings() {
   const { toast } = useToast();
   const { user, checkPermission } = useAuth();
   const isTeamMember = user?.role === 'user';
+  // A client reaches this page for one reason: to see their own projects and
+  // open a project's health report. Every other tab on it is org administration
+  // - team, clients, invoice details, API keys - and none of it is theirs.
+  // Hidden here AND refused by the backend; this only shapes the UI.
+  const isClient = user?.role === 'client';
   const hasTeamManagement = isTeamMember && checkPermission(MODULES.TEAM_MANAGEMENT, 'read');
 
   // Organization state
@@ -621,6 +627,11 @@ export default function OrganizationSettings() {
   }, [user]);
 
   const loadOrganization = async () => {
+    // Org details (name, industry, API keys) are admin-only on the backend, and
+    // a client has no tab that shows them. Calling it anyway logged a 403 on
+    // every client visit - a real error in the console for a request the page
+    // did not need.
+    if (isClient) return;
     try {
       const data = await apiClient.getOrganization();
       setOrganization(data);
@@ -1570,26 +1581,31 @@ export default function OrganizationSettings() {
       <Tabs value={selectedTab} onValueChange={handleTabChange} className="space-y-6">
         <div className="flex items-center justify-between">
           <TabsList className="bg-muted/50 p-1 border border-border">
-            <TabsTrigger value="domains" className="data-[state=active]:gradient-primary data-[state=active]:shadow-md data-[state=active]:shadow-primary/20 data-[state=active]:text-white">All Domains</TabsTrigger>
-            {(!isTeamMember || hasTeamManagement) && (
+            <TabsTrigger value="domains" className="data-[state=active]:gradient-primary data-[state=active]:shadow-md data-[state=active]:shadow-primary/20 data-[state=active]:text-white">
+              {isClient ? "My Projects" : "All Domains"}
+            </TabsTrigger>
+            {!isClient && (
+              <TabsTrigger value="schedules" className="data-[state=active]:gradient-primary data-[state=active]:shadow-md data-[state=active]:shadow-primary/20 data-[state=active]:text-white">Schedules</TabsTrigger>
+            )}
+            {!isClient && (!isTeamMember || hasTeamManagement) && (
               <TabsTrigger value="team" className="data-[state=active]:gradient-primary data-[state=active]:shadow-md data-[state=active]:shadow-primary/20 data-[state=active]:text-white">Team Members</TabsTrigger>
             )}
             {/* Clients moved here from its own sidebar entry — it is org
                 administration, and it sits next to Team Members because both
                 are about who can log in. Same permission as this page. */}
-            {!isTeamMember && (
+            {!isClient && !isTeamMember && (
               <TabsTrigger value="clients" className="data-[state=active]:gradient-primary data-[state=active]:shadow-md data-[state=active]:shadow-primary/20 data-[state=active]:text-white">Clients</TabsTrigger>
             )}
             {/* This organisation's registered particulars for its tax invoices. */}
-            {!isTeamMember && (
+            {!isClient && !isTeamMember && (
               <TabsTrigger value="invoice-details" className="data-[state=active]:gradient-primary data-[state=active]:shadow-md data-[state=active]:shadow-primary/20 data-[state=active]:text-white">Invoice Details</TabsTrigger>
             )}
-            {user?.role === 'super_admin' && (
+            {!isClient && user?.role === 'super_admin' && (
               <TabsTrigger value="api-keys" className="data-[state=active]:gradient-primary data-[state=active]:shadow-md data-[state=active]:shadow-primary/20 data-[state=active]:text-white">
                 <Key className="h-3.5 w-3.5 mr-1.5" />API Keys
               </TabsTrigger>
             )}
-            {(user?.role === 'super_admin' || user?.role === 'admin') && (
+            {!isClient && (user?.role === 'super_admin' || user?.role === 'admin') && (
               <TabsTrigger value="access-keys" className="data-[state=active]:gradient-primary data-[state=active]:shadow-md data-[state=active]:shadow-primary/20 data-[state=active]:text-white">
                 <Key className="h-3.5 w-3.5 mr-1.5" />Get your API key
               </TabsTrigger>
@@ -1609,7 +1625,7 @@ export default function OrganizationSettings() {
           </TabsList>
 
           <div className="flex gap-2">
-            {selectedTab === "domains" && !isTeamMember && (
+            {selectedTab === "domains" && !isTeamMember && !isClient && (
               <Button onClick={() => setAddDomainDialogOpen(true)}>
                 <Plus className="h-4 w-4 mr-2" />
                 Add Domain
@@ -1623,6 +1639,14 @@ export default function OrganizationSettings() {
             )}
           </div>
         </div>
+
+        {/* ─────────── SCHEDULES TAB ─────────── */}
+        <TabsContent value="schedules" className="space-y-6">
+          {/* Same panel the Overview > Schedules page renders, so the two stay
+              identical. `embedded` drops the page heading: the card carries its
+              own title here, exactly as the All Domains tab does. */}
+          <DomainSweepCadence />
+        </TabsContent>
 
         <TabsContent value="domains" className="space-y-6">
           <Card className="border border-border">
@@ -1723,8 +1747,12 @@ export default function OrganizationSettings() {
                         ) : null
                       )}
 
-                      {/* Track Prompts — per-domain prompt refresh (costs tokens; confirmed first) */}
-                      {!isTeamMember && (
+                      {/* Track Prompts — per-domain prompt refresh (costs tokens;
+                          confirmed first). Never shown to a client: one click is a
+                          full re-run of the project on every platform - 30.65 credits
+                          on Kia Motors - and it carries no cooldown or kill switch.
+                          The backend refuses it for a client anyway (admins only). */}
+                      {!isTeamMember && !isClient && (
                         <Button
                           variant="outline"
                           size="sm"
@@ -1761,13 +1789,13 @@ export default function OrganizationSettings() {
                       <Button
                         variant="ghost"
                         size="icon"
-                        onClick={() => navigate(`/organization-settings/domains/${domain.id}${isTeamMember ? '?tab=integrations' : ''}`)}
-                        title="Domain Settings"
+                        onClick={() => navigate(`/organization-settings/domains/${domain.id}${isClient ? '?tab=health' : isTeamMember ? '?tab=integrations' : ''}`)}
+                        title={isClient ? "Health report" : "Domain Settings"}
                       >
-                        <Settings className="h-4 w-4" />
+                        {isClient ? <Activity className="h-4 w-4" /> : <Settings className="h-4 w-4" />}
                       </Button>
 
-                      {!isTeamMember && (
+                      {!isTeamMember && !isClient && (
                         <Button
                           variant="ghost"
                           size="icon"

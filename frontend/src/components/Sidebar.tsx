@@ -531,6 +531,10 @@ export const Sidebar = () => {
                   name: "Settings",
                   icon: Settings,
                   items: [
+                    // Not for clients: their way into a project is the gear on
+                    // the project pill at the top of this sidebar, and repeating
+                    // it down here made two routes to one page. Profile is left,
+                    // so a client's footer is a plain Profile link.
                     ...((user.role === 'admin' || user.role === 'super_admin' || (user.role === 'user' && checkPermission && checkPermission('organization_settings', 'read')))
                       ? [{ name: "Organization", path: "/organization-settings", icon: Settings }]
                       : []),

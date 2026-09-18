@@ -33,6 +33,7 @@ from .serializers import (
 from authentication.serializers import AccountSerializer
 from authentication.models import Account
 from keywords.models import Keyword, SecondaryKeyword
+from prompts.models import PromptAnalytics, SweepGuardState
 import json
 import re
 import logging
@@ -90,13 +91,19 @@ def get_openai_client():
 # $0, exactly like the chat/outline/humanize paths already do. A funded key
 # still gets full paid quality because the paid model is always tried first.
 FREE_INTERNAL_MODELS = [
-    'minimax/minimax-m3:free',
-    'google/gemma-4-31b-it:free',
-    'z-ai/glm-5.2:free',
-    # Free slugs get retired without notice (minimax-m3 already 404s). One more
-    # rung at the bottom, verified against OpenRouter on 2026-09-11, so the
-    # ladder still has a working step when the ones above it are gone.
-    'nex-agi/nex-n2.5-mini:free',
+    # Verified against OpenRouter on 2026-09-17 with a real completion each:
+    # every slug here answered, and the two that did not (nemotron-3.5-lightning
+    # timed out at 181s, inkling-small returned 403) are deliberately absent.
+    #
+    # Free slugs are retired without notice - 'minimax/minimax-m3:free' sat at
+    # the top of this list until it stopped being listed at all. Order is
+    # fastest-verified first, so the common case costs one call.
+    'google/gemma-4-31b-it:free',          # 1.4s
+    'inclusionai/ling-3.0-flash-vl:free',  # 1.3s
+    'nex-agi/nex-n2.5-mini:free',          # 3.5s
+    'nvidia/nemotron-3-super-120b-a12b:free',
+    'z-ai/glm-5.2:free',                   # slowest, and truncates on a tight
+                                           # max_tokens - keep it last
 ]
 
 
@@ -319,6 +326,66 @@ def get_google_genai_client():
         raise Exception(f"Failed to initialize Google GenAI client: {e}")
 
 
+def _sweep_context(organisation):
+    """What the Schedules screen needs to describe the sweep truthfully.
+
+    Returned on the existing /domains/ payload rather than from an endpoint of
+    its own: the screen already waits for that list, and a second request for
+    three scalars would only add a round trip. Skipped for `fields=minimal`,
+    which is the project switcher and wants the smallest payload it can get.
+
+    Everything here is measured, not configured. The platform list comes from
+    the analytics rows the engine actually wrote, because the setting that
+    drives dispatch (ENABLED_PLATFORMS) lives in the ENGINE's settings and the
+    backend cannot see it - reading a default out of backend settings would
+    print a confident number that no sweep agrees with.
+    """
+    context = {
+        'platforms': [],
+        'enabled': True,
+        'disabled_reason': '',
+        'last_started_at': None,
+    }
+
+    try:
+        # order_by() is load-bearing: PromptAnalytics.Meta.ordering is
+        # ['-created_at'], and Django adds an ORDER BY column into SELECT
+        # DISTINCT, which makes every row distinct and returns 13k "platforms".
+        context['platforms'] = sorted(
+            PromptAnalytics.objects
+            .filter(prompt__group__domain__organisation=organisation)
+            .order_by()
+            .values_list('platform', flat=True)
+            .distinct()
+        )
+    except Exception:
+        logger.warning("Schedules: could not read the platform list", exc_info=True)
+
+    try:
+        # The kill switch the engine's sweep guard reads. While it is off the
+        # sweep is refused even with force=True, so the schedule below is a
+        # plan rather than something that will happen - and the screen has to
+        # be able to say so instead of promising a next run.
+        row = (
+            SweepGuardState.objects
+            .filter(sweep='prompts')
+            .values('enabled', 'disabled_reason', 'last_started_at')
+            .first()
+        )
+        if row:
+            context.update(
+                enabled=bool(row['enabled']),
+                disabled_reason=row['disabled_reason'] or '',
+                last_started_at=row['last_started_at'],
+            )
+    except Exception:
+        # A missing row means the guard has never been written, which the guard
+        # itself reads as permissive. Never fail the domain list over it.
+        logger.warning("Schedules: could not read the sweep guard state", exc_info=True)
+
+    return context
+
+
 @api_view(['GET', 'POST'])
 @permission_classes([IsAuthenticated])
 def domain_list(request):
@@ -347,6 +414,7 @@ def domain_list(request):
                 domains.select_related('organisation')
                 .prefetch_related('health_checks')
                 .annotate(prompt_count_annotated=Count('prompt_groups__prompts', distinct=True))
+                .annotate(group_count_annotated=Count('prompt_groups', distinct=True))
                 # Prompts still being crawled (Track Prompts / weekly sweep). These
                 # re-run prompts without touching processing_status, so the domain
                 # row needs its own signal to show "Processing" while they run.
@@ -388,10 +456,13 @@ def domain_list(request):
             serializer = DomainMinimalSerializer(domains, many=True)
         else:
             serializer = DomainSerializer(domains, many=True)
-        return Response({
+        payload = {
             'domains': serializer.data,
             'total_count': total_count,
-        })
+        }
+        if request.query_params.get('fields') != 'minimal':
+            payload['sweep'] = _sweep_context(request.user.organisation)
+        return Response(payload)
     
     elif request.method == 'POST':
         # Only admins can create domains
@@ -2664,6 +2735,39 @@ def _reconstruct_categories_from_checks(checks_list):
     return categories
 
 
+def domain_for_user_or_404(request, domain_id):
+    """The domain, if this user is allowed to see it. Otherwise Http404.
+
+    Same rule as domain_detail: admins and service accounts see any domain in
+    their own organisation; everyone else needs an explicit DomainAccess row,
+    and that row must itself belong to their organisation.
+
+    Exists because the health-check views called a bare
+    get_object_or_404(Domain, id=domain_id) - no organisation, no access check -
+    so any authenticated account could read any domain's health report by id,
+    including another tenant's. Verified: a client in org 1 got HTTP 200 for a
+    domain in org 2. Raising 404 rather than 403 keeps a probe from confirming
+    that an id exists at all.
+    """
+    from django.http import Http404
+
+    if request.user.role in ('super_admin', 'admin') or getattr(
+        request.user, 'is_service_account', False
+    ):
+        try:
+            return Domain.objects.get(id=domain_id, organisation=request.user.organisation)
+        except Domain.DoesNotExist:
+            raise Http404('Domain not found')
+    try:
+        return DomainAccess.objects.select_related('domain').get(
+            user=request.user,
+            domain_id=domain_id,
+            domain__organisation=request.user.organisation,
+        ).domain
+    except DomainAccess.DoesNotExist:
+        raise Http404('Domain not found')
+
+
 @api_view(['GET'])
 @permission_classes([IsAuthenticated])
 def domain_health_check(request, domain_id):
@@ -2675,8 +2779,11 @@ def domain_health_check(request, domain_id):
     import requests as req
     from concurrent.futures import ThreadPoolExecutor
 
+    # Outside the try below: that block turns anything into a 500, which would
+    # report "you may not see this domain" as a server error.
+    domain = domain_for_user_or_404(request, domain_id)
+
     try:
-        domain = get_object_or_404(Domain, id=domain_id)
         url = domain.url
 
         # Ensure URL has protocol
@@ -2883,9 +2990,10 @@ def domain_health_check_history(request, domain_id):
     """
     from .models import DomainHealthCheck
 
-    try:
-        domain = get_object_or_404(Domain, id=domain_id)
+    # Outside the try below, for the same reason as domain_health_check.
+    domain = domain_for_user_or_404(request, domain_id)
 
+    try:
         # Get limit from query params (default 10, max 100)
         limit = request.GET.get('limit', '10')
         try:

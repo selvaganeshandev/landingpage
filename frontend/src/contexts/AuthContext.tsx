@@ -348,8 +348,13 @@ export function AuthProvider({ children }: AuthProviderProps) {
     // Client: read-only access to data modules, never admin modules.
     // Backend domain-scoping is the real boundary; this only shapes the UI.
     if (state.user?.role === 'client') {
-      const CLIENT_ADMIN_MODULES = ['organization_settings', 'team_management'];
-      if (CLIENT_ADMIN_MODULES.includes(module)) return false;
+      // team_management stays closed outright. organization_settings is opened
+      // at READ only, because a client needs one thing inside it: the list of
+      // their own projects and each project's health report. The page itself
+      // hides every other tab from a client, and the backend scopes the data
+      // by DomainAccess - a client sees their projects and no others.
+      if (module === 'team_management') return false;
+      if (module === 'organization_settings') return requiredLevel === 'read';
       return requiredLevel === 'read';
     }
 
