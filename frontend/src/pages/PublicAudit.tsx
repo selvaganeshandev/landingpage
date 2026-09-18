@@ -7,13 +7,13 @@
  *   only — exports live on /audits/<id>, behind login, because a public link
  *   is shareable by definition and anything reachable from it is public;
  *
- *   a lead gets the app frame with every left-panel row locked (ProspectShell),
- *   one action — have the audit emailed to them — and, if they arrived from the
- *   landing page, a way back to it. Nothing here leads into the app.
+ *   a lead gets the app frame with every left-panel row locked (ProspectShell)
+ *   and, if they arrived from the landing page, a way back to it. The report is
+ *   read here; nothing is posted out and nothing leads into the app.
  */
 import { useCallback, useEffect, useState } from "react";
 import { Link, useParams } from "react-router-dom";
-import { ArrowLeft, Check, Loader2, Mail } from "lucide-react";
+import { ArrowLeft, Loader2 } from "lucide-react";
 import { apiClient } from "@/services/api";
 import { useAuth } from "@/contexts/AuthContext";
 import { useToast } from "@/hooks/use-toast";
@@ -38,8 +38,6 @@ export default function PublicAudit() {
 
   const [audit, setAudit] = useState<PublicAuditType | null>(null);
   const [error, setError] = useState<{ status?: number; message: string } | null>(null);
-  const [emailing, setEmailing] = useState(false);
-  const [emailedTo, setEmailedTo] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     if (!token) return;
@@ -65,53 +63,6 @@ export default function PublicAudit() {
     document.title = audit?.brand_name ? `${audit.brand_name} — AI visibility audit · PromptMaxx` : "AI visibility audit · PromptMaxx";
     return () => { document.title = "PromptMaxx"; };
   }, [audit?.brand_name]);
-
-  const emailReport = async () => {
-    setEmailing(true);
-    try {
-      const res = await apiClient.emailPublicAudit(token);
-      setEmailedTo(res.to);
-      toast({ title: "On its way", description: `The full audit is heading to ${res.to}.` });
-    } catch (e) {
-      const err = e as Error & { status?: number };
-      toast({
-        title: err.status === 429 ? "Already sent" : "Could not send the email",
-        description: err.message,
-        variant: "destructive",
-      });
-    } finally {
-      setEmailing(false);
-    }
-  };
-
-  /** The lead's single action: have the audit sent to them.
-   *
-   *  No downloads and no exports are offered — not even greyed out, which only
-   *  teaches someone what they cannot have. The report is on screen, the copy
-   *  arrives by email, and the PDF and issue list are part of what converting
-   *  to a project buys. */
-  const lockedActions = (
-    <section className="no-print rounded-xl border border-border bg-muted/30 p-5">
-      <div className="flex flex-wrap items-center justify-between gap-4">
-        <div>
-          <p className="font-semibold">Want this audit in your inbox?</p>
-          <p className="text-sm text-muted-foreground mt-1">
-            We'll send the full audit to the address you signed up with, so you can forward it to your team.
-          </p>
-        </div>
-        {emailedTo ? (
-          <span className="inline-flex items-center gap-2 text-sm font-medium text-emerald-600">
-            <Check className="h-4 w-4" />Sent to {emailedTo}
-          </span>
-        ) : (
-          <Button onClick={emailReport} disabled={emailing}>
-            {emailing ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : <Mail className="h-4 w-4 mr-2" />}
-            Click for full audit
-          </Button>
-        )}
-      </div>
-    </section>
-  );
 
   const teamShell = (children: React.ReactNode) => (
     <div className="min-h-screen bg-background text-foreground">
@@ -221,7 +172,6 @@ export default function PublicAudit() {
 
   return shell(
     <div className="space-y-10">
-      {locked && lockedActions}
       <AuditReportView audit={audit} />
       {locked && backHome}
     </div>,

@@ -10,7 +10,6 @@ urlpatterns = [
     path('public/<str:token>/', views.audit_public, name='audit_public'),
     path('public/<str:token>/pdf/', views.audit_public_pdf, name='audit_public_pdf'),
     path('public/<str:token>/issues.csv', views.audit_public_issues_csv, name='audit_public_issues_csv'),
-    path('public/<str:token>/email/', views.audit_public_email, name='audit_public_email'),
     path('<int:pk>/pdf/', views.audit_pdf, name='audit_pdf'),
     path('<int:pk>/issues.csv', views.audit_issues_csv, name='audit_issues_csv'),
     path('claim/<str:token>/', views.audit_claim_by_token, name='audit_claim_by_token'),

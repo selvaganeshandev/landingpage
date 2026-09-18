@@ -2838,14 +2838,6 @@ export const apiClient = {
   },
   publicAuditIssuesCsvUrl: (token: string) => `${API_BASE_URL}/audits/public/${encodeURIComponent(token)}/issues.csv`,
 
-  /** Send the finished report to the address the audit was requested with.
-   *  The recipient lives on the audit row — the caller cannot choose it. */
-  emailPublicAudit: (token: string) =>
-    apiRequest<{ sent: boolean; to: string }>(`/audits/public/${encodeURIComponent(token)}/email/`, {
-      method: 'POST',
-      skipAuth: true,
-    }),
-
   getPublicAudit: (token: string) =>
     apiRequest<import('@/types/audit').PublicAudit>(`/audits/public/${encodeURIComponent(token)}/`, { skipAuth: true }),
 

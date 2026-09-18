@@ -235,64 +235,6 @@ def audit_public_issues_csv(request, token):
 EMAIL_RE = re.compile(r'^[^@\s]+@[^@\s]+\.[^@\s]+$')
 
 
-# How many times one public report may be mailed before the button stops
-# working. The lead can ask again if the first one went to spam, but a token
-# that leaked cannot be used to send mail indefinitely.
-PUBLIC_EMAIL_MAX_SENDS = 5
-
-
-@api_view(['POST'])
-@permission_classes([AllowAny])
-def audit_public_email(request, token):
-    """Send the finished report to the address this audit was requested with.
-
-    The lead has no account, so this is how they get their copy — the PDF and
-    the CSV stay locked until the team converts the audit into a project.
-
-    The recipient is ALWAYS audit.requester_email and is never read from the
-    request body. That is the whole security model here: a public token is
-    guessable-ish and shareable, so an endpoint that mailed an arbitrary
-    address on demand would be an open spam relay wearing our From: header.
-    """
-    audit = get_object_or_404(Audit, public_token=token)
-    if audit.is_expired:
-        return Response({'error': 'This audit link has expired.'}, status=status.HTTP_404_NOT_FOUND)
-    if audit.status != 'DONE':
-        return Response({'error': 'The audit has not finished yet.'}, status=status.HTTP_409_CONFLICT)
-
-    address = (audit.requester_email or '').strip()
-    if not address or not EMAIL_RE.match(address):
-        return Response(
-            {'error': 'This audit has no email address on file. Ask us for a copy instead.'},
-            status=status.HTTP_400_BAD_REQUEST,
-        )
-    if audit.email_count >= PUBLIC_EMAIL_MAX_SENDS:
-        return Response(
-            {'error': 'This report has already been sent several times. Please check your inbox and spam folder.'},
-            status=status.HTTP_429_TOO_MANY_REQUESTS,
-        )
-
-    from .notifications import send_report_email
-    if not send_report_email(audit, [address]):
-        return Response({'error': "We couldn't send the email just now. Please try again shortly."},
-                        status=status.HTTP_502_BAD_GATEWAY)
-    audit.record_email([address])
-    return Response({'sent': True, 'to': _mask_email(address)})
-
-
-def _mask_email(address):
-    """'someone@brand.com' -> 's•••••e@brand.com'.
-
-    The lead typed the address, so showing it back confirms where the mail
-    went; masking keeps a shared or shoulder-surfed screen from handing out a
-    colleague's full address.
-    """
-    name, _, domain = address.partition('@')
-    if len(name) <= 2:
-        return f"{name[:1]}•@{domain}"
-    return f"{name[0]}{'•' * (len(name) - 2)}{name[-1]}@{domain}"
-
-
 @api_view(['GET'])
 @permission_classes([IsAuthenticated])
 def audit_issues_csv(request, pk):
