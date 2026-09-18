@@ -6,7 +6,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import {
-  Download, ExternalLink, Eye, Link2, Loader2, MoreHorizontal, Play, RefreshCw, Search, Trash2, Zap, Info,
+  Download, ExternalLink, Eye, Link2, Loader2, Mail, MoreHorizontal, Play, RefreshCw, Search, Trash2, Zap, Info,
 } from "lucide-react";
 import { apiClient } from "@/services/api";
 import { useToast } from "@/hooks/use-toast";
@@ -322,16 +322,17 @@ export default function AuditEngine() {
               <TableHead>Source</TableHead>
               <TableHead>Ran</TableHead>
               <TableHead className="text-right">Opens</TableHead>
+              <TableHead>Emailed</TableHead>
               <TableHead>Claimed</TableHead>
               <TableHead className="w-10" />
             </TableRow>
           </TableHeader>
           <TableBody>
             {loading && !data ? (
-              <TableRow><TableCell colSpan={8} className="text-center py-10 text-muted-foreground"><Loader2 className="h-5 w-5 animate-spin inline" /></TableCell></TableRow>
+              <TableRow><TableCell colSpan={9} className="text-center py-10 text-muted-foreground"><Loader2 className="h-5 w-5 animate-spin inline" /></TableCell></TableRow>
             ) : rows.length === 0 ? (
               <TableRow>
-                <TableCell colSpan={8} className="text-center py-12 text-muted-foreground">
+                <TableCell colSpan={9} className="text-center py-12 text-muted-foreground">
                   No audits yet. Enter a website above to run the first one.
                 </TableCell>
               </TableRow>
@@ -349,6 +350,19 @@ export default function AuditEngine() {
                 <TableCell className="text-muted-foreground">{SOURCE_LABEL[row.source] || row.source}</TableCell>
                 <TableCell className="text-muted-foreground" title={row.created_at}>{timeAgo(row.created_at)}</TableCell>
                 <TableCell className="text-right tabular-nums">{row.opens}</TableCell>
+                <TableCell>
+                  {row.emailed_at ? (
+                    <span
+                      className="inline-flex items-center gap-1 text-xs text-emerald-600"
+                      title={`Sent to ${(row.emailed_to || []).join(", ") || "the requester"}${row.email_count > 1 ? ` · ${row.email_count} times` : ""} · ${row.emailed_at}`}
+                    >
+                      <Mail className="h-3.5 w-3.5" />Sent {timeAgo(row.emailed_at)}
+                      {row.email_count > 1 && <span className="text-muted-foreground">×{row.email_count}</span>}
+                    </span>
+                  ) : (
+                    <span className="text-xs text-muted-foreground">Not sent</span>
+                  )}
+                </TableCell>
                 <TableCell>
                   {row.is_claimed
                     ? <Badge variant="outline" className="text-emerald-600">Project → {row.claimed_domain_name}</Badge>

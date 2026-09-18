@@ -1,36 +1,45 @@
 /**
- * /audit/<token> — the shareable report. No login, no sidebar: this is what a
- * prospect opens from the landing page or a shared link.
+ * /audit/<token> — where a lead lands, straight from the landing page form.
  *
- * While the audit runs it shows the six-stage progress and polls; once DONE
- * it renders the same AuditReportView the admin previews in the app. "Claim
- * this audit" claims by token when the visitor is a signed-in admin, and
- * otherwise sends them through sign-in and back here.
+ * Two audiences, one route:
+ *
+ *   the team (a signed-in admin) gets the plain report frame, for reading
+ *   only — exports live on /audits/<id>, behind login, because a public link
+ *   is shareable by definition and anything reachable from it is public;
+ *
+ *   a lead gets the app frame with every left-panel row locked (ProspectShell),
+ *   one action — have the audit emailed to them — and, if they arrived from the
+ *   landing page, a way back to it. Nothing here leads into the app.
  */
 import { useCallback, useEffect, useState } from "react";
-import { Link, useNavigate, useParams } from "react-router-dom";
-import { Download, Link2, Loader2, Zap } from "lucide-react";
+import { Link, useParams } from "react-router-dom";
+import { ArrowLeft, Check, Loader2, Mail } from "lucide-react";
 import { apiClient } from "@/services/api";
 import { useAuth } from "@/contexts/AuthContext";
 import { useToast } from "@/hooks/use-toast";
 import { Button } from "@/components/ui/button";
 import { Progress } from "@/components/ui/progress";
-import { StageStrip, fmtDate } from "@/components/audits/AuditBits";
+import { RunTimer, StageStrip, fmtDate } from "@/components/audits/AuditBits";
 import { AuditReportView } from "@/components/audits/AuditReportView";
+import { ProspectShell } from "@/components/audits/ProspectShell";
 import type { PublicAudit as PublicAuditType } from "@/types/audit";
 
 const POLL_MS = 5_000;
 
 export default function PublicAudit() {
   const { token = "" } = useParams<{ token: string }>();
-  const navigate = useNavigate();
   const { toast } = useToast();
   const { user, isAuthenticated } = useAuth();
-  const canClaim = isAuthenticated && (user?.role === "admin" || user?.role === "super_admin");
+  // Anyone who is not the team is a lead, and gets the locked frame. Neither
+  // audience downloads anything from this page any more; the difference is the
+  // frame and the "email me the audit" card.
+  const isTeam = isAuthenticated && (user?.role === "admin" || user?.role === "super_admin");
+  const locked = !isTeam;
 
   const [audit, setAudit] = useState<PublicAuditType | null>(null);
   const [error, setError] = useState<{ status?: number; message: string } | null>(null);
-  const [claiming, setClaiming] = useState(false);
+  const [emailing, setEmailing] = useState(false);
+  const [emailedTo, setEmailedTo] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     if (!token) return;
@@ -57,41 +66,54 @@ export default function PublicAudit() {
     return () => { document.title = "PromptMaxx"; };
   }, [audit?.brand_name]);
 
-  const share = async () => {
-    const link = window.location.href;
+  const emailReport = async () => {
+    setEmailing(true);
     try {
-      await navigator.clipboard.writeText(link);
-      toast({ title: "Link copied", description: link });
-    } catch {
-      toast({ title: "Share this link", description: link });
-    }
-  };
-
-  const claim = async () => {
-    if (!audit) return;
-    if (!canClaim) {
-      navigate(`/signin?next=${encodeURIComponent(`/audit/${token}`)}`);
-      return;
-    }
-    setClaiming(true);
-    try {
-      const res = await apiClient.claimAuditByToken(token);
-      toast({ title: `${res.domain.name} is now a project`, description: "This audit is its Day-0 baseline. Keywords are being generated." });
-      navigate(`/audits/${res.audit.id}`);
+      const res = await apiClient.emailPublicAudit(token);
+      setEmailedTo(res.to);
+      toast({ title: "On its way", description: `The full audit is heading to ${res.to}.` });
     } catch (e) {
-      const err = e as Error & { status?: number; data?: { audit_id?: number; domain_id?: number } };
-      if (err.data?.audit_id && err.data?.domain_id) {
-        toast({ title: "Already a project", description: err.message });
-        navigate(`/audits/${err.data.audit_id}`);
-      } else {
-        toast({ title: "Could not claim this audit", description: err.message, variant: "destructive" });
-      }
+      const err = e as Error & { status?: number };
+      toast({
+        title: err.status === 429 ? "Already sent" : "Could not send the email",
+        description: err.message,
+        variant: "destructive",
+      });
     } finally {
-      setClaiming(false);
+      setEmailing(false);
     }
   };
 
-  const shell = (children: React.ReactNode) => (
+  /** The lead's single action: have the audit sent to them.
+   *
+   *  No downloads and no exports are offered — not even greyed out, which only
+   *  teaches someone what they cannot have. The report is on screen, the copy
+   *  arrives by email, and the PDF and issue list are part of what converting
+   *  to a project buys. */
+  const lockedActions = (
+    <section className="no-print rounded-xl border border-border bg-muted/30 p-5">
+      <div className="flex flex-wrap items-center justify-between gap-4">
+        <div>
+          <p className="font-semibold">Want this audit in your inbox?</p>
+          <p className="text-sm text-muted-foreground mt-1">
+            We'll send the full audit to the address you signed up with, so you can forward it to your team.
+          </p>
+        </div>
+        {emailedTo ? (
+          <span className="inline-flex items-center gap-2 text-sm font-medium text-emerald-600">
+            <Check className="h-4 w-4" />Sent to {emailedTo}
+          </span>
+        ) : (
+          <Button onClick={emailReport} disabled={emailing}>
+            {emailing ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : <Mail className="h-4 w-4 mr-2" />}
+            Click for full audit
+          </Button>
+        )}
+      </div>
+    </section>
+  );
+
+  const teamShell = (children: React.ReactNode) => (
     <div className="min-h-screen bg-background text-foreground">
       <style>{`@media print { .no-print { display: none !important; } body { background: #fff; } }`}</style>
       <header className="no-print border-b border-border">
@@ -100,28 +122,12 @@ export default function PublicAudit() {
             <Link to="/" className="text-lg font-bold tracking-tight text-primary">PROMPTMAXX</Link>
             <span className="text-sm text-muted-foreground">· Free AI visibility audit</span>
           </div>
+          {/* Read-only. Exports are on /audits/<id>, behind login. */}
           <div className="flex items-center gap-2">
             {audit?.status === "DONE" && (
-              <>
-                <span className="hidden sm:inline text-xs text-muted-foreground mr-2">
-                  Public link{audit.expires_at ? ` · expires ${fmtDate(audit.expires_at)}` : ""} · {audit.opens} open{audit.opens === 1 ? "" : "s"}
-                </span>
-                <Button variant="outline" size="sm" onClick={share}><Link2 className="h-4 w-4 mr-2" />Share</Button>
-                <Button variant="outline" size="sm" asChild>
-                  <a href={apiClient.publicAuditPdfUrl(token)} download={`promptmaxx-audit-${audit.host}.pdf`}><Download className="h-4 w-4 mr-2" />PDF</a>
-                </Button>
-                {audit.report?.crawl?.technical_issues && (
-                  <Button variant="outline" size="sm" asChild>
-                    <a href={apiClient.publicAuditIssuesCsvUrl(token)} download={`promptmaxx-issues-${audit.host}.csv`}><Download className="h-4 w-4 mr-2" />Issues CSV</a>
-                  </Button>
-                )}
-                {!audit.is_claimed && (
-                  <Button size="sm" onClick={claim} disabled={claiming}>
-                    {claiming ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : <Zap className="h-4 w-4 mr-2" />}
-                    Claim this audit
-                  </Button>
-                )}
-              </>
+              <span className="hidden sm:inline text-xs text-muted-foreground">
+                Public link{audit.expires_at ? ` · expires ${fmtDate(audit.expires_at)}` : ""} · {audit.opens} open{audit.opens === 1 ? "" : "s"}
+              </span>
             )}
           </div>
         </div>
@@ -135,6 +141,23 @@ export default function PublicAudit() {
       </footer>
     </div>
   );
+
+  /** A visitor who arrived from the landing page gets an explicit way back.
+   *  Browser-back already works (the landing page redirects rather than
+   *  replaces), but leaving the only exit to a browser chrome button is not an
+   *  exit a visitor can see. Absent for audits the team started by hand. */
+  const backHome = audit?.landing_url ? (
+    <div className="no-print pt-2">
+      <Button variant="outline" asChild>
+        <a href={audit.landing_url}>
+          <ArrowLeft className="h-4 w-4 mr-2" />Back to {new URL(audit.landing_url).hostname.replace(/^www\./, "")}
+        </a>
+      </Button>
+    </div>
+  ) : null;
+
+  const shell = (children: React.ReactNode) =>
+    locked ? <ProspectShell host={audit?.host}>{children}</ProspectShell> : teamShell(children);
 
   if (error) {
     return shell(
@@ -166,15 +189,20 @@ export default function PublicAudit() {
         <div>
           <p className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">AI visibility audit</p>
           <h1 className="text-3xl font-bold tracking-tight mt-1">Auditing {audit.host}</h1>
-          <p className="text-muted-foreground mt-1">Six stages · about three minutes · this page updates itself. If you left an email, we'll send you the link too.</p>
+          <p className="text-muted-foreground mt-1">
+            {audit.seo_enabled ? "Seven stages" : "Six stages"} · this page updates itself, so you can leave it open.
+          </p>
         </div>
         <div className="rounded-lg border border-border p-5 space-y-4">
           <div className="flex items-center justify-between text-sm">
-            <span className="font-medium">{audit.stage_label || "Queued"}{engines?.total ? ` · ${engines.done ?? 0} / ${engines.total} executions` : ""}</span>
-            <span className="text-muted-foreground tabular-nums">{audit.progress}%</span>
+            <span className="font-medium">{audit.stage_label || "Queued"}{engines?.total ? ` · ${engines.done ?? 0} / ${engines.total} answers` : ""}</span>
+            <span className="flex items-center gap-3">
+              <RunTimer startedAt={audit.created_at} finishedAt={audit.completed_at} running seoEnabled={audit.seo_enabled} />
+              <span className="text-muted-foreground tabular-nums">{audit.progress}%</span>
+            </span>
           </div>
           <Progress value={audit.progress} className="h-2" />
-          <StageStrip status={audit.status} stage={audit.stage} stageDetail={audit.stage_detail || {}} seoEnabled={false} />
+          <StageStrip status={audit.status} stage={audit.stage} stageDetail={audit.stage_detail || {}} seoEnabled={audit.seo_enabled} />
         </div>
         {audit.brand_name && (
           <div className="rounded-lg border border-border p-5">
@@ -193,22 +221,9 @@ export default function PublicAudit() {
 
   return shell(
     <div className="space-y-10">
+      {locked && lockedActions}
       <AuditReportView audit={audit} />
-      {!audit.is_claimed && (
-        <section className="no-print rounded-xl border border-primary/30 bg-primary/5 p-6 flex flex-wrap items-center justify-between gap-4">
-          <div>
-            <p className="font-semibold">The full plan is one click away</p>
-            <p className="text-sm text-muted-foreground mt-1">
-              Every prompt re-run for confidence, more engines, Google rankings, and a sequenced plan with the projected score at each step.
-              This audit becomes Day 0 of your project — nothing is recomputed.
-            </p>
-          </div>
-          <Button onClick={claim} disabled={claiming}>
-            {claiming ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : <Zap className="h-4 w-4 mr-2" />}
-            Claim this audit →
-          </Button>
-        </section>
-      )}
+      {locked && backHome}
     </div>,
   );
 }

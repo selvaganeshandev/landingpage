@@ -48,6 +48,48 @@ def _send(subject, body):
         return False
 
 
+def report_email(audit):
+    """The "your audit is ready" message, as (subject, text, html).
+
+    Mirrors the engine's publish-time email so a report sent by hand from the
+    audit page reads exactly like one sent automatically.
+    """
+    brand = audit.brand_name or audit.host
+    link = _public_url(audit)
+    ttl = int(getattr(settings, 'AUDIT_PUBLIC_TTL_DAYS', 30))
+    stage = (audit.geo_stage or '').replace('_', ' ') or 'unscored'
+    headline = (
+        f"GEO score {audit.geo_score if audit.geo_score is not None else '—'} · {stage} · "
+        f"mentioned on {audit.appearances} of {audit.total_runs} answers, cited on {audit.cited_runs}"
+    )
+    text = (
+        f"The AI visibility audit of {brand} is ready.\n\n{headline}\n\n"
+        f"Open the report: {link}\n\n"
+        f"The link works without a login and stays live for {ttl} days.\n\n— PromptMaxx"
+    )
+    html = (
+        f"<p>The AI visibility audit of <strong>{brand}</strong> is ready.</p>"
+        f"<p>{headline}</p>"
+        f'<p><a href="{link}">Open the report</a></p>'
+        f"<p style='color:#6b7280;font-size:13px'>The link works without a login and stays live for {ttl} days.</p>"
+        "<p>— PromptMaxx</p>"
+    )
+    return f'AI visibility audit of {brand}', text, html
+
+
+def send_report_email(audit, addresses):
+    """Email the public report link to `addresses`. Returns True when Mailgun accepted it."""
+    if not addresses:
+        return False
+    subject, text, html = report_email(audit)
+    try:
+        from llm_monitor.email_utils import send_mail
+        return bool(send_mail(subject, text, recipient_list=list(addresses), fail_silently=True, html_message=html))
+    except Exception as exc:  # noqa: BLE001 - a mail problem must not 500 the request
+        logger.warning('[Audit] report email not sent for audit %s: %s', audit.pk, exc)
+        return False
+
+
 def maybe_alert_warm_lead(audit):
     """Call after a public open has been counted (audit.opens is current)."""
     threshold = int(getattr(settings, 'AUDIT_WARM_LEAD_OPENS', 5))

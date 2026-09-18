@@ -27,9 +27,10 @@ Nothing here runs unless AUDIT_ENGINE_ENABLED is True.
 """
 import json
 import logging
+import random
 import re
 import time
-from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from types import SimpleNamespace
 from typing import Any, Dict, List, Optional
 
@@ -123,6 +124,52 @@ KEYWORD_PROMPT_MATCH = 0.3  # token-overlap needed to pair a keyword with a prom
 
 def country_info(code: str):
     return COUNTRIES.get((code or '').strip().lower(), COUNTRIES['us'])
+
+
+def _call_with_rate_limit_retry(fn, label: str):
+    """Run one provider call, retrying only on 429. Exponential, full jitter.
+
+    The engine stage asks every (prompt, engine) pair in one pool, so a provider
+    now sees a burst where it used to see a trickle and a 429 is an ordinary
+    event rather than an exception. That matters for the *result*, not just for
+    tidiness: without a retry a rate-limited call is stored as a failed answer,
+    and a missing answer reads as "the brand was not mentioned" — silently
+    deflating the GEO score instead of surfacing the problem. This is what keeps
+    the faster schedule from changing what the audit reports.
+
+    The jitter is the point, not a detail: a dozen threads hit the limit inside
+    the same second, and a fixed backoff would march them into the next window
+    together and collide again. Mirrors analytics_helpers._call_with_backoff.
+
+    Anything that is not a 429 is re-raised at once — retrying a bad request or
+    an auth failure only spends the wait budget before failing anyway.
+    """
+    from core.analytics_helpers import _is_rate_limited
+
+    attempts = max(0, int(getattr(settings, 'AUDIT_RATE_LIMIT_RETRIES', 4)))
+    base = float(getattr(settings, 'AUDIT_RATE_LIMIT_BASE_DELAY', 2.0))
+    max_wait = float(getattr(settings, 'AUDIT_RATE_LIMIT_MAX_WAIT', 120.0))
+
+    waited = 0.0
+    for attempt in range(attempts + 1):
+        try:
+            return fn()
+        except Exception as exc:  # noqa: BLE001 - re-raised below unless it is a 429
+            if not _is_rate_limited(exc) or attempt == attempts:
+                raise
+            delay = random.uniform(0, base * (2 ** attempt))
+            if waited + delay > max_wait:
+                logger.warning(
+                    '[Audit] %s rate limited; %.0fs wait budget exhausted after %d attempts.',
+                    label, max_wait, attempt + 1,
+                )
+                raise
+            waited += delay
+            logger.info(
+                '[Audit] %s rate limited (attempt %d/%d); retrying in %.1fs.',
+                label, attempt + 1, attempts + 1, delay,
+            )
+            time.sleep(delay)
 
 
 def _hosts_of(urls: List[str]) -> List[str]:
@@ -699,15 +746,32 @@ class AuditProcessor:
         audit.set_stage('engines', progress=30, done=done, total=total)
 
         group = self._group_stand_in()
-        max_workers = max(1, int(getattr(settings, 'MAX_CONCURRENT_PROMPT_PLATFORMS', 3)))
+        # One pool over every (prompt, engine, run) triple.
+        #
+        # This used to open a fresh pool inside the prompt loop, so each prompt
+        # cost max(engine latency) and that was paid once per prompt: measured
+        # on audit #26, eight prompts x ~78s = ~625s of an 11.9 minute audit,
+        # against a floor of 93s (the single slowest call). The calls are
+        # independent of each other, so the nesting bought nothing.
+        #
+        # Nothing about the calls changes - same prompts, same models, same
+        # parameters, same answers, same scores. Only the schedule. The two
+        # things that could have made the result differ are handled: 429s are
+        # retried (see _call_with_rate_limit_retry) so a burst cannot turn into
+        # a missing answer, and the cap keeps the burst small enough that the
+        # providers stay happy. Raising the cap trades provider goodwill for
+        # wall clock; 8-12 is the useful range.
+        max_workers = max(1, int(getattr(settings, 'AUDIT_MAX_CONCURRENT_CALLS', 8)))
 
-        def run_one(prompt, platform, label, handler, client):
+        def run_one(prompt, label, handler, client):
             """Pool thread: network only, no ORM."""
             started = time.monotonic()
             if client is None:
                 return {'status': 'skipped', 'error': 'no API key for this engine'}
             try:
-                result = handler(prompt['text'], audit.website, client, group)
+                result = _call_with_rate_limit_retry(
+                    lambda: handler(prompt['text'], audit.website, client, group), label,
+                )
             except Exception as exc:  # noqa: BLE001
                 from core.analytics_helpers import _is_rate_limited
                 return {
@@ -720,19 +784,27 @@ class AuditProcessor:
                 return {'status': 'failed', 'error': 'engine returned no answer', 'latency_ms': latency}
             return {'result': result, 'latency_ms': latency}
 
-        for prompt in prompts:
-            for run_index in range(1, runs + 1):
-                todo = [e for e in engines if (prompt['index'], e[1], run_index) not in existing]
-                if not todo:
-                    continue
-                with ThreadPoolExecutor(max_workers=min(max_workers, len(todo)), thread_name_prefix='audit') as pool:
-                    futures = {
-                        label: pool.submit(run_one, prompt, platform, label, handler, client)
-                        for platform, label, handler, client in todo
-                    }
-                    outcomes = {label: f.result() for label, f in futures.items()}
+        # Resume is unchanged: only answered triples are skipped, so a re-run
+        # after a provider outage still re-asks the failed ones.
+        todo = [
+            (prompt, run_index, label, handler, client)
+            for prompt in prompts
+            for run_index in range(1, runs + 1)
+            for _platform, label, handler, client in engines
+            if (prompt['index'], label, run_index) not in existing
+        ]
 
-                for label, out in outcomes.items():
+        if todo:
+            with ThreadPoolExecutor(max_workers=min(max_workers, len(todo)), thread_name_prefix='audit') as pool:
+                futures = {
+                    pool.submit(run_one, prompt, label, handler, client): (prompt, run_index, label)
+                    for prompt, run_index, label, handler, client in todo
+                }
+                # Rows are written here, on the main thread, as each answer
+                # lands - never inside the pool, so the workers stay ORM-free.
+                for future in as_completed(futures):
+                    prompt, run_index, label = futures[future]
+                    out = future.result()
                     if 'result' in out:
                         fields = self._evidence_row(prompt, label, out['result'], out['latency_ms'])
                     else:
@@ -750,8 +822,8 @@ class AuditProcessor:
                         },
                     )
                     done += 1
-                # 30 -> 70 across the engine stage
-                audit.set_stage('engines', progress=30 + int(40 * done / total), done=done, total=total)
+                    # 30 -> 70 across the engine stage
+                    audit.set_stage('engines', progress=30 + int(40 * done / total), done=done, total=total)
 
         answered = AuditPromptResult.objects.filter(audit=audit, status='ok').count()
         if answered == 0:
@@ -771,45 +843,94 @@ class AuditProcessor:
         audit.set_stage('serp', progress=72)
 
         keywords = self._discover_keywords()
-        _name, region, language = country_info(audit.country)
+        _name, _region, language = country_info(audit.country)
         isocode = (audit.country or 'us').lower()
-        from core.seo_ranking_processor import fetch_serp_data, parse_json_serp_response
+        from core.audit_serp import fetch_serp
+        from core.seo_ranking_processor import parse_json_serp_response
 
         volumes = self._keyword_volumes(keywords, isocode, language)
         existing = set(AuditKeywordResult.objects.filter(audit=audit).values_list('keyword', flat=True))
         done = len(existing)
         total = len(keywords)
-        for kw in keywords:
-            if kw in existing:
-                continue
-            position, url, outranked = None, '', []
-            try:
-                data = fetch_serp_data(kw, region, isocode, language)
-                if data:
-                    parsed = parse_json_serp_response(data, audit.website)
-                    position = parsed.get('rank') or None
-                    url = parsed.get('url') or ''
-                    comps = parsed.get('competitors') or {}
-                    ranked = sorted(
-                        ((d, r) for d, r in comps.items() if isinstance(r, (int, float)) and r),
-                        key=lambda x: x[1],
+        todo = [kw for kw in keywords if kw not in existing]
+
+        def rank_one(kw):
+            """Pool thread: network only, no ORM.
+
+            A raised exception here means we never got an answer, and the
+            caller must NOT store that as a position. Writing an unanswered
+            lookup down as 'no position' is indistinguishable from a real
+            absence in the report, so a broken key or a rate limit would tell
+            the prospect they rank for nothing on Google when nobody asked.
+            """
+            data = fetch_serp(kw, isocode, language)
+            if not data:
+                return {'position': None, 'url': '', 'outranked': []}
+            parsed = parse_json_serp_response(data, audit.website)
+            position = parsed.get('rank') or None
+            # parse_json_serp_response returns competitors keyed by rank, with a
+            # dict per entry: {'2': {'domain': 'x.com', 'rank': 2, ...}}.
+            entries = []
+            for key, value in (parsed.get('competitors') or {}).items():
+                if isinstance(value, dict):
+                    domain, rank = value.get('domain'), value.get('rank')
+                else:  # tolerate a plain {domain: rank} map
+                    domain, rank = key, value
+                if domain and isinstance(rank, (int, float)) and rank:
+                    entries.append((domain, rank))
+            entries.sort(key=lambda pair: pair[1])
+            return {
+                'position': position,
+                'url': parsed.get('url') or '',
+                'outranked': [d for d, r in entries if position is None or r < position][:10],
+            }
+
+        # One pool over the keywords, for the same reason the engine stage uses
+        # one: these lookups are independent, and 25 of them in series added
+        # minutes to an audit that now takes about three.
+        max_workers = max(1, int(getattr(settings, 'AUDIT_MAX_CONCURRENT_CALLS', 8)))
+        unanswered = []
+
+        if todo:
+            with ThreadPoolExecutor(max_workers=min(max_workers, len(todo)), thread_name_prefix='audit-serp') as pool:
+                futures = {pool.submit(rank_one, kw): kw for kw in todo}
+                for future in as_completed(futures):
+                    kw = futures[future]
+                    try:
+                        out = future.result()
+                    except Exception as exc:  # noqa: BLE001
+                        # No row is written: the keyword stays absent from the
+                        # report rather than appearing as an unranked one, and
+                        # a re-run will ask again because it is not in
+                        # `existing`.
+                        logger.warning('[Audit] SERP lookup failed for %r: %s', kw, exc)
+                        unanswered.append(kw)
+                        continue
+                    AuditKeywordResult.objects.update_or_create(
+                        audit=audit, keyword=kw,
+                        defaults={
+                            'search_volume': volumes.get(kw.lower()),
+                            'position': int(out['position']) if out['position'] else None,
+                            'ranking_url': out['url'][:1000],
+                            'outranked_by': out['outranked'],
+                            'geo_engines_mentioning': self._engines_mentioning_for(kw),
+                        },
                     )
-                    outranked = [d for d, r in ranked if position is None or r < position][:10]
-            except Exception as exc:  # noqa: BLE001
-                logger.warning('[Audit] SERP failed for %r: %s', kw, exc)
-            AuditKeywordResult.objects.update_or_create(
-                audit=audit, keyword=kw,
-                defaults={
-                    'search_volume': volumes.get(kw.lower()),
-                    'position': int(position) if position else None,
-                    'ranking_url': url[:1000],
-                    'outranked_by': outranked,
-                    'geo_engines_mentioning': self._engines_mentioning_for(kw),
-                },
+                    done += 1
+                    audit.set_stage('serp', progress=72 + int(13 * done / max(total, 1)), done=done, total=total)
+
+        if unanswered and done == 0:
+            # Every lookup failed — almost always a credentials or quota problem.
+            # Failing the stage is better than publishing an SEO section built
+            # from nothing.
+            raise AuditError(
+                'No keyword could be ranked (%d attempted). Check the DataForSEO credentials.' % len(unanswered)
             )
-            done += 1
-            audit.set_stage('serp', progress=72 + int(13 * done / max(total, 1)), done=done, total=total)
-        audit.set_stage('serp', progress=85, done=done, total=total, complete=True)
+
+        audit.set_stage(
+            'serp', progress=85, done=done, total=total, complete=True,
+            ranked=done, unanswered=len(unanswered),
+        )
 
     def _discover_keywords(self) -> List[str]:
         cached = (self.audit.grounding or {}).get('keywords')
@@ -1039,6 +1160,14 @@ class AuditProcessor:
             outcome = notify_audit_published(audit)
         except Exception as exc:  # noqa: BLE001
             logger.warning('[Audit] notifications failed for audit %s: %s', audit.pk, exc)
+        if outcome.get('emailed'):
+            # The leads table reads these columns, so an automatic send is
+            # recorded the same way the "Email report" button records one.
+            try:
+                from core.audit_notifications import requester_address
+                audit.record_email([requester_address(audit)])
+            except Exception as exc:  # noqa: BLE001 - bookkeeping must not fail a published audit
+                logger.info('[Audit] could not record the email for audit %s: %s', audit.pk, exc)
         merged = dict(audit.stage_detail or {})
         merged['publish'] = {**merged.get('publish', {}), **outcome}
         audit.stage_detail = merged

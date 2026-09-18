@@ -209,14 +209,26 @@ class DiscoveryTests(SimpleTestCase):
             d = c.discover_urls('https://e.com', 'e.com', c.parse_robots('Sitemap: https://e.com/sitemap.xml'), limit=4)
         self.assertTrue(d['sitemap_present'])
         self.assertEqual(d['sitemap_children'], 1)
-        self.assertEqual(d['urls'], ['https://e.com/', 'https://www.e.com/a', 'https://e.com/c', 'https://e.com/d'])
+        # Which URLs survive, not what order the sitemap listed them in: /tag/x
+        # and file.pdf are filtered by SKIP_PATH_RE, other.com is off-site, and
+        # ranking decides the rest (see PageSamplerTests).
+        self.assertEqual(d['urls'][0], 'https://e.com/')
+        self.assertEqual(
+            sorted(d['urls']),
+            sorted(['https://e.com/', 'https://www.e.com/a', 'https://e.com/c', 'https://e.com/d']),
+        )
 
     def test_falls_back_to_homepage_links(self):
         html = '<a href="/pricing">p</a><a href="https://e.com/about?x=1">a</a><a href="https://other.com/z">o</a><a href="/login">l</a>'
         with patch.object(c, 'fetch_text', return_value=None):
             d = c.discover_urls('https://e.com', 'e.com', c.parse_robots(None), limit=10, homepage_html=html)
         self.assertFalse(d['sitemap_present'])
-        self.assertEqual(d['urls'], ['https://e.com/', 'https://e.com/pricing', 'https://e.com/about'])
+        # /login is filtered, other.com is off-site; the query string is dropped.
+        self.assertEqual(d['urls'][0], 'https://e.com/')
+        self.assertEqual(
+            sorted(d['urls']),
+            sorted(['https://e.com/', 'https://e.com/pricing', 'https://e.com/about']),
+        )
 
 
 class CrawlSiteTests(SimpleTestCase):
@@ -293,3 +305,185 @@ class CrawlSiteTests(SimpleTestCase):
         self.assertEqual(s['sitemap_health']['listed'], 1)
         self.assertEqual(len(s['sitemap_health']['not_in_sitemap']), 3)
         self.assertEqual(r['pages'][0]['index'], {'verdict': 'indexable', 'reason': ''})
+
+class PageSamplerTests(SimpleTestCase):
+    """What the audit reads is decided here, so it gets its own tests.
+
+    Before ranking, discover_urls took sitemap order. On a large site that is
+    generated pages first: coinbase.com gave 11 of 12 sampled pages as
+    /converter/<coin>/<coin> and binance.com 11 of 12 as /trade/<PAIR>, which
+    carry no prose, no schema and nothing an engine would cite — and mostly
+    403 anyway. The audit then reported on one page, or none.
+    """
+
+    databases = []
+
+    def test_generated_permutation_pages_lose_to_real_ones(self):
+        urls = ['https://coinbase.com/'] + [
+            f'https://www.coinbase.com/converter/{a}/{b}'
+            for a, b in [('brm', '00'), ('00', 'steth'), ('steth', '00'), ('00', 'mpp'), ('mpp', '00')]
+        ] + [
+            'https://www.coinbase.com/about',
+            'https://www.coinbase.com/blog/what-is-bitcoin',
+            'https://www.coinbase.com/learn/crypto-basics',
+        ]
+        picked = c.rank_candidates(urls, 4)
+        self.assertEqual(picked[0], 'https://coinbase.com/', 'the homepage always leads')
+        self.assertNotIn('/converter/', ' '.join(picked[1:]))
+
+    def test_trading_pairs_lose_too(self):
+        urls = ['https://binance.com/'] + [
+            f'https://www.binance.com/en/trade/{p}' for p in ('1000CAT_USDT', '0G_USDC', 'BTC_USDT', 'ETH_USDC')
+        ] + ['https://www.binance.com/en/about', 'https://www.binance.com/en/support/faq']
+        picked = c.rank_candidates(urls, 3)
+        self.assertNotIn('/trade/', ' '.join(picked[1:]))
+
+    def test_one_section_cannot_fill_the_sample(self):
+        """A 5,000-post blog would otherwise crowd out every other page type."""
+        urls = ['https://e.com/'] + [f'https://e.com/blog/post-{i}' for i in range(20)] + [
+            'https://e.com/about', 'https://e.com/pricing',
+        ]
+        picked = c.rank_candidates(urls, 6)
+        blog = [u for u in picked if '/blog/' in u]
+        self.assertLessEqual(len(blog), c.MAX_PER_SECTION)
+        self.assertIn('https://e.com/about', picked)
+        self.assertIn('https://e.com/pricing', picked)
+
+    def test_the_cap_does_not_starve_a_small_site(self):
+        """Two sections and a limit of 8 must still return 8, not 7."""
+        urls = ['https://e.com/'] + [f'https://e.com/blog/post-{i}' for i in range(10)]
+        picked = c.rank_candidates(urls, 8)
+        self.assertEqual(len(picked), 8)
+
+    def test_shallow_named_pages_beat_deep_ones(self):
+        urls = [
+            'https://e.com/',
+            'https://e.com/a/b/c/d/e/deep-page',
+            'https://e.com/about',
+        ]
+        self.assertEqual(c.rank_candidates(urls, 2)[1], 'https://e.com/about')
+
+    def test_an_empty_list_is_handled(self):
+        self.assertEqual(c.rank_candidates([], 5), [])
+
+    def test_a_language_prefix_does_not_hide_what_a_page_is(self):
+        """Audit #39 (binance.com): every sampled URL was /en-PH/trade/<PAIR>.
+
+        The ranker reads the first path segment to decide what kind of page it
+        is, and binance puts the locale there — so it saw "en-PH", the machine
+        pattern never matched /trade/, and the section cap grouped eleven
+        trading pairs as one section. Any international site hits this.
+        """
+        self.assertEqual(c._page_rank('https://b.com/en-PH/about'),
+                         c._page_rank('https://b.com/about'))
+        self.assertEqual(c._page_rank('https://b.com/en-PH/trade/1000CAT_USDC'),
+                         c._page_rank('https://b.com/trade/BTC_USDT'))
+        self.assertLess(c._page_rank('https://b.com/en-PH/about'),
+                        c._page_rank('https://b.com/en-PH/trade/1000CAT_USDC'))
+
+    def test_the_section_cap_counts_the_section_not_the_language(self):
+        urls = ['https://b.com/'] + [
+            f'https://b.com/en-PH/trade/{p}' for p in
+            ('1000CAT_USDC', 'AUCTION_USDT', 'MUBARAK_USDC', 'VIRTUAL_USDT', 'BIGTIME_USDT')
+        ] + ['https://b.com/en-PH/about', 'https://b.com/en-PH/support/faq']
+        picked = c.rank_candidates(urls, 3)
+        self.assertEqual(picked[0], 'https://b.com/')
+        self.assertNotIn('/trade/', ' '.join(picked[1:]), 'real pages must come first')
+
+    def test_only_real_language_codes_are_stripped(self):
+        """A shape rule would eat /api/, /faq/ and /dev/ — all real sections."""
+        self.assertEqual(c._strip_locale(['api', 'docs']), ['api', 'docs'])
+        self.assertEqual(c._strip_locale(['faq', 'billing']), ['faq', 'billing'])
+        self.assertEqual(c._strip_locale(['en', 'about']), ['about'])
+        self.assertEqual(c._strip_locale(['en-PH', 'about']), ['about'])
+        self.assertEqual(c._strip_locale(['pt_BR', 'blog']), ['blog'])
+        # nothing follows it, so it is the page itself
+        self.assertEqual(c._strip_locale(['en']), ['en'])
+
+    def test_an_ordinary_slug_is_not_mistaken_for_a_ticker(self):
+        """The pair rule must not swallow the pages worth reading."""
+        for slug in ('how-to-invest', 'about-us', 'best-crm-software', 'what-is-bitcoin'):
+            self.assertFalse(c.GENERATED_SEG_RE.match(slug), slug)
+        for pair in ('BTC_USDT', '1000CAT_USDC', 'AUCTION_USDT'):
+            self.assertTrue(c.GENERATED_SEG_RE.match(pair), pair)
+
+    def test_sites_without_a_locale_prefix_are_unchanged(self):
+        """colgate and elevenlabs crawl correctly today; keep it that way."""
+        urls = ['https://e.com/', 'https://e.com/about', 'https://e.com/blog/post-1',
+                'https://e.com/pricing', 'https://e.com/a/b/c/d/deep']
+        picked = c.rank_candidates(urls, 4)
+        self.assertEqual(picked[0], 'https://e.com/')
+        self.assertIn('https://e.com/about', picked)
+        self.assertIn('https://e.com/pricing', picked)
+        self.assertNotIn('https://e.com/a/b/c/d/deep', picked)
+
+class RescueFetchTests(SimpleTestCase):
+    """Blocked pages get one retry through DataBlue, which renders JavaScript.
+
+    Our own fetcher reads ordinary sites fine (bybit 12/12, colgate 12/12) and
+    gets nothing from protected ones: binance answers an empty HTTP 202,
+    coinbase 403s everything but the homepage. DataBlue is billed per page, so
+    it is a rescue and never the default.
+    """
+
+    databases = []
+
+    def test_what_counts_as_blocked(self):
+        blocked = [
+            {'text': None, 'status': 403, 'error': ''},              # coinbase
+            {'text': None, 'status': 202, 'error': ''},              # binance: answered, empty
+            {'text': None, 'status': 0, 'error': 'connection'},      # kraken: refused
+            {'text': None, 'status': 429, 'error': ''},
+            {'text': None, 'status': 503, 'error': ''},
+        ]
+        for resp in blocked:
+            self.assertTrue(c._looks_blocked(resp), resp)
+
+    def test_what_does_not_count(self):
+        # A 404 is an answer and a real finding — spending a credit to confirm
+        # a page is missing would be waste. A page we read needs no rescue.
+        for resp in ({'text': '<html>hi</html>', 'status': 200, 'error': ''},
+                     {'text': None, 'status': 404, 'error': ''},
+                     {'text': None, 'status': 410, 'error': ''},
+                     {'text': None, 'status': 500, 'error': ''}):
+            self.assertFalse(c._looks_blocked(resp), resp)
+
+    def test_no_key_means_no_rescue(self):
+        with patch.object(c, 'fetch_response', return_value={'text': None, 'status': 403, 'error': '', 'headers': {}}):
+            with self.settings(DATABLUE_API_KEY=''):
+                page = c.fetch_page('https://e.com/x', 'e.com', allow_rescue=True)
+        self.assertIn('parse_error', page)
+        self.assertNotIn('rescued', page)
+
+    def test_a_blocked_page_is_rescued(self):
+        html = '<html><head><title>Real page</title></head><body>' + ('word ' * 200) + '</body></html>'
+        with patch.object(c, 'fetch_response', return_value={'text': None, 'status': 403, 'error': '', 'headers': {}}), \
+             patch.object(c, 'rescue_fetch', return_value=html):
+            page = c.fetch_page('https://e.com/x', 'e.com', allow_rescue=True)
+        self.assertNotIn('parse_error', page)
+        self.assertTrue(page['rescued'])
+        self.assertEqual(page['title'], 'Real page')
+
+    def test_a_readable_page_is_never_rescued(self):
+        """The credit-saving property: never pay for a page we already have."""
+        html = '<html><head><title>Fine</title></head><body>' + ('word ' * 200) + '</body></html>'
+        calls = []
+        with patch.object(c, 'fetch_response', return_value={'text': html, 'status': 200, 'error': '', 'headers': {}}), \
+             patch.object(c, 'rescue_fetch', side_effect=lambda u: calls.append(u)):
+            page = c.fetch_page('https://e.com/x', 'e.com', allow_rescue=True)
+        self.assertEqual(calls, [], 'a page we could read must not cost a DataBlue credit')
+        self.assertNotIn('rescued', page)
+
+    def test_rescue_is_off_unless_asked_for(self):
+        calls = []
+        with patch.object(c, 'fetch_response', return_value={'text': None, 'status': 403, 'error': '', 'headers': {}}), \
+             patch.object(c, 'rescue_fetch', side_effect=lambda u: calls.append(u)):
+            c.fetch_page('https://e.com/x', 'e.com')   # allow_rescue defaults to False
+        self.assertEqual(calls, [])
+
+    def test_a_failing_rescue_leaves_the_page_failed(self):
+        with patch.object(c, 'fetch_response', return_value={'text': None, 'status': 403, 'error': '', 'headers': {}}), \
+             patch.object(c, 'rescue_fetch', return_value=None):
+            page = c.fetch_page('https://e.com/x', 'e.com', allow_rescue=True)
+        self.assertEqual(page['parse_error'], 'HTTP 403')
+        self.assertNotIn('rescued', page)

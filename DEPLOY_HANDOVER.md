@@ -169,6 +169,54 @@ pre-existing and not yours.
 
 ---
 
+## Phase 1.5 — settings the release needs
+
+Skip only if you have checked and the answer is none. **A missing setting is the
+one failure here that is completely silent**: a missing migration raises, a
+missing route 404s, a mis-built bundle shows up in the hash check — but a
+setting that is not there just makes the server behave differently, with nothing
+in the logs to say so.
+
+Settings take effect at the restart in 2d, so they must be in place before it.
+
+### There are two `.env` files, and they are not interchangeable
+
+| File | Read by |
+|---|---|
+| `/root/python/v3.12/llm-monitor/backend/.env` | Django / gunicorn — the API |
+| `/root/python/v3.12/llm-monitor/engine/.env` | the engine and **all three celery workers** |
+
+Each project loads the `.env` beside its own `manage.py`. They routinely hold
+**different values for the same key** — locally `AUDIT_PROMPT_COUNT` is 6 in one
+and 8 in the other — so "it is already set" is never an answer until you say
+*which file*. A worker setting written to `backend/.env` changes nothing, and
+nothing warns you.
+
+Read what is there now before you add anything:
+
+```bash
+ssh promptmaxx 'grep -E "^(AUDIT|MAILGUN|DATABLUE|DATAFORSEO)_" /root/python/v3.12/llm-monitor/backend/.env'
+ssh promptmaxx 'grep -E "^(AUDIT|MAILGUN|DATABLUE|DATAFORSEO)_" /root/python/v3.12/llm-monitor/engine/.env'
+```
+
+Append what the release needs — to the right file, and never overwriting the
+file wholesale:
+
+```bash
+ssh promptmaxx "grep -q '^SETTING_NAME=' /root/python/v3.12/llm-monitor/engine/.env \
+  || echo 'SETTING_NAME=value' >> /root/python/v3.12/llm-monitor/engine/.env"
+```
+
+### Defaults are a decision, not a safety net
+
+A new setting with a default **changes production the moment the code lands**,
+without anyone typing anything. Before deploying, list every setting the release
+adds and ask of each: *if nobody sets this, is the default what production
+should do?* Where the answer is no, set it explicitly here. The per-release
+`DEPLOY_COMMANDS.md` is where that list belongs.
+
+---
+
 ## Phase 2 — backend and engine
 
 New API endpoints are additive: the currently-deployed frontend never calls them,
@@ -207,7 +255,33 @@ Read the migration file first:
 
 - `AddField`, `CreateModel`, `ADD COLUMN IF NOT EXISTS` — additive and safe.
 - `RemoveField`, `AlterField`, `RunSQL` that drops anything — **stop and ask Arun.**
-  These need a maintenance window.
+  These need a maintenance window **and a snapshot first** (below).
+
+### Snapshot the database before anything that is not purely additive
+
+`migrate <app> <previous>` reverses the *schema*. It does not bring back data a
+dropped column took with it. The webroot has a backup in 3a; give the database
+the same courtesy, and take it **before** the migration, not after:
+
+```bash
+ssh promptmaxx 'set -a; . /root/python/v3.12/llm-monitor/backend/.env; set +a;
+  PGPASSWORD="$DB_PASSWORD" pg_dump -h "${DB_HOST:-localhost}" -p "${DB_PORT:-5432}" \
+    -U "$DB_USER" -d "$DB_NAME" -Fc \
+    -f "/root/db-$(date +%Y%m%d-%H%M%S).dump"'
+
+ssh promptmaxx 'ls -lh /root/db-*.dump | tail -1'    # confirm it is not 0 bytes
+```
+
+To restore it:
+
+```bash
+ssh promptmaxx 'set -a; . /root/python/v3.12/llm-monitor/backend/.env; set +a;
+  PGPASSWORD="$DB_PASSWORD" pg_restore -h "${DB_HOST:-localhost}" -p "${DB_PORT:-5432}" \
+    -U "$DB_USER" -d "$DB_NAME" --clean --if-exists /root/db-<timestamp>.dump'
+```
+
+An additive release does not need this. Take it anyway if you are unsure which
+kind you have — it costs a minute and the alternative has no undo.
 
 ### 2d. Verify it boots, THEN restart
 
@@ -297,7 +371,9 @@ It must match the filename `npm run build` printed in 3b.
 |---|---|
 | Frontend | `rsync -a --delete /var/www/html.bak-<ts>/ /var/www/html/` |
 | Backend / engine | `git reset --hard <sha from 2a>` then restart the five services |
-| Migrations | `manage.py migrate <app> <previous_number>` |
+| Migrations | `manage.py migrate <app> <previous_number>` — schema only |
+| Dropped data | `pg_restore` from the 2c snapshot; there is no other route |
+| A setting | edit the right `.env` (see Phase 1.5) and restart the five services |
 
 Additive migrations usually need **no** rollback — old code ignores new columns
 and tables quite happily. Reverting the code alone is normally enough, and faster.
@@ -312,18 +388,24 @@ and tables quite happily. Reverting the code alone is normally enough, and faste
 - [ ] New endpoints return 401, not 404 or 500
 - [ ] `/var/log/celery/worker.log` shows no new tracebacks
 - [ ] `showmigrations | grep -c "\[ \]"` is 0
+- [ ] Every setting the release needs is in the **right** `.env` (Phase 1.5)
+- [ ] Database snapshot taken, if the release was not purely additive
 - [ ] Rollback point written down somewhere you can find it
 
 ---
 
-## Three things people get wrong
+## Four things people get wrong
 
 1. **The server runs `production`, not `main`.** Deploying `main` is the most
    common mistake here.
 2. **`frontend/.env.local` must hold production URLs at build time.** See 3c.
-3. **You can stop after any phase.** Phase 1 is just git. Phase 2 is additive and
-   invisible to users. Phase 3 is the only user-facing step. Never jump straight
-   to Phase 3.
+3. **You can stop after any phase.** Phase 1 is just git. Phase 3 is the only
+   user-facing step. Never jump straight to Phase 3.
+4. **Phase 2 is usually invisible to users, but check rather than assume.** It is
+   invisible when the release only *adds* endpoints, because the deployed
+   frontend never calls them. A release that removes or changes an endpoint, or
+   changes what an existing setting does, is not invisible — and then Phase 2
+   and Phase 3 have to ship together.
 
 If anything looks different from what this file describes — unexpected pending
 migrations, a dirty working tree on the server, drifted branches — **stop and

@@ -39,7 +39,8 @@ from reportlab.lib.pagesizes import A4
 from reportlab.lib.styles import ParagraphStyle, getSampleStyleSheet
 from reportlab.lib.units import mm
 from reportlab.platypus import (
-    BaseDocTemplate, CondPageBreak, Frame, NextPageTemplate, PageBreak, PageTemplate, Paragraph, Spacer, Table, TableStyle,
+    BaseDocTemplate, CondPageBreak, Flowable, Frame, NextPageTemplate, PageBreak, PageTemplate, Paragraph, Spacer, Table,
+    TableStyle,
 )
 from reportlab.platypus.tableofcontents import TableOfContents
 
@@ -409,6 +410,29 @@ def _donut(parts, width, height=92):
 # document template with running header/footer + TOC
 # =====================================================================================
 
+class _TocMark(Flowable):
+    """Zero-height marker that puts one heading into the contents.
+
+    `afterFlowable` only sees flowables added straight to the story, and both
+    headings are drawn inside tables now (the purple part band and the accent
+    bar beside a section title). Without this marker the contents page would
+    have nothing to list, and the running header would lose the part name.
+    """
+
+    def __init__(self, level, text):
+        super().__init__()
+        self.level = level
+        self.text = text
+        self.width = 0
+        self.height = 0
+
+    def wrap(self, *_args):
+        return 0, 0
+
+    def draw(self):
+        return
+
+
 class _Doc(BaseDocTemplate):
     def __init__(self, buf, audit, brand_label, **kw):
         super().__init__(buf, pagesize=A4, leftMargin=MARGIN, rightMargin=MARGIN, topMargin=20 * mm, bottomMargin=18 * mm, **kw)
@@ -471,8 +495,14 @@ class _Doc(BaseDocTemplate):
         canvas.restoreState()
 
     def afterFlowable(self, flowable):
-        # TOC entries: part titles (level 0) and section headings (level 1)
-        if isinstance(flowable, Paragraph):
+        # Contents entries: part titles (level 0) and section headings (level 1).
+        # Both arrive as markers because the headings themselves are drawn
+        # inside tables, which afterFlowable never sees.
+        if isinstance(flowable, _TocMark):
+            if flowable.level == 0:
+                self.part_title = flowable.text
+            self.notify('TOCEntry', (flowable.level, flowable.text, self.page))
+        elif isinstance(flowable, Paragraph):
             name = flowable.style.name
             if name == 'part_title':
                 self.part_title = flowable.getPlainText()
@@ -630,6 +660,7 @@ def build_audit_pdf(audit) -> bytes:
                                   ('ROUNDEDCORNERS', [8] * 4), ('LINEBELOW', (0, 0), (-1, -1), 3, SECONDARY),
                                   ('LEFTPADDING', (0, 0), (0, 0), 6 * mm), ('RIGHTPADDING', (0, 0), (-1, -1), 6 * mm),
                                   ('TOPPADDING', (0, 0), (-1, -1), 8 * mm), ('BOTTOMPADDING', (0, 0), (-1, -1), 8 * mm)]))
+        story.append(_TocMark(0, title))
         story.append(band)
         story.append(Spacer(1, 10))
 
@@ -661,6 +692,7 @@ def build_audit_pdf(audit) -> bytes:
         # a heading needs room for at least a few rows under it; tables then split freely
         story.append(Spacer(1, 8))
         story.append(CondPageBreak(50 * mm))
+        story.append(_TocMark(1, title))
         head = Table([[_p(title, st['h2'])]], colWidths=[W])
         head.setStyle(TableStyle([('LINEBEFORE', (0, 0), (0, -1), 2.5, PRIMARY), ('LEFTPADDING', (0, 0), (-1, -1), 8),
                                   ('TOPPADDING', (0, 0), (-1, -1), 0), ('BOTTOMPADDING', (0, 0), (-1, -1), 0)]))

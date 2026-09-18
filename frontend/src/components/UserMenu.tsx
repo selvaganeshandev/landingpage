@@ -1,18 +1,18 @@
 /**
- * Account menu at the foot of the sidebar: who you are, then Settings, Switch
- * project, What's new and Sign out.
+ * Account menu at the foot of the sidebar: who you are, then Settings,
+ * What's new and Sign out.
  *
  * Replaces the old footer (a Settings fly-out plus a separate Sign Out row)
  * with one trigger so the footer reads like an account card. Settings keeps
  * the same targets the fly-out had (Organization / Billing / Profile, gated by
  * role) — as a sub-menu when there is more than one, a plain row otherwise.
- * Switching a project reuses the sidebar's own switch logic via `onSwitchDomain`
- * so the two entry points can never drift.
+ *
+ * Project switching lives on the project pill at the top of the sidebar only:
+ * it used to be here as well, which made two routes to one action.
  */
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { ArrowLeftRight, Building2, LogOut, Settings, Sparkles } from "lucide-react";
-import { cn } from "@/lib/utils";
+import { LogOut, Settings, Sparkles } from "lucide-react";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import {
   DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel, DropdownMenuSeparator,
@@ -20,8 +20,6 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import type { User } from "@/types/auth";
-import type { Domain } from "@/stores/domainStore";
-import { getFaviconUrl, handleFaviconError } from "@/utils/faviconHelper";
 import { WhatsNewDialog } from "./WhatsNewDialog";
 
 const ROLE_LABEL: Record<User["role"], string> = { super_admin: "Owner", admin: "Admin", user: "Member", client: "Client" };
@@ -44,13 +42,10 @@ interface Props {
   user: User;
   collapsed: boolean;
   settingsTargets: SettingsTarget[];
-  domains: Domain[];
-  selectedDomain: Domain | null;
-  onSwitchDomain: (domain: Domain) => void | Promise<void>;
   onSignOut: () => void;
 }
 
-export function UserMenu({ user, collapsed, settingsTargets, domains, selectedDomain, onSwitchDomain, onSignOut }: Props) {
+export function UserMenu({ user, collapsed, settingsTargets, onSignOut }: Props) {
   const navigate = useNavigate();
   const [whatsNew, setWhatsNew] = useState(false);
   const name = displayName(user);
@@ -100,29 +95,6 @@ export function UserMenu({ user, collapsed, settingsTargets, domains, selectedDo
           ) : (
             <DropdownMenuItem onSelect={() => navigate(settingsTargets[0]?.path || "/profile")}><Settings className="mr-2 h-4 w-4" />Settings</DropdownMenuItem>
           )}
-
-          <DropdownMenuSub>
-            <DropdownMenuSubTrigger><ArrowLeftRight className="mr-2 h-4 w-4" />Switch project</DropdownMenuSubTrigger>
-            <DropdownMenuSubContent className="w-60 max-h-72 overflow-y-auto">
-              {domains.length === 0 && <DropdownMenuItem disabled>No projects yet</DropdownMenuItem>}
-              {domains.map((d) => {
-                const busy = !!d.processing_status && ["INIT", "SCHD", "PROC", "FAIL"].includes(d.processing_status);
-                const favicon = getFaviconUrl(d.url, 32);
-                return (
-                  <DropdownMenuItem key={d.id} disabled={busy} onSelect={() => onSwitchDomain(d)}
-                                    className={cn("flex items-center gap-2", selectedDomain?.id === d.id && "bg-accent")}>
-                    {favicon ? (
-                      <img src={favicon} alt="" className="h-4 w-4 rounded-sm flex-none" onError={(e) => handleFaviconError(e, d.url, d.name, 32)} />
-                    ) : (
-                      <Building2 className="h-4 w-4 flex-none text-muted-foreground" />
-                    )}
-                    <span className="truncate flex-1">{d.name}</span>
-                    {busy && <span className="text-[10px] text-muted-foreground">{d.processing_status === "FAIL" ? "failed" : "processing"}</span>}
-                  </DropdownMenuItem>
-                );
-              })}
-            </DropdownMenuSubContent>
-          </DropdownMenuSub>
 
           <DropdownMenuItem onSelect={() => setWhatsNew(true)}><Sparkles className="mr-2 h-4 w-4" />What's new</DropdownMenuItem>
           <DropdownMenuSeparator />

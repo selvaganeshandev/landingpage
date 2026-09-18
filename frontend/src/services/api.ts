@@ -2799,6 +2799,31 @@ export const apiClient = {
     return response.blob();
   },
 
+  // ===== Runs (the evidence ledger behind every GEO number) =====
+  getRuns: (params: Record<string, string | number | undefined>) => {
+    const q = new URLSearchParams();
+    Object.entries(params).forEach(([k, v]) => { if (v !== undefined && v !== '' && v !== 'any') q.set(k, String(v)); });
+    return apiRequest<import('@/types/runs').RunsListResponse>(`/prompts/runs/?${q.toString()}`);
+  },
+
+  getRunsSummary: (params: Record<string, string | number | undefined>) => {
+    const q = new URLSearchParams();
+    Object.entries(params).forEach(([k, v]) => { if (v !== undefined && v !== '' && v !== 'any') q.set(k, String(v)); });
+    return apiRequest<import('@/types/runs').RunsSummaryResponse>(`/prompts/runs/summary/?${q.toString()}`);
+  },
+
+  /** The filtered ledger as CSV. Returns the bytes; the caller saves them. */
+  downloadRunsCsv: async (params: Record<string, string | number | undefined>): Promise<Blob> => {
+    const q = new URLSearchParams();
+    Object.entries(params).forEach(([k, v]) => { if (v !== undefined && v !== '' && v !== 'any') q.set(k, String(v)); });
+    const token = getAuthToken();
+    const headers: HeadersInit = {};
+    if (token) headers['Authorization'] = `Bearer ${token}`;
+    const response = await fetch(`${API_BASE_URL}/prompts/runs/export/?${q.toString()}`, { method: 'GET', headers });
+    if (!response.ok) throw new Error('Could not export the runs');
+    return response.blob();
+  },
+
   /** Public PDF link — no auth, safe to open in a new tab or put in an email. */
   publicAuditPdfUrl: (token: string) => `${API_BASE_URL}/audits/public/${encodeURIComponent(token)}/pdf/`,
 
@@ -2812,6 +2837,14 @@ export const apiClient = {
     return response.blob();
   },
   publicAuditIssuesCsvUrl: (token: string) => `${API_BASE_URL}/audits/public/${encodeURIComponent(token)}/issues.csv`,
+
+  /** Send the finished report to the address the audit was requested with.
+   *  The recipient lives on the audit row — the caller cannot choose it. */
+  emailPublicAudit: (token: string) =>
+    apiRequest<{ sent: boolean; to: string }>(`/audits/public/${encodeURIComponent(token)}/email/`, {
+      method: 'POST',
+      skipAuth: true,
+    }),
 
   getPublicAudit: (token: string) =>
     apiRequest<import('@/types/audit').PublicAudit>(`/audits/public/${encodeURIComponent(token)}/`, { skipAuth: true }),

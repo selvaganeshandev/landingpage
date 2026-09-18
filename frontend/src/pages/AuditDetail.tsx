@@ -22,18 +22,22 @@ import {
   AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription,
   AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
-import { StageStrip, StatusBadge, fmtDate, fmtDateTime, saveBlob } from "@/components/audits/AuditBits";
+import { RunTimer, StageStrip, StatusBadge, fmtDate, fmtDateTime, saveBlob } from "@/components/audits/AuditBits";
 import { AuditReportView } from "@/components/audits/AuditReportView";
 import type { AuditDetail as AuditDetailType, PublicAudit } from "@/types/audit";
 
 const POLL_MS = 5_000;
 
-/** The detail row carries everything the public serializer does; narrow it for the shared view. */
+/** The detail row carries everything the public serializer does, bar two fields
+ *  the public view derives for itself: seo_enabled, which the detail row holds
+ *  inside config, and landing_url, which only a public visitor needs. */
 function asPublic(a: AuditDetailType): PublicAudit {
   return {
     ...a,
     report: a.report && "geo" in a.report ? a.report : null,
     stage_detail: a.stage_detail || {},
+    seo_enabled: Boolean((a.config as { seo_enabled?: boolean })?.seo_enabled),
+    landing_url: "",
   } as PublicAudit;
 }
 
@@ -46,7 +50,7 @@ export default function AuditDetail() {
 
   const [audit, setAudit] = useState<AuditDetailType | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [busy, setBusy] = useState<"rerun" | "claim" | "delete" | "pdf" | "csv" | null>(null);
+  const [busy, setBusy] = useState<"rerun" | "claim" | "delete" | "pdf" | "csv" | "email" | null>(null);
   const [confirmDelete, setConfirmDelete] = useState(false);
 
   const load = useCallback(async () => {
@@ -236,11 +240,18 @@ export default function AuditDetail() {
               <span className="font-medium">
                 {audit.status === "FAIL" ? "Stopped" : `${audit.stage_label || "Queued"}${engineDetail?.total ? ` · ${engineDetail.done ?? 0} / ${engineDetail.total} executions` : ""}`}
               </span>
-              <span className="text-muted-foreground tabular-nums">{audit.progress}%</span>
+              <span className="flex items-center gap-3">
+                {live && <RunTimer startedAt={audit.created_at} finishedAt={audit.completed_at} running seoEnabled={seoEnabled} />}
+                <span className="text-muted-foreground tabular-nums">{audit.progress}%</span>
+              </span>
             </div>
             <Progress value={audit.progress} className="h-2" />
             <StageStrip status={audit.status} stage={audit.stage} stageDetail={audit.stage_detail || {}} seoEnabled={seoEnabled} />
-            {live && <p className="text-xs text-muted-foreground">Six stages · about three minutes · this page updates itself.</p>}
+            {live && (
+              <p className="text-xs text-muted-foreground">
+                {seoEnabled ? "Seven stages" : "Six stages"} · this page updates itself.
+              </p>
+            )}
           </CardContent>
         </Card>
       )}
@@ -400,6 +411,7 @@ export default function AuditDetail() {
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
+
     </div>
   );
 }

@@ -706,14 +706,30 @@ def _priority(score: Optional[float]) -> str:
 def health_score(base: Dict[str, Any], tech: Dict[str, Any]) -> Dict[str, Any]:
     """Nine weighted categories → one 0-100 site score; unmeasured categories drop out."""
     n = base.get('pages_sampled') or 0
+    attempted = base.get('pages_attempted') or 0
+    # Tried real pages and got nothing back from any of them: the site is
+    # refusing automated readers (bot protection, WAF, an empty 202). Measured
+    # on binance.com, which allows every AI crawler in robots.txt and then
+    # serves them a blank page.
+    blocked = attempted > 0 and n == 0
     bots_total = base.get('bots_total') or 1
     scores: Dict[str, Optional[float]] = {}
     detail: Dict[str, str] = {}
 
     bots = (base.get('bots_allowed') or 0) / bots_total
     noindex = (tech.get('noindex_pages') or 0) / n if n else 0
-    scores['crawlability'] = 100 * (0.6 * bots + 0.2 * (1 if base.get('sitemap_present') else 0) + 0.2 * (1 - noindex))
-    detail['crawlability'] = f"{base.get('bots_allowed')} of {bots_total} AI crawlers allowed · sitemap {'found' if base.get('sitemap_present') else 'missing'}"
+    if blocked:
+        # Unscored, not zero: we did not prove crawlers are blocked, we proved
+        # we could not check. A zero would be as much of an invention as the
+        # 100 this used to award.
+        scores['crawlability'] = None
+        detail['crawlability'] = (
+            f"unverified — robots.txt allows {base.get('bots_allowed')} of {bots_total} AI crawlers, "
+            f"but all {attempted} pages we requested returned nothing readable"
+        )
+    else:
+        scores['crawlability'] = 100 * (0.6 * bots + 0.2 * (1 if base.get('sitemap_present') else 0) + 0.2 * (1 - noindex))
+        detail['crawlability'] = f"{base.get('bots_allowed')} of {bots_total} AI crawlers allowed · sitemap {'found' if base.get('sitemap_present') else 'missing'}"
 
     if n:
         from core.audit_crawl import RECOMMENDED_SCHEMA
@@ -780,7 +796,19 @@ def health_score(base: Dict[str, Any], tech: Dict[str, Any]) -> Dict[str, Any]:
         if s is not None and total_w:
             acc += s * weight / total_w
         cats.append({'key': key, 'label': label, 'weight': weight, 'score': s, 'priority': _priority(s), 'detail': detail.get(key, '')})
-    return {'score': round(acc) if total_w else None, 'categories': cats}
+    if blocked:
+        # Off-site signals (backlinks, Core Web Vitals) may still have scored,
+        # but a "site health" headline built from them while we read zero pages
+        # is a number that means nothing. Say so instead.
+        return {
+            'score': None, 'categories': cats, 'blocked': True,
+            'blocked_reason': (
+                f"We could not read any of the {attempted} pages we requested. The site answers automated "
+                f"readers with an empty response, so AI crawlers may be getting the same — even though "
+                f"robots.txt allows them."
+            ),
+        }
+    return {'score': round(acc) if total_w else None, 'categories': cats, 'blocked': False}
 
 
 def technical_issues(ok: List[Dict[str, Any]], tech: Dict[str, Any]) -> List[Dict[str, Any]]:

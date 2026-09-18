@@ -27,12 +27,12 @@ const RELEASES: Release[] = [
     ],
   },
   {
-    date: "Aug 2026",
-    title: "Faster app, cleaner sentiment",
+    date: "Sep 2026",
+    title: "Schedule",
     items: [
-      "Cached reads and a fixed 64-second endpoint — pages load noticeably faster.",
-      "Sentiment now shows for every tracked domain.",
-      "CSV prompt upload reads the right column and never collapses rows.",
+      "Set how often each project is swept — weekly, every 15 days, every 30 days, or off.",
+      "See the cost per sweep and per month before you commit to a cadence.",
+      "A Schedule tab on every project: prompts, engines, cost per run and the next run date.",
     ],
   },
 ];

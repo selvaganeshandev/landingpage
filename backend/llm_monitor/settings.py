@@ -446,6 +446,11 @@ AUDIT_ENGINES = [
 # The SEO half (keyword discovery + SERP fetch) spends DataBlue/DataForSEO
 # quota; kept behind its own flag so GEO-only audits can ship first.
 AUDIT_SEO_ENABLED = config('AUDIT_SEO_ENABLED', default=False, cast=bool)
+
+# Where a visitor who arrived from the landing page is sent back to when they
+# leave the report. Empty means no back link is shown — the browser's own back
+# button still works, this is the explicit way out.
+AUDIT_LANDING_URL = config('AUDIT_LANDING_URL', default='')
 AUDIT_KEYWORD_COUNT = config('AUDIT_KEYWORD_COUNT', default=50, cast=int)
 # The crawl stage (Findable pillar): plain-HTTP sample of the site's own pages
 # for schema, bylines, citations and dates. No paid API. Time-boxed so a slow

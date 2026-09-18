@@ -259,6 +259,7 @@ class HappyPathTests(_Base):
         self.assertEqual(a.brand_name, 'HDFC Bank')
 
 
+@override_settings(AUDIT_RATE_LIMIT_RETRIES=0)
 class EngineFailureTests(_Base):
     def test_failures_are_recorded_not_counted_as_absent(self):
         self.engines = [
@@ -354,6 +355,122 @@ class ResumeTests(_Base):
         self.assertEqual(AuditPromptResult.objects.get(audit=self.audit, prompt_index=3).status, 'ok')
 
 
+class EngineConcurrencyTests(_Base):
+    """The engine stage runs one pool across every (prompt, engine) pair.
+
+    It used to open a fresh pool per prompt, which capped concurrency at the
+    number of engines and made the stage cost sum(prompts) x slowest engine.
+    These tests pin the two properties that fix depends on: the pool really is
+    wider than one prompt's worth of calls, and no answer is lost on the way.
+    """
+
+    @override_settings(AUDIT_MAX_CONCURRENT_CALLS=8)
+    def test_calls_from_different_prompts_overlap(self):
+        import threading
+        import time as _time
+
+        lock = threading.Lock()
+        live = {'now': 0, 'peak': 0}
+        seen = []
+
+        def slow(prompt_text, user_domain, client, group):
+            with lock:
+                live['now'] += 1
+                live['peak'] = max(live['peak'], live['now'])
+                seen.append(prompt_text)
+            try:
+                _time.sleep(0.25)
+                return make_handler()(prompt_text, user_domain, client, group)
+            finally:
+                with lock:
+                    live['now'] -= 1
+
+        self.engines = [
+            ('chatgpt', 'ChatGPT', slow, object()),
+            ('claude', 'Claude', slow, object()),
+        ]
+        self.assertEqual(self.run_audit()['status'], 'done')
+
+        # 4 prompts x 2 engines, every pair asked exactly once.
+        self.assertEqual(len(seen), 8)
+        self.assertEqual(AuditPromptResult.objects.filter(audit=self.audit, status='ok').count(), 8)
+
+        # The old shape could never exceed len(engines) == 2 in flight. Anything
+        # above that proves prompts are overlapping rather than queueing.
+        self.assertGreater(
+            live['peak'], 2,
+            'calls from different prompts must overlap, not run prompt by prompt',
+        )
+
+    @override_settings(AUDIT_MAX_CONCURRENT_CALLS=2)
+    def test_concurrency_cap_is_honoured(self):
+        import threading
+        import time as _time
+
+        lock = threading.Lock()
+        live = {'now': 0, 'peak': 0}
+
+        def slow(prompt_text, user_domain, client, group):
+            with lock:
+                live['now'] += 1
+                live['peak'] = max(live['peak'], live['now'])
+            try:
+                _time.sleep(0.1)
+                return make_handler()(prompt_text, user_domain, client, group)
+            finally:
+                with lock:
+                    live['now'] -= 1
+
+        self.engines = [
+            ('chatgpt', 'ChatGPT', slow, object()),
+            ('claude', 'Claude', slow, object()),
+        ]
+        self.assertEqual(self.run_audit()['status'], 'done')
+        self.assertLessEqual(live['peak'], 2, 'the pool must not exceed AUDIT_MAX_CONCURRENT_CALLS')
+
+    @override_settings(AUDIT_RATE_LIMIT_RETRIES=3, AUDIT_RATE_LIMIT_BASE_DELAY=0.01)
+    def test_a_429_is_retried_rather_than_stored_as_a_missing_answer(self):
+        """A burst makes 429s ordinary; a dropped answer would deflate the score.
+
+        Without the retry this row lands as status='rate_limited' with
+        is_mention=False, which scoring reads as "the brand was not mentioned".
+        """
+        calls = {'n': 0}
+
+        def flaky(prompt_text, user_domain, client, group):
+            calls['n'] += 1
+            if calls['n'] <= 2:
+                raise RuntimeError('429 rate limited')
+            return make_handler()(prompt_text, user_domain, client, group)
+
+        self.engines = [('chatgpt', 'ChatGPT', flaky, object())]
+        self.assertEqual(self.run_audit()['status'], 'done')
+
+        rows = AuditPromptResult.objects.filter(audit=self.audit)
+        self.assertEqual(rows.count(), 4)
+        self.assertEqual(rows.filter(status='ok').count(), 4, 'retried 429s must still answer')
+        self.assertEqual(calls['n'], 6, '4 answers + 2 retried 429s')
+
+    @override_settings(AUDIT_RATE_LIMIT_RETRIES=2, AUDIT_RATE_LIMIT_BASE_DELAY=0.01)
+    def test_a_non_429_is_not_retried(self):
+        """Retrying an auth failure or a bad request only burns the budget."""
+        calls = {'n': 0}
+
+        def broken(prompt_text, user_domain, client, group):
+            calls['n'] += 1
+            raise RuntimeError('401 unauthorized')
+
+        self.engines = [
+            ('chatgpt', 'ChatGPT', broken, object()),
+            ('claude', 'Claude', make_handler(), object()),
+        ]
+        self.assertEqual(self.run_audit()['status'], 'done')
+        self.assertEqual(calls['n'], 4, 'one attempt per prompt, no retries')
+        self.assertEqual(
+            AuditPromptResult.objects.filter(audit=self.audit, platform='ChatGPT', status='failed').count(), 4,
+        )
+
+
 class SeoStageTests(_Base):
     def test_seo_stage_ranks_discovered_keywords(self):
         self.llm_json = [PROFILE, ['hdfc savings account', 'home loan interest rate', 'gold loan rate']]
@@ -363,7 +480,7 @@ class SeoStageTests(_Base):
                                         'competitors': {'sbi.co.in': 1, 'paisabazaar.com': 2, 'icicibank.com': 7}},
             'gold loan rate': {'rank': 0, 'url': '', 'competitors': {'muthootfinance.com': 1}},
         }
-        with patch('core.seo_ranking_processor.fetch_serp_data', side_effect=lambda kw, *a, **k: {'kw': kw}), \
+        with patch('core.audit_serp.fetch_serp', side_effect=lambda kw, *a, **k: {'kw': kw}), \
              patch('core.seo_ranking_processor.parse_json_serp_response', side_effect=lambda data, url: serp[data['kw']]), \
              patch.object(ap.AuditProcessor, '_keyword_volumes', return_value={'hdfc savings account': 74000, 'home loan interest rate': 201000}), \
              override_settings(AUDIT_ENGINE_ENABLED=True, AUDIT_PROMPT_COUNT=4, AUDIT_SEO_ENABLED=True, AUDIT_KEYWORD_COUNT=5):
@@ -385,6 +502,80 @@ class SeoStageTests(_Base):
         self.assertEqual(a.report['seo']['keywords_total'], 3)
         self.assertEqual(a.grounding['keywords'], list(serp))
         self.assertTrue(a.stage_detail['serp']['complete'])
+        self.assertEqual(a.stage_detail['serp']['ranked'], 3)
+        self.assertEqual(a.stage_detail['serp']['unanswered'], 0)
+
+    def test_a_failed_lookup_is_not_recorded_as_not_ranking(self):
+        """An unanswered keyword must leave no row at all.
+
+        Writing it down with position=None is indistinguishable from a real
+        absence: audit_scoring counts every row in keywords_total and in the
+        visibility denominator, so one broken lookup would tell the prospect
+        they rank for nothing on a keyword nobody ever asked about.
+        """
+        self.llm_json = [PROFILE, ['ranked keyword', 'broken keyword']]
+        serp = {'ranked keyword': {'rank': 3, 'url': 'https://hdfcbank.com/x', 'competitors': {}}}
+
+        def flaky(kw, *a, **k):
+            if kw == 'broken keyword':
+                raise RuntimeError('401 unauthorized')
+            return {'kw': kw}
+
+        with patch('core.audit_serp.fetch_serp', side_effect=flaky), \
+             patch('core.seo_ranking_processor.parse_json_serp_response', side_effect=lambda data, url: serp[data['kw']]), \
+             patch.object(ap.AuditProcessor, '_keyword_volumes', return_value={}), \
+             override_settings(AUDIT_ENGINE_ENABLED=True, AUDIT_PROMPT_COUNT=4, AUDIT_SEO_ENABLED=True, AUDIT_KEYWORD_COUNT=5):
+            result = ap.run_audit(self.audit.pk)
+
+        self.assertEqual(result['status'], 'done', result)
+        a = Audit.objects.get(pk=self.audit.pk)
+        rows = {k.keyword: k for k in AuditKeywordResult.objects.filter(audit=a)}
+        self.assertEqual(set(rows), {'ranked keyword'}, 'the unanswered keyword must not be stored')
+        self.assertEqual(a.keywords_total, 1, 'an unanswered keyword must not dilute the totals')
+        self.assertEqual(a.stage_detail['serp']['unanswered'], 1)
+
+    def test_every_lookup_failing_fails_the_stage(self):
+        """Publishing an SEO section built from nothing is worse than stopping."""
+        self.llm_json = [PROFILE, ['one', 'two']]
+        with patch('core.audit_serp.fetch_serp', side_effect=RuntimeError('401 unauthorized')), \
+             patch.object(ap.AuditProcessor, '_keyword_volumes', return_value={}), \
+             override_settings(AUDIT_ENGINE_ENABLED=True, AUDIT_PROMPT_COUNT=4, AUDIT_SEO_ENABLED=True, AUDIT_KEYWORD_COUNT=5):
+            result = ap.run_audit(self.audit.pk)
+
+        self.assertEqual(result['status'], 'failed')
+        a = Audit.objects.get(pk=self.audit.pk)
+        self.assertEqual(a.status, 'FAIL')
+        self.assertIn('No keyword could be ranked', a.error)
+        self.assertEqual(AuditKeywordResult.objects.filter(audit=a).count(), 0)
+
+    def test_outranked_by_reads_the_real_competitor_shape(self):
+        """parse_json_serp_response keys competitors by rank, with dict values.
+
+        The previous code iterated that map as {domain: rank} and filtered on
+        isinstance(rank, (int, float)), which no entry satisfied — so
+        outranked_by came back empty on every real audit. Verified against a
+        live SERP for 'crm software india'.
+        """
+        self.llm_json = [PROFILE, ['one keyword']]
+        parsed = {
+            'rank': 4,
+            'url': 'https://hdfcbank.com/x',
+            'competitors': {
+                '1': {'domain': 'sbi.co.in', 'rank': 1, 'url': 'https://sbi.co.in/'},
+                '2': {'domain': 'icicibank.com', 'rank': 2, 'url': 'https://icicibank.com/'},
+                '9': {'domain': 'paisabazaar.com', 'rank': 9, 'url': 'https://paisabazaar.com/'},
+            },
+        }
+        with patch('core.audit_serp.fetch_serp', side_effect=lambda kw, *a, **k: {'kw': kw}), \
+             patch('core.seo_ranking_processor.parse_json_serp_response', side_effect=lambda data, url: parsed), \
+             patch.object(ap.AuditProcessor, '_keyword_volumes', return_value={}), \
+             override_settings(AUDIT_ENGINE_ENABLED=True, AUDIT_PROMPT_COUNT=4, AUDIT_SEO_ENABLED=True, AUDIT_KEYWORD_COUNT=5):
+            self.assertEqual(ap.run_audit(self.audit.pk)['status'], 'done')
+
+        row = AuditKeywordResult.objects.get(audit=self.audit, keyword='one keyword')
+        self.assertEqual(row.position, 4)
+        # only those ahead of us, nearest first
+        self.assertEqual(row.outranked_by, ['sbi.co.in', 'icicibank.com'])
 
 
 class HelperTests(TestCase):
@@ -433,7 +624,8 @@ class NotificationTests(_Base):
                 return {'success': True}
 
         with patch('core.mailgun_email_service.MailgunEmailService', FakeService), \
-             override_settings(AUDIT_LEAD_ALERT_EMAILS='sales@agency.in, ops@agency.in', FRONTEND_URL='https://app.example.com/'):
+             override_settings(AUDIT_AUTO_EMAIL_ON_PUBLISH=True, AUDIT_LEAD_ALERT_EMAILS='sales@agency.in, ops@agency.in',
+                               FRONTEND_URL='https://app.example.com/'):
             self.assertEqual(self.run_audit()['status'], 'done')
         a = Audit.objects.get(pk=self.audit.pk)
         self.assertEqual(a.stage_detail['publish'], {'emailed': True, 'alerted': True})
@@ -448,22 +640,44 @@ class NotificationTests(_Base):
         self.assertIn(f'https://app.example.com/audits/{a.pk}', text2)
         self.assertIn('lead@example.com', text2)
 
-    def test_manual_audit_emails_the_admin_but_raises_no_lead_alert(self):
-        sent = []
-
+    def _fake_service(self, sent):
         class FakeService:
             def send_report_email(self, recipients, subject, body_text, body_html=None, **kw):
                 sent.append(tuple(recipients)); return {'success': True}
+        return FakeService
 
+    def test_manual_audit_emails_the_admin_when_auto_email_is_on(self):
+        sent = []
         from shared_models.models import Account, Organisation
         org = Organisation.objects.create(name='Agency')
         admin = Account.objects.create(username='a', email='admin@agency.in', organisation=org, role='admin')
         Audit.objects.filter(pk=self.audit.pk).update(source='manual', requested_by=admin)
-        with patch('core.mailgun_email_service.MailgunEmailService', FakeService), \
-             override_settings(AUDIT_LEAD_ALERT_EMAILS='sales@agency.in'):
+        with patch('core.mailgun_email_service.MailgunEmailService', self._fake_service(sent)), \
+             override_settings(AUDIT_AUTO_EMAIL_ON_PUBLISH=True, AUDIT_LEAD_ALERT_EMAILS='sales@agency.in'):
             self.assertEqual(self.run_audit()['status'], 'done')
-        self.assertEqual(sent, [('admin@agency.in',)])
+        self.assertEqual(sent, [('admin@agency.in',)], 'a manual audit raises no lead alert')
         self.assertEqual(Audit.objects.get(pk=self.audit.pk).stage_detail['publish'], {'emailed': True, 'alerted': False})
+
+    def test_publishing_emails_nobody_by_default(self):
+        # Reports are sent on demand from the audit page, not by publication.
+        sent = []
+        Audit.objects.filter(pk=self.audit.pk).update(requester_email='lead@example.com')
+        with patch('core.mailgun_email_service.MailgunEmailService', self._fake_service(sent)), \
+             override_settings(AUDIT_LEAD_ALERT_EMAILS=''):
+            self.assertEqual(self.run_audit()['status'], 'done')
+        self.assertEqual(sent, [])
+        self.assertEqual(Audit.objects.get(pk=self.audit.pk).stage_detail['publish'], {'emailed': False, 'alerted': False})
+
+    def test_lead_alerts_still_fire_with_auto_email_off(self):
+        # The team notification is opt-in through its own setting and is not
+        # what the auto-email flag governs.
+        sent = []
+        Audit.objects.filter(pk=self.audit.pk).update(requester_email='lead@example.com', source='landing')
+        with patch('core.mailgun_email_service.MailgunEmailService', self._fake_service(sent)), \
+             override_settings(AUDIT_AUTO_EMAIL_ON_PUBLISH=False, AUDIT_LEAD_ALERT_EMAILS='sales@agency.in'):
+            self.assertEqual(self.run_audit()['status'], 'done')
+        self.assertEqual(sent, [('sales@agency.in',)], 'the visitor gets nothing, the team still hears about the lead')
+        self.assertEqual(Audit.objects.get(pk=self.audit.pk).stage_detail['publish'], {'emailed': False, 'alerted': True})
 
     def test_unconfigured_mailgun_is_a_quiet_no_op(self):
         Audit.objects.filter(pk=self.audit.pk).update(requester_email='lead@example.com')

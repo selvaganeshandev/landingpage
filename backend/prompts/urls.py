@@ -3,10 +3,16 @@ from . import views
 from . import diagnostic_views
 from .views_prompt_export import prompts_export, prompts_export_data, prompt_group_export
 from . import views_generation
+from . import views_runs
 
 urlpatterns = [
     # Test endpoint
     path('test/', diagnostic_views.test_view, name='test_view'),
+
+    # Runs — the evidence ledger behind every GEO number (read-only)
+    path('runs/', views_runs.runs_list, name='runs_list'),
+    path('runs/summary/', views_runs.runs_summary, name='runs_summary'),
+    path('runs/export/', views_runs.runs_export, name='runs_export'),
 
     # AI Prompt Data Export (xlsx)
     path('export/', prompts_export, name='prompts_export'),

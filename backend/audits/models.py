@@ -134,6 +134,11 @@ class Audit(models.Model):
     # ---- publication ----
     opens = models.PositiveIntegerField(default=0, help_text="Public report views")
     last_opened_at = models.DateTimeField(null=True, blank=True)
+    # Delivery. Publication no longer emails anyone by default, so the leads
+    # table has to say whether the report actually reached someone and when.
+    emailed_at = models.DateTimeField(null=True, blank=True, help_text="When the report was last emailed")
+    emailed_to = models.JSONField(default=list, blank=True, help_text="Addresses the last send went to")
+    email_count = models.PositiveIntegerField(default=0, help_text="How many times the report has been emailed")
     expires_at = models.DateTimeField(
         null=True, blank=True,
         help_text="Public link stops resolving after this; claimed audits never expire",
@@ -226,6 +231,21 @@ class Audit(models.Model):
         self.error = (error or '')[:4000]
         self.completed_at = timezone.now()
         self.save(update_fields=['status', 'error', 'completed_at', 'modified_at'])
+
+    def record_email(self, addresses):
+        """Remember that the report was emailed, and to whom.
+
+        Called after Mailgun accepts the message — by the "Email report" button
+        and by the engine when AUDIT_AUTO_EMAIL_ON_PUBLISH sends one. Counting
+        is done with F() so two sends at once cannot lose one.
+        """
+        addresses = [str(a).strip() for a in (addresses or []) if str(a).strip()][:5]
+        type(self).objects.filter(pk=self.pk).update(
+            emailed_at=timezone.now(), emailed_to=addresses,
+            email_count=models.F('email_count') + 1, modified_at=timezone.now(),
+        )
+        self.refresh_from_db(fields=['emailed_at', 'emailed_to', 'email_count'])
+        return self.emailed_at
 
     def record_open(self):
         """Count a public view without touching modified_at."""

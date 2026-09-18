@@ -3,6 +3,7 @@
  * band badge and the six-stage progress strip. Formatting helpers live in
  * ./format so this file only exports components (fast refresh).
  */
+import { useEffect, useState } from "react";
 import { Loader2, Check, X, Minus } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Badge } from "@/components/ui/badge";
@@ -12,6 +13,72 @@ import {
 } from "@/types/audit";
 
 export { fmtDate, fmtDateTime, timeAgo, pct, saveBlob } from "./format";
+
+/** Typical wall clock, for the "approx." half of the readout.
+ *
+ *  Measured after the engine stage was flattened onto one pool: 8 prompts x 3
+ *  engines at AUDIT_MAX_CONCURRENT_CALLS=12 costs ~100s, plus ~90s of profile,
+ *  crawl, scoring and publishing. Ranking 25 keywords adds another ~40s —
+ *  measured at 4-23s per lookup, pooled — so an audit with the SERP stage on
+ *  is meaningfully longer and gets its own figure rather than one average that
+ *  is wrong for both.
+ *
+ *  A guide, not a promise: a large site or a slow provider pushes it out,
+ *  which is what the "taking longer than usual" note is for. */
+const TYPICAL_RUN_SECONDS = { geo: 4 * 60, withSeo: 5 * 60 };
+
+function clock(seconds: number) {
+  const s = Math.max(0, Math.floor(seconds));
+  return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}`;
+}
+
+/**
+ * How long this audit has been running, ticking once a second, against how
+ * long one usually takes. Once it finishes it holds the final duration.
+ *
+ * The clock is derived from the row's own timestamps rather than from when
+ * the page opened, so a reload — or a lead opening the link from their email
+ * ten minutes later — still shows the truth.
+ */
+export function RunTimer({
+  startedAt, finishedAt, running, seoEnabled = false,
+}: {
+  startedAt: string;
+  finishedAt?: string | null;
+  running: boolean;
+  /** Ranking keywords on Google adds roughly a minute. */
+  seoEnabled?: boolean;
+}) {
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    if (!running) return;
+    const t = setInterval(() => setNow(Date.now()), 1000);
+    return () => clearInterval(t);
+  }, [running]);
+
+  const start = new Date(startedAt).getTime();
+  if (!Number.isFinite(start)) return null;
+  const end = !running && finishedAt ? new Date(finishedAt).getTime() : now;
+  const elapsed = (end - start) / 1000;
+
+  if (!running) {
+    return <span className="tabular-nums">Took {clock(elapsed)}</span>;
+  }
+
+  const typical = seoEnabled ? TYPICAL_RUN_SECONDS.withSeo : TYPICAL_RUN_SECONDS.geo;
+  const overrunning = elapsed > typical * 1.5;
+  return (
+    <span className="tabular-nums">
+      {clock(elapsed)}
+      <span className="text-muted-foreground">
+        {" "}of approx. {Math.round(typical / 60)} min
+      </span>
+      {overrunning && (
+        <span className="text-amber-600"> · taking longer than usual</span>
+      )}
+    </span>
+  );
+}
 
 export function geoTone(stage: GeoStage) {
   return stage ? GEO_STAGE_LABELS[stage].tone : "text-muted-foreground";
@@ -88,7 +155,12 @@ export function StageStrip({
     if (key === "profile" && d.source) return d.source === "site" ? "site read" : "from public knowledge";
     if (key === "crawl" && d.skipped) return "skipped";
     if (key === "crawl" && d.error) return "site could not be read";
-    if (key === "crawl" && typeof d.pages === "number") return `${d.pages} pages sampled`;
+    if (key === "crawl" && typeof d.pages === "number") {
+      // A page that needed a rendering fetch is itself a finding: if our reader
+      // could not see it, an AI crawler probably cannot either.
+      const rescued = typeof d.pages_rescued === "number" ? d.pages_rescued : 0;
+      return `${d.pages} pages sampled${rescued ? ` · ${rescued} needed rendering` : ""}`;
+    }
     if (key === "prompts" && typeof d.count === "number") return `${d.count} prompts`;
     if (key === "score" && typeof d.geo_score === "number") return `GEO ${d.geo_score}`;
     return "";
@@ -124,6 +196,9 @@ export function StageStrip({
               <span className="truncate" title={s.label}>{s.short}</span>
             </div>
             <p className="mt-1 text-xs text-muted-foreground min-h-[1rem]">{detailFor(s.key)}</p>
+            {/* What this stage is for, while it is the one running. Shown only
+                on the live stage so the strip stays scannable once it is done. */}
+            {active && <p className="mt-1.5 text-xs leading-snug text-foreground/70">{s.does}</p>}
           </li>
         );
       })}

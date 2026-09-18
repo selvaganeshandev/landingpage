@@ -87,17 +87,29 @@ def _lead_email(audit) -> Dict[str, str]:
 
 
 def notify_audit_published(audit) -> Dict[str, bool]:
-    """Send both messages. Returns what actually went out."""
+    """Send what publication warrants. Returns what actually went out.
+
+    The report email to the requester is gated by AUDIT_AUTO_EMAIL_ON_PUBLISH
+    (off by default): audits run from inside the app are emailed on demand with
+    the "Email report" button instead. Turn the flag on for the landing-page
+    funnel, where the email is how a visitor receives the audit they asked for.
+    Team lead alerts are unaffected — they are already opt-in through
+    AUDIT_LEAD_ALERT_EMAILS.
+    """
     from core.mailgun_email_service import MailgunEmailService
 
     outcome = {'emailed': False, 'alerted': False}
+    auto_email = bool(getattr(settings, 'AUDIT_AUTO_EMAIL_ON_PUBLISH', False))
+    recipients_configured = lead_alert_recipients()
+    if not auto_email and not recipients_configured:
+        return outcome
     try:
         service = MailgunEmailService()
     except Exception as exc:  # noqa: BLE001
         logger.warning('[Audit] email service unavailable: %s', exc)
         return outcome
 
-    to = requester_address(audit)
+    to = requester_address(audit) if auto_email else None
     if to:
         msg = _ready_email(audit)
         res = service.send_report_email([to], msg['subject'], msg['text'], body_html=msg['html'] or None)

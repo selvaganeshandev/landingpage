@@ -13,6 +13,7 @@ const Dashboard = lazy(() => import("./pages/Dashboard"));
 const Prompts = lazy(() => import("./pages/Prompts"));
 const PromptDetail = lazy(() => import("./pages/PromptDetail"));
 const Mentions = lazy(() => import("./pages/Mentions"));
+const Runs = lazy(() => import("./pages/Runs"));
 const MentionDetail = lazy(() => import("./pages/MentionDetail"));
 const Sentiment = lazy(() => import("./pages/Sentiment"));
 const ShareOfVoice = lazy(() => import("./pages/ShareOfVoice"));
@@ -127,6 +128,11 @@ const App = () => (
                   analysis runs, so anyone who can see the dashboard can see it. */}
               
               {/* Tracking */}
+              <Route path="/runs" element={
+                <ProtectedRoute requiredPermission={MODULES.PROMPTS}>
+                  <Runs />
+                </ProtectedRoute>
+              } />
               <Route path="/mentions" element={
                 <ProtectedRoute requiredPermission={MODULES.MENTIONS}>
                   <Mentions />

@@ -146,7 +146,7 @@ export const DomainSweepCadence = () => {
                   <div className="text-xs text-muted-foreground tabular-nums">
                     {cluster.prompts.toLocaleString()} prompts
                     {platformCount > 0 && cluster.option.days !== null && (
-                      <> · ≈ {cluster.creditsPerMonth.toFixed(2)} credits / month</>
+                      <> · ≈ {`$\u2009${cluster.creditsPerMonth.toFixed(2)}`} / month</>
                     )}
                     {cluster.option.days === null && <> · nothing scheduled</>}
                   </div>
@@ -188,10 +188,10 @@ export const DomainSweepCadence = () => {
                   <div className="w-24">
                     <div className="text-sm font-medium tabular-nums">
                       {platformCount > 0
-                        ? creditsPerSweep(domain, sweep?.platforms ?? []).toFixed(2)
+                        ? `$\u2009${creditsPerSweep(domain, sweep?.platforms ?? []).toFixed(2)}`
                         : "—"}
                     </div>
-                    <div className="text-xs text-muted-foreground">credits / sweep</div>
+                    <div className="text-xs text-muted-foreground">cost / sweep</div>
                   </div>
                   <div className="w-24">
                     <div className="text-sm font-medium">

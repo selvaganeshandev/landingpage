@@ -72,6 +72,147 @@ SKIP_PATH_RE = re.compile(
 )
 
 
+# Sections whose pages are the ones an AI engine actually quotes: prose, with a
+# claim in it. Matched on the first path segment.
+CONTENT_SECTIONS = {
+    'blog', 'about', 'about-us', 'guide', 'guides', 'learn', 'learning', 'resources', 'resource',
+    'insights', 'news', 'press', 'article', 'articles', 'help', 'support', 'docs', 'documentation',
+    'faq', 'faqs', 'product', 'products', 'service', 'services', 'solutions', 'solution',
+    'pricing', 'plans', 'features', 'case-studies', 'case-study', 'customers', 'why', 'how-it-works',
+    'company', 'team', 'contact', 'security', 'compliance', 'legal', 'careers',
+}
+
+# Machine-generated permutation pages. Big sites list tens of thousands of these
+# and they sort first in the sitemap, so taking sitemap order means auditing
+# nothing else. Measured: coinbase.com gave 11 of 12 sampled pages as
+# /converter/<coin>/<coin>, binance.com 11 of 12 as /trade/<PAIR>. They carry no
+# prose, no schema and nothing citable — and usually 403 anyway.
+# Matches /trade/BTC_USDT as well as /converter/btc/eth: the trailing pair may
+# be one segment or two, and binance uses one.
+MACHINE_PATH_RE = re.compile(
+    r'/(converter|convert|trade|trading|price|prices|markets?|rates?|exchange|pairs?|symbols?|'
+    r'buy|sell|compare|vs|calculator|chart|charts)/[^/]+(?:/[^/]+)?/?$',
+    re.IGNORECASE,
+)
+
+# A generated-looking segment: a ticker pair (BTC_USDT, 1000CAT_USDC), a bare
+# number, or a long hex id.
+#
+# The pair rule is deliberately narrow — underscore-separated and upper-case or
+# numeric only. A looser rule matching any `x-y` would also swallow ordinary
+# slugs like `how-to-invest` and `about-us`, which are exactly the pages worth
+# reading. Not case-insensitive, for the same reason.
+GENERATED_SEG_RE = re.compile(r'^[A-Z0-9]{2,12}_[A-Z0-9]{2,12}$|^\d+$|^[0-9a-f]{8,}$')
+
+# ISO 639-1 codes that realistically appear as a URL's first segment. A list,
+# not a shape: `^[a-z]{2,3}$` would also strip `api`, `faq` and `dev`, which are
+# real sections. Two letters plus an optional region suffix covers `/en/`,
+# `/en-PH/`, `/pt_BR/` and `/zh-hans/`.
+LANGUAGE_CODES = {
+    'aa', 'ab', 'af', 'am', 'ar', 'as', 'az', 'be', 'bg', 'bn', 'bs', 'ca', 'cs', 'cy', 'da', 'de',
+    'el', 'en', 'eo', 'es', 'et', 'eu', 'fa', 'fi', 'fr', 'ga', 'gl', 'gu', 'he', 'hi', 'hr', 'hu',
+    'hy', 'id', 'is', 'it', 'ja', 'ka', 'kk', 'km', 'kn', 'ko', 'ku', 'ky', 'lo', 'lt', 'lv', 'mk',
+    'ml', 'mn', 'mr', 'ms', 'mt', 'my', 'nb', 'ne', 'nl', 'nn', 'no', 'pa', 'pl', 'ps', 'pt', 'ro',
+    'ru', 'si', 'sk', 'sl', 'sq', 'sr', 'sv', 'sw', 'ta', 'te', 'th', 'tl', 'tr', 'uk', 'ur', 'uz',
+    'vi', 'zh',
+}
+LOCALE_SEG_RE = re.compile(r'^([a-z]{2})(?:[-_][a-z0-9]{2,5})?$', re.IGNORECASE)
+
+
+def _strip_locale(segs):
+    """Drop a leading language segment so the next one can be judged.
+
+    Only when something follows it: `/en` on its own is a real landing page,
+    and stripping it would make it look like the homepage.
+    """
+    if len(segs) > 1:
+        m = LOCALE_SEG_RE.match(segs[0])
+        if m and m.group(1).lower() in LANGUAGE_CODES:
+            return segs[1:]
+    return segs
+
+# At most this many pages from any one top-level section, so a single big
+# directory cannot fill the whole sample.
+MAX_PER_SECTION = 3
+
+# How many blocked pages may be re-fetched through DataBlue in one audit.
+# Each costs a credit and takes several seconds (it renders JavaScript), so the
+# budget is small and deliberate: enough to recover a usable sample from a
+# protected site, not enough to quietly double the cost of every audit. Zero
+# disables the rescue entirely.
+DATABLUE_RESCUE_PAGES = 6
+
+
+def _page_rank(url: str) -> float:
+    """Lower sorts first. How likely is this page to be worth reading?
+
+    Shallow, named, prose-shaped pages beat deep generated ones. This decides
+    what the audit actually looks at, so it is the difference between reading a
+    brand's About page and reading its ten-thousandth currency pair.
+    """
+    raw = urlparse(url).path or '/'
+    segs = _strip_locale([s for s in raw.split('/') if s])
+    if not segs:
+        return -100.0  # the homepage
+
+    # Judge the path as if the language prefix were not there: /en-PH/about is
+    # the same kind of page as /about, and /en-PH/trade/X is the same kind of
+    # page as /trade/X.
+    path = '/' + '/'.join(segs)
+
+    score = len(segs) * 2.0  # depth costs
+    first = segs[0].lower()
+    if first in CONTENT_SECTIONS:
+        score -= 6.0
+    if MACHINE_PATH_RE.search(path):
+        score += 25.0
+    for seg in segs:
+        if GENERATED_SEG_RE.match(seg):
+            score += 8.0
+    if len(path) > 90:
+        score += 3.0
+    digits = sum(c.isdigit() for c in path)
+    if digits > 8:
+        score += 2.0
+    return score
+
+
+def rank_candidates(urls: List[str], limit: int) -> List[str]:
+    """Best `limit` URLs to sample, homepage first, capped per section.
+
+    The per-section cap matters as much as the ranking: without it a site whose
+    /blog/ holds 5,000 posts would still crowd out every other kind of page.
+    """
+    if not urls:
+        return []
+    home, rest = urls[0], urls[1:]
+    ranked = sorted(rest, key=lambda u: (_page_rank(u), len(u)))
+
+    out, per_section = [home], {}
+    for u in ranked:
+        if len(out) >= limit:
+            break
+        # Group by the section, not the language: without this every
+        # /en-PH/* URL counts as one section called "en-PH" and the cap never
+        # bites, which is how eleven trading pairs filled one sample.
+        segs = _strip_locale([s for s in (urlparse(u).path or '/').split('/') if s])
+        section = segs[0].lower() if segs else ''
+        if per_section.get(section, 0) >= MAX_PER_SECTION:
+            continue
+        per_section[section] = per_section.get(section, 0) + 1
+        out.append(u)
+
+    # If the cap left room (a site with only two sections), fill it back up
+    # rather than sampling fewer pages than asked for.
+    if len(out) < limit:
+        for u in ranked:
+            if len(out) >= limit:
+                break
+            if u not in out:
+                out.append(u)
+    return out[:limit]
+
+
 # ---- fetch side ----------------------------------------------------------------
 
 def _get(url: str, timeout: int = FETCH_TIMEOUT):
@@ -100,6 +241,47 @@ def fetch_response(url: str, timeout: int = FETCH_TIMEOUT) -> Dict[str, Any]:
                         'timeout' if 'timeout' in name else 'connection')
         logger.debug('[AuditCrawl] %s: %s', url, exc)
     return out
+
+
+def _looks_blocked(resp: Dict[str, Any]) -> bool:
+    """Did we get nothing readable, in a way a different fetcher might fix?
+
+    A 404 is an answer and a real finding, so it is left alone. These are the
+    shapes bot protection produces: refused outright, forbidden, rate-limited,
+    or a 2xx with an empty body (binance answers HTTP 202 and no content).
+    """
+    if resp.get('text'):
+        return False
+    status = int(resp.get('status') or 0)
+    if resp.get('error') in ('connection', 'timeout'):
+        return True
+    if status in (401, 403, 429, 503):
+        return True
+    return 200 <= status < 300  # answered, but with nothing in it
+
+
+def rescue_fetch(url: str) -> Optional[str]:
+    """One blocked page, re-fetched through DataBlue with JS rendering.
+
+    Returns HTML, or None when DataBlue is not configured or also fails. Costs
+    a DataBlue credit per call, so callers must only use it on pages that
+    already failed.
+    """
+    from django.conf import settings
+    if not getattr(settings, 'DATABLUE_API_KEY', ''):
+        return None
+    try:
+        from core.misinformation_services.crawler import WebCrawler
+        # rawHtml, not html: the audit reads <head> — title, description,
+        # canonical, hreflang and JSON-LD. DataBlue's "html" is <main> only.
+        html, status, err = WebCrawler().crawl(url, dynamic=True, formats=['rawHtml'])
+        if html:
+            logger.info('[AuditCrawl] rescued %s via DataBlue', url)
+            return html
+        logger.info('[AuditCrawl] DataBlue could not read %s (%s %s)', url, status, err)
+    except Exception as exc:  # noqa: BLE001 - a rescue that fails must not fail the crawl
+        logger.info('[AuditCrawl] DataBlue rescue failed for %s: %s', url, exc)
+    return None
 
 
 def certificate_info(host: str, timeout: int = 6) -> Optional[Dict[str, Any]]:
@@ -203,18 +385,21 @@ def discover_urls(website: str, host: str, robots: Dict[str, Any], limit: int, h
             if key not in seen and _same_site(u, host) and not SKIP_PATH_RE.search(urlparse(u).path or ''):
                 seen.add(key)
                 found.append(u)
-        if len(found) >= limit:
+        if len(found) >= limit * 8:
             break
-    if len(found) < limit and homepage_html:
+    if len(found) < limit * 8 and homepage_html:
         for m in re.finditer(r'href=["\']([^"\'#?]+)', homepage_html, flags=re.IGNORECASE):
             u = urljoin(website, m.group(1))
             key = u.rstrip('/').replace('://www.', '://')
             if key not in seen and _same_site(u, host) and not SKIP_PATH_RE.search(urlparse(u).path or ''):
                 seen.add(key)
                 found.append(u)
-            if len(found) >= limit:
+            if len(found) >= limit * 8:
                 break
-    return {'urls': found[:limit], 'sitemap_present': sitemap_present, 'sitemap_children': children_seen,
+    # `found` is in sitemap order, which on a large site is generated pages
+    # first. Rank before truncating, or the sample is decided by whatever the
+    # site happened to list.
+    return {'urls': rank_candidates(found, limit), 'sitemap_present': sitemap_present, 'sitemap_children': children_seen,
             'sitemap_urls': in_sitemap[:5000], 'sitemap_url_count': len(in_sitemap)}
 
 
@@ -395,6 +580,7 @@ def summarise(pages: List[Dict[str, Any]], robots: Dict[str, Any], sitemap_prese
     """Site-level numbers the report prints and crawl_measures() scores, plus the technical layer."""
     ok = [p for p in pages if not p.get('parse_error')]
     n = len(ok)
+    rescued = sum(1 for p in pages if p.get('rescued'))
     with_schema = sum(1 for p in ok if p.get('has_schema'))
     types = Counter()
     for p in ok:
@@ -405,6 +591,13 @@ def summarise(pages: List[Dict[str, Any]], robots: Dict[str, Any], sitemap_prese
     allowed = robots.get('allowed') or {}
     base = {
         'pages_sampled': n,
+        # Attempted vs parsed: the gap is how health_score tells "a small site"
+        # (nothing to crawl) from "we were blocked" (plenty to crawl, no access).
+        'pages_attempted': len(pages),
+        # How many needed a JavaScript-rendering fetch to read at all — itself a
+        # finding: a page our crawler cannot read is one an AI crawler probably
+        # cannot read either.
+        'pages_rescued': rescued,
         'robots_present': bool(robots.get('present')),
         'bots': [{'bot': bot, 'engine': engine, 'allowed': bool(allowed.get(bot, True))} for bot, engine in AI_BOTS],
         'bots_allowed': sum(1 for bot, _ in AI_BOTS if allowed.get(bot, True)),
@@ -491,8 +684,12 @@ def crawl_measures(summary: Dict[str, Any]) -> Dict[str, Dict[str, Any]]:
 
 # ---- orchestration ----------------------------------------------------------------
 
-def fetch_page(url: str, host: str) -> Dict[str, Any]:
+def fetch_page(url: str, host: str, allow_rescue: bool = False) -> Dict[str, Any]:
     resp = fetch_response(url)
+    if allow_rescue and _looks_blocked(resp):
+        rescued = rescue_fetch(url)
+        if rescued:
+            resp = {**resp, 'text': rescued, 'rescued': True}
     headers = resp.get('headers') or {}
     transport = {'status_code': resp.get('status') or 0, 'redirects': resp.get('redirects') or 0,
                  'final_url': resp.get('final_url') if resp.get('final_url') != url else '',
@@ -500,6 +697,8 @@ def fetch_page(url: str, host: str) -> Dict[str, Any]:
                  'html_bytes': int(resp.get('bytes') or 0),
                  'security_headers': {h: (h in headers) for h in ('content-security-policy', 'x-content-type-options', 'x-frame-options', 'referrer-policy')},
                  'x_robots': (headers.get('x-robots-tag') or '')[:120], 'fetch_error': resp.get('error') or ''}
+    if resp.get('rescued'):
+        transport['rescued'] = True
     html = resp.get('text')
     if html is None:
         status = resp.get('status') or 0
@@ -538,6 +737,14 @@ def crawl_site(website: str, host: str, homepage_html: Optional[str] = None, lim
     discovered = discover_urls(website, host, robots, limit, homepage_html)
 
     from core.audit_technical import link_graph, norm_url
+    # Only spent on pages our own fetch could not read, and only when a
+    # DataBlue key exists — otherwise rescue_fetch() returns None anyway and
+    # this costs nothing but a branch.
+    from django.conf import settings as _settings
+    rescue_budget = {'left': (
+        int(getattr(_settings, 'AUDIT_DATABLUE_RESCUE_PAGES', DATABLUE_RESCUE_PAGES))
+        if getattr(_settings, 'DATABLUE_API_KEY', '') else 0
+    )}
     pages: List[Dict[str, Any]] = []
     order: List[str] = list(discovered['urls'])
     queued = {norm_url(u) for u in order}
@@ -549,7 +756,15 @@ def crawl_site(website: str, host: str, homepage_html: Optional[str] = None, lim
             if remaining <= 3:
                 logger.info('[AuditCrawl] budget exhausted for %s after %d pages', host, len(pages))
                 break
-            futures = {pool.submit(fetch_page, u, host): u for u in batch}
+            # Rescues are handed out first-come, first-served from one shared
+            # budget: the pages we most want are sampled first, so the earliest
+            # failures are the ones worth spending a credit on.
+            futures = {}
+            for u in batch:
+                allow = rescue_budget['left'] > 0
+                if allow:
+                    rescue_budget['left'] -= 1
+                futures[pool.submit(fetch_page, u, host, allow)] = u
             try:
                 for fut in as_completed(futures, timeout=remaining):
                     pages.append(fut.result())

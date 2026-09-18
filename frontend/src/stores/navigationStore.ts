@@ -70,16 +70,6 @@ const allNavGroups: NavGroup[] = [
     sectionLabel: true,
     items: [],
   },
-  // Audit Engine leads the Overview group. It is an admin tool (the backend
-  // scopes the leads table to admin / super_admin), so it rides on the
-  // organization_settings module rather than a new one: super_admin always
-  // passes, admins pass unless explicitly restricted, clients never do.
-  {
-    name: "Audit Engine",
-    items: [
-      { name: "Audit Engine", path: "/audits", icon: ScanSearch, module: MODULES.ORGANIZATION_SETTINGS },
-    ],
-  },
   {
     name: "Dashboard",
     items: [
@@ -115,6 +105,10 @@ const allNavGroups: NavGroup[] = [
       { name: "Citations", path: "/citations", icon: ExternalLink, module: MODULES.CITATIONS },
       { name: "Sources", path: "/sources", icon: LinkIcon, module: MODULES.CITATIONS },
       { name: "Alerts", path: "/alerts", icon: Bell, module: MODULES.ALERTS },
+      // The run ledger is the evidence every other GEO screen is computed
+      // from, so it led this group as a flat entry until the sidebar stopped
+      // fitting on one screen. Inside Tracking it costs a hover and saves a row.
+      { name: "Runs", path: "/runs", icon: Activity, module: MODULES.PROMPTS },
     ],
   },
   {
@@ -210,6 +204,18 @@ const allNavGroups: NavGroup[] = [
       { name: "GEO Content Gaps", path: "/content-gaps", icon: Target, module: MODULES.CONTENT_GAPS },
       { name: "SEO Content Gaps", path: "/seo-content-gaps", icon: FileSearch, module: MODULES.KEYWORD_RANKINGS },
       { name: "Content Planner", path: "/content-calendar", icon: Calendar, module: MODULES.CONTENT_PLANNER },
+    ],
+  },
+  // Audit Engine sits under Strategy as its own row, not inside the fly-out:
+  // it is where new business comes from rather than a view of an existing
+  // project, so it is worth a click of its own. Still an admin tool — the
+  // backend scopes the leads table to admin / super_admin, so it rides on the
+  // organization_settings module rather than a new one: super_admin always
+  // passes, admins pass unless explicitly restricted, clients never do.
+  {
+    name: "Audit Engine",
+    items: [
+      { name: "Audit Engine", path: "/audits", icon: ScanSearch, module: MODULES.ORGANIZATION_SETTINGS },
     ],
   },
 ];

@@ -219,6 +219,38 @@ class SummaryTests(SimpleTestCase):
         self.assertIsNotNone(s['health']['score'])
         self.assertEqual(len(s['content_patterns']), 3)
 
+    def test_a_site_that_blocks_our_reader_is_unverified_not_perfect(self):
+        """Audit #29 (binance.com): 12 pages requested, all answered HTTP 202
+        with an empty body, so pages_sampled was 0.
+
+        Every other category is gated on having pages, so crawlability — which
+        is computed purely from robots.txt — was the only one left, scored 100
+        ("5 of 5 AI crawlers allowed"), and the site was reported at 92/100.
+        robots.txt states policy; a fetch is evidence, and the evidence said
+        nobody could read a page.
+        """
+        base = self.base(pages_sampled=0, pages_attempted=12)
+        s = t.technical_summary([], base, website='https://blocked.com')
+        health = s['health']
+
+        self.assertIsNone(health['score'], 'no page read means no site health score')
+        self.assertTrue(health['blocked'])
+        self.assertIn('could not read any', health['blocked_reason'])
+
+        cat = next(c for c in health['categories'] if c['key'] == 'crawlability')
+        self.assertIsNone(cat['score'], 'unscored, not 100 and not 0')
+        self.assertIn('unverified', cat['detail'])
+        self.assertIn('robots.txt allows 5 of 5', cat['detail'])
+
+    def test_a_site_with_nothing_to_crawl_is_not_treated_as_blocked(self):
+        """Attempted zero pages is a different thing from attempted and refused."""
+        base = self.base(pages_sampled=0, pages_attempted=0)
+        s = t.technical_summary([], base, website='https://empty.com')
+        health = s['health']
+        self.assertFalse(health['blocked'])
+        cat = next(c for c in health['categories'] if c['key'] == 'crawlability')
+        self.assertIsNotNone(cat['score'], 'robots.txt is still the best evidence we have here')
+
     def test_cwv_feeds_the_health_score(self):
         cwv = {'source': 'field', 'lcp_ms': 1800, 'cls': 0.02, 'inp_ms': 150, 'score': 100}
         s = t.technical_summary(self.pages(), self.base(), website='https://e.com', cwv=cwv)

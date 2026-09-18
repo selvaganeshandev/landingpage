@@ -30,6 +30,17 @@ logger = logging.getLogger(__name__)
 DEFAULT_SCRAPE_URL = "https://api.datablue.dev/v1/scrape"
 
 
+def _scrape_payload(url: str, dynamic: bool, formats=None) -> dict:
+    """Body for /v1/scrape. Extra keys only when asked for, so existing callers
+    keep the exact request they had before."""
+    payload = {"url": url}
+    if dynamic:
+        payload["dynamic"] = True
+    if formats:
+        payload["formats"] = list(formats)
+    return payload
+
+
 class WebCrawler:
     """
     Web crawler using the DataBlue scrape API.
@@ -99,7 +110,7 @@ class WebCrawler:
                 time.sleep(sleep_time)
             self._last_request_time = time.time()
 
-    def crawl(self, url: str, dynamic: bool = None) -> Tuple[Optional[str], int, Optional[str]]:
+    def crawl(self, url: str, dynamic: bool = None, formats: Optional[list] = None) -> Tuple[Optional[str], int, Optional[str]]:
         """
         Crawl a URL and return the page content using the DataBlue scrape API.
 
@@ -116,6 +127,11 @@ class WebCrawler:
         if not self.api_key:
             return None, 0, "DATABLUE_API_KEY not configured"
 
+        # `dynamic` was accepted and then dropped: the payload only ever carried
+        # the URL, so JavaScript rendering could not be turned on by any caller.
+        # Sent only when asked for, so existing callers keep their behaviour.
+        use_dynamic = self.use_dynamic if dynamic is None else dynamic
+
         for attempt in range(self.max_retries):
             try:
                 self._rate_limit_wait()
@@ -128,7 +144,7 @@ class WebCrawler:
                         "Authorization": f"Bearer {self.api_key}",
                         "Content-Type": "application/json",
                     },
-                    json={"url": url},
+                    json=_scrape_payload(url, use_dynamic, formats),
                     timeout=self.timeout,
                 )
 
@@ -225,7 +241,9 @@ class WebCrawler:
             logger.info(f"Origin returned {origin_status} for {url}")
             return None, origin_status, f"HTTP {origin_status}"
 
-        content = data.get("markdown") or data.get("html") or data.get("content") or ""
+        # raw_html first: it is the whole document, and only the audit rescue
+        # asks for it. Markdown stays the default for everyone else.
+        content = data.get("raw_html") or data.get("markdown") or data.get("html") or data.get("content") or ""
         if not content.strip():
             return None, origin_status, "Empty page content"
 

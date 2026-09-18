@@ -65,6 +65,11 @@ export interface AuditListRow extends AuditProgress {
   engines_total: number;
   opens: number;
   last_opened_at: string | null;
+  /** Delivery: publication sends nothing by default, so these say whether the
+   *  report actually reached someone, when, and how many times. */
+  emailed_at: string | null;
+  emailed_to: string[];
+  email_count: number;
   expires_at: string | null;
   claimed_at: string | null;
   claimed_domain: number | null;
@@ -583,6 +588,12 @@ export interface PublicAudit extends AuditProgress {
   host: string;
   website: string;
   country: string;
+  /** Whether the Google-ranking stage runs on this audit, so the progress
+   *  strip can tell a real step from a skipped one. */
+  seo_enabled: boolean;
+  /** Where to send a landing-page visitor back to; '' for audits the team
+   *  started themselves, which have no 'back' to offer. */
+  landing_url: string;
   brand_name: string;
   industry: string;
   competitors: AuditCompetitor[];
@@ -650,14 +661,26 @@ export interface AuditClaimResponse {
   domain: { id: number; name: string; url: string; country: string; processing_status: string };
 }
 
-export const AUDIT_STAGES: { key: Exclude<AuditStage, ''>; label: string; short: string }[] = [
-  { key: 'profile', label: 'Reading the site', short: 'Profile' },
-  { key: 'crawl', label: 'Checking your pages', short: 'Pages' },
-  { key: 'prompts', label: 'Writing buyer prompts', short: 'Prompts' },
-  { key: 'engines', label: 'Asking the AI engines', short: 'AI answers' },
-  { key: 'serp', label: 'Checking Google rankings', short: 'SERP + crawl' },
-  { key: 'score', label: 'Scoring', short: 'Score' },
-  { key: 'publish', label: 'Publishing the report', short: 'Publish' },
+/** `does` is shown to whoever is watching the audit run: one plain sentence
+ *  saying what the stage does and what it uses, so seven ticking boxes are
+ *  legible to someone who has never seen the product. */
+export const AUDIT_STAGES: { key: Exclude<AuditStage, ''>; label: string; short: string; does: string }[] = [
+  { key: 'profile', label: 'Reading the site', short: 'Profile',
+    does: 'Reading your homepage and working out your brand, industry and main competitors.' },
+  { key: 'crawl', label: 'Checking your pages', short: 'Pages',
+    does: 'Sampling your pages for structured data, author bylines, depth and whether AI crawlers are allowed in.' },
+  { key: 'prompts', label: 'Writing buyer prompts', short: 'Prompts',
+    does: 'Writing the questions a real buyer would ask, from broad research to direct comparisons.' },
+  { key: 'engines', label: 'Asking the AI engines', short: 'AI answers',
+    does: 'Asking every question to ChatGPT, Claude and Perplexity, and recording who they name and cite.' },
+  // 'SERP + crawl' until 2026-09: a leftover from when crawling and ranking
+  // were one stage. The crawl is stage 2; this one only ranks keywords.
+  { key: 'serp', label: 'Checking Google rankings', short: 'Rankings',
+    does: 'Looking up where you rank on Google for your keywords, and who outranks you.' },
+  { key: 'score', label: 'Scoring', short: 'Score',
+    does: 'Turning the evidence into your visibility score, website health and a prioritised fix plan.' },
+  { key: 'publish', label: 'Publishing the report', short: 'Publish',
+    does: 'Putting the finished report together.' },
 ];
 
 export const GAP_LABELS: Record<GapType, { label: string; tone: string; hint: string }> = {

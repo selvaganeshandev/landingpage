@@ -565,6 +565,91 @@ class LeadAlertTests(_Base):
 
 
 @override_settings(**ON)
+class PublicEmailTests(_Base):
+    """POST /audits/public/<token>/email/ — the lead's "Click for full audit".
+
+    A lead has no account, so this is the only way they get their copy; the
+    PDF and the CSV stay locked until the audit becomes a project.
+    """
+
+    def _sent(self):
+        calls = []
+
+        def fake(subject, message, from_email=None, recipient_list=None, fail_silently=False, html_message=None):
+            calls.append({'subject': subject, 'to': list(recipient_list or []), 'text': message})
+            return 1
+        return calls, fake
+
+    def test_sends_to_the_address_the_audit_was_requested_with(self):
+        audit = _done_audit(requester_email='lead@brand.com')
+        calls, fake = self._sent()
+        with patch('llm_monitor.email_utils.send_mail', fake):
+            r = _client().post(f'/audits/public/{audit.public_token}/email/', {}, format='json')
+        self.assertEqual(r.status_code, 200)
+        self.assertTrue(r.data['sent'])
+        self.assertEqual(calls[0]['to'], ['lead@brand.com'])
+        self.assertIn(f'/audit/{audit.public_token}', calls[0]['text'])
+        audit.refresh_from_db()
+        self.assertEqual(audit.email_count, 1)
+        self.assertEqual(audit.emailed_to, ['lead@brand.com'])
+
+    def test_the_address_is_masked_in_the_response(self):
+        """Confirms where it went without handing a shared screen the full address."""
+        audit = _done_audit(requester_email='someone@brand.com')
+        _calls, fake = self._sent()
+        with patch('llm_monitor.email_utils.send_mail', fake):
+            r = _client().post(f'/audits/public/{audit.public_token}/email/', {}, format='json')
+        self.assertEqual(r.data['to'], 's•••••e@brand.com')
+
+    def test_an_address_in_the_body_is_ignored(self):
+        """The security property: this must not become an open spam relay.
+
+        A public token is shareable, so if the caller could name the recipient
+        anyone holding a link could send mail from our domain to anyone.
+        """
+        audit = _done_audit(requester_email='lead@brand.com')
+        calls, fake = self._sent()
+        with patch('llm_monitor.email_utils.send_mail', fake):
+            r = _client().post(
+                f'/audits/public/{audit.public_token}/email/',
+                {'to': 'victim@elsewhere.com', 'email': 'victim2@elsewhere.com'},
+                format='json',
+            )
+        self.assertEqual(r.status_code, 200)
+        self.assertEqual(calls[0]['to'], ['lead@brand.com'])
+
+    def test_an_unfinished_audit_is_refused(self):
+        audit = _done_audit(requester_email='lead@brand.com', status='PROC', progress=40, report={})
+        r = _client().post(f'/audits/public/{audit.public_token}/email/', {}, format='json')
+        self.assertEqual(r.status_code, 409)
+
+    def test_an_audit_with_no_address_on_file(self):
+        audit = _done_audit(requester_email='')
+        r = _client().post(f'/audits/public/{audit.public_token}/email/', {}, format='json')
+        self.assertEqual(r.status_code, 400)
+        self.assertIn('no email address', r.data['error'].lower())
+
+    def test_sending_is_capped(self):
+        from audits.views import PUBLIC_EMAIL_MAX_SENDS
+        audit = _done_audit(requester_email='lead@brand.com', email_count=PUBLIC_EMAIL_MAX_SENDS)
+        r = _client().post(f'/audits/public/{audit.public_token}/email/', {}, format='json')
+        self.assertEqual(r.status_code, 429)
+
+    def test_an_expired_link_is_gone(self):
+        audit = _done_audit(requester_email='lead@brand.com',
+                            expires_at=timezone.now() - timedelta(days=1))
+        r = _client().post(f'/audits/public/{audit.public_token}/email/', {}, format='json')
+        self.assertEqual(r.status_code, 404)
+
+    def test_a_mail_failure_is_reported_not_swallowed(self):
+        audit = _done_audit(requester_email='lead@brand.com')
+        with patch('llm_monitor.email_utils.send_mail', side_effect=RuntimeError('mailgun down')):
+            r = _client().post(f'/audits/public/{audit.public_token}/email/', {}, format='json')
+        self.assertEqual(r.status_code, 502)
+        audit.refresh_from_db()
+        self.assertEqual(audit.email_count, 0, 'a failed send must not be recorded as delivered')
+
+
 class PdfTests(_Base):
     """The downloadable report: public by token, authenticated by id, DONE only."""
 

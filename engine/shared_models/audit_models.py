@@ -61,6 +61,9 @@ class Audit(models.Model):
 
     opens = models.PositiveIntegerField(default=0)
     last_opened_at = models.DateTimeField(null=True, blank=True)
+    emailed_at = models.DateTimeField(null=True, blank=True)
+    emailed_to = models.JSONField(default=list, blank=True)
+    email_count = models.PositiveIntegerField(default=0)
     expires_at = models.DateTimeField(null=True, blank=True)
 
     claimed_at = models.DateTimeField(null=True, blank=True)
@@ -100,6 +103,16 @@ class Audit(models.Model):
         if self.status == 'INIT':
             self.status = 'PROC'
         self.save(update_fields=['stage', 'progress', 'stage_detail', 'status', 'modified_at'])
+
+    def record_email(self, addresses):
+        """Mirror of the backend helper: remember that the report was emailed."""
+        addresses = [str(a).strip() for a in (addresses or []) if str(a).strip()][:5]
+        type(self).objects.filter(pk=self.pk).update(
+            emailed_at=timezone.now(), emailed_to=addresses,
+            email_count=models.F('email_count') + 1, modified_at=timezone.now(),
+        )
+        self.refresh_from_db(fields=['emailed_at', 'emailed_to', 'email_count'])
+        return self.emailed_at
 
     def mark_failed(self, error):
         self.status = 'FAIL'

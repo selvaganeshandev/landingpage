@@ -180,6 +180,31 @@ MAX_CONCURRENT_COMPETITOR_PROMPTS = config('MAX_CONCURRENT_COMPETITOR_PROMPTS', 
 # Set to 1 to restore the old strictly-serial behaviour.
 MAX_CONCURRENT_PROMPT_PLATFORMS = config('MAX_CONCURRENT_PROMPT_PLATFORMS', default=3, cast=int)
 
+# How many audit engine calls may be in flight at once.
+#
+# Distinct from MAX_CONCURRENT_PROMPT_PLATFORMS above, which is per-prompt and
+# therefore caps out at the number of engines. The audit stage runs ONE pool
+# across every (prompt, engine, run) triple, so this is the real ceiling and
+# raising it actually does something.
+#
+# Measured on audit #26 (8 prompts x 3 engines = 24 calls): the old per-prompt
+# pool took 625s against a 93s floor, because the eight prompts ran one after
+# another. Flattened, the stage costs roughly ceil(24 / this) waves of ~78s:
+#   8  -> 3 waves, ~4 min  audit   (default: comfortable for every provider)
+#   12 -> 2 waves, ~3 min  audit
+#   24 -> 1 wave,  ~2.5 min audit  (most 429-prone)
+#
+# Higher is not free: a burst of 429s costs more wall clock in backoff than the
+# extra parallelism saves, and a call that exhausts its retries is stored as a
+# failed answer, which reads as "brand not mentioned" and deflates the score.
+AUDIT_MAX_CONCURRENT_CALLS = config('AUDIT_MAX_CONCURRENT_CALLS', default=8, cast=int)
+
+# 429 retry budget for those calls. Only 429s are retried; anything else fails
+# fast. See core.audit_processor._call_with_rate_limit_retry.
+AUDIT_RATE_LIMIT_RETRIES = config('AUDIT_RATE_LIMIT_RETRIES', default=4, cast=int)
+AUDIT_RATE_LIMIT_BASE_DELAY = config('AUDIT_RATE_LIMIT_BASE_DELAY', default=2.0, cast=float)
+AUDIT_RATE_LIMIT_MAX_WAIT = config('AUDIT_RATE_LIMIT_MAX_WAIT', default=120.0, cast=float)
+
 # A PromptGroup left in SCHD longer than this is assumed dead (deploy, kill -9,
 # OOM) and reaped back to INIT by the prompt scheduler's reaper.
 #
@@ -431,6 +456,11 @@ AUDIT_SUMMARY_ENABLED = config('AUDIT_SUMMARY_ENABLED', default=True, cast=bool)
 # Comma-separated team addresses that hear about new landing-page audits the
 # moment they publish. Empty = no alerts. Requester emails need only Mailgun.
 AUDIT_LEAD_ALERT_EMAILS = config('AUDIT_LEAD_ALERT_EMAILS', default='')
+# Whether publishing an audit also emails the report link to whoever requested
+# it. Off: nothing is sent automatically and the report is emailed on demand
+# from the audit page ("Email report"). Turn it on for the landing-page funnel,
+# where that email is how a visitor receives the audit they asked for.
+AUDIT_AUTO_EMAIL_ON_PUBLISH = config('AUDIT_AUTO_EMAIL_ON_PUBLISH', default=False, cast=bool)
 
 # ==================== WEEKLY SWEEP COST GUARDS ====================
 # A weekly sweep resets EVERY prompt/competitor and re-queries every enabled

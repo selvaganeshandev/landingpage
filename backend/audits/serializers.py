@@ -1,3 +1,4 @@
+from django.conf import settings
 from rest_framework import serializers
 
 from .models import Audit, AuditKeywordResult, AuditPageResult, AuditPromptResult
@@ -54,11 +55,14 @@ class PublicAuditSerializer(_ProgressMixin, serializers.ModelSerializer):
     """
     error = serializers.SerializerMethodField()
     report = serializers.SerializerMethodField()
+    seo_enabled = serializers.SerializerMethodField()
+    landing_url = serializers.SerializerMethodField()
 
     class Meta:
         model = Audit
         fields = [
-            'public_token', 'host', 'website', 'country', 'brand_name', 'industry',
+            'public_token', 'host', 'website', 'country', 'brand_name', 'industry', 'seo_enabled',
+            'landing_url',
             'competitors', 'tech_stack',
             'status', 'stage', 'stage_index', 'stage_total', 'stage_label', 'progress', 'stage_detail',
             'error',
@@ -69,6 +73,26 @@ class PublicAuditSerializer(_ProgressMixin, serializers.ModelSerializer):
             'created_at', 'completed_at',
         ]
         read_only_fields = fields
+
+    def get_seo_enabled(self, obj):
+        """Whether this audit ranks keywords on Google.
+
+        Derived, not the config blob: the progress strip has to label the SERP
+        stage either as a real step or as skipped, and guessing wrong tells the
+        visitor a stage was skipped while they watch it run.
+        """
+        return bool((obj.config or {}).get('seo_enabled'))
+
+    def get_landing_url(self, obj):
+        """Where to send this visitor back to, or '' for no back link.
+
+        Only for audits that came from the landing page: those visitors have no
+        account and nothing else to reach here, so the report is the end of the
+        road. An audit an admin started by hand has no 'back' to offer.
+        """
+        if obj.source != 'landing':
+            return ''
+        return getattr(settings, 'AUDIT_LANDING_URL', '') or ''
 
     def get_error(self, obj):
         if obj.status != 'FAIL':
@@ -92,6 +116,7 @@ class AuditListSerializer(_ProgressMixin, serializers.ModelSerializer):
             'status', 'stage', 'stage_index', 'stage_total', 'stage_label', 'progress', 'error',
             'geo_score', 'geo_stage', 'seo_visibility', 'engines_preferred', 'engines_total',
             'opens', 'last_opened_at', 'expires_at', 'is_expired',
+            'emailed_at', 'emailed_to', 'email_count',
             'is_claimed', 'claimed_at', 'claimed_domain', 'claimed_domain_name',
             'requested_by', 'requested_by_email', 'requester_email',
             'created_at', 'completed_at',

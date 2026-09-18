@@ -518,9 +518,10 @@ export const Sidebar = () => {
       </nav>
 
       <div className={cn("border-t border-border mt-auto pt-1.5", isOpen ? "px-2 pb-2" : "px-2 pb-2")}>
-          {/* Account menu: name, email · role, then Settings / Switch project /
-              What's new / Sign out. The Settings targets are the same the old
-              fly-out had (Organization / Billing / Profile, gated by role). */}
+          {/* Account menu: name, email · role, then Settings / What's new /
+              Sign out. The Settings targets are the same the old fly-out had
+              (Organization / Billing / Profile, gated by role). Switching
+              projects is the pill at the top of this sidebar, not here. */}
           {user && (
             <UserMenu
               user={user}
@@ -533,9 +534,6 @@ export const Sidebar = () => {
                 ...(user.role === 'super_admin' ? [{ name: "Billing", path: "/billing", icon: CreditCard }] : []),
                 { name: "Profile", path: "/profile", icon: User },
               ]}
-              domains={domains}
-              selectedDomain={selectedDomain}
-              onSwitchDomain={switchDomain}
               onSignOut={handleLogoutClick}
             />
           )}
