@@ -17,7 +17,13 @@ torch==2.3.1
 torchvision==0.18.1
 
 # Google Gemini
-google-generativeai==0.8.3
+# Gemini SDK stack - keep these three in step across backend AND engine.
+# proto-plus < 1.26 caps at protobuf < 5 and blows up at call time against a
+# newer protobuf with a MessageMapContainer AttributeError that names neither
+# package. Verified working together on 2026-09-17.
+google-generativeai==0.8.4
+proto-plus==1.28.4
+protobuf==7.36.0
 # Unified SDK - required only for GEMINI_BACKEND=vertex (Vertex AI path).
 # Matches the version already pinned in backend/requirements.txt.
 google-genai==1.39.0

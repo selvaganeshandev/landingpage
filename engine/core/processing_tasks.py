@@ -2,6 +2,7 @@ from celery import shared_task
 from django.conf import settings
 from django.db import transaction
 from django.utils import timezone
+from datetime import timedelta
 from shared_models.models import Domain
 from shared_models.models import Prompt, Competitor
 from .domain_processor import DomainProcessor
@@ -117,13 +118,63 @@ def process_prompt_analytics_scheduler(self):
     return processor.schedule_tick()
 
 
+# Days between sweeps for each Domain.sweep_cadence value. None means never.
+# 'biweekly'/'monthly' are 14/28 rather than 15/30 so a cadence always lands on
+# a multiple of the weekly cron: at 15 days a domain due on day 15 would wait
+# for the day-21 run, drifting to a 21-day cadence. The UI labels stay "15/30
+# days" because that is how a client thinks about it; the schedule honours it to
+# the nearest run, which is the closest a weekly cron can get.
+SWEEP_CADENCE_DAYS = {
+    'weekly': 7,
+    'biweekly': 14,
+    'monthly': 28,
+    'off': None,
+}
+# The cron fires every 7 days, but beat jitter, a restart or a queue backlog can
+# push a run late or (fractionally) early. Without slack a run that landed even
+# a minute early would find every domain "not due yet" and sweep nothing.
+SWEEP_CADENCE_GRACE = timedelta(hours=12)
+
+
+def _cadence_due_domain_ids(ignore_due=False):
+    """Domain ids due for a sweep now, per Domain.sweep_cadence.
+
+    `ignore_due` drops the "not due yet" test and keeps only the 'off' one. A
+    forced sweep is an operator saying "run it now", so it should not be talked
+    out of it by a timer - but 'off' is the client's own choice, and force is
+    meant to override the cooldown, not that.
+
+    Returns (ids, skipped). `ids` is None when every domain is due, which is the
+    signal to apply no domain filter at all — keeping the common case
+    identical to the untiered sweep that ran before this field existed.
+
+    A domain with no cadence set reads as 'weekly', and a NULL last_swept_at
+    counts as due, so no domain is silently dropped when this ships.
+    """
+    now = timezone.now()
+    due, skipped = [], 0
+    for domain_id, cadence, last_swept in Domain.objects.values_list(
+            'id', 'sweep_cadence', 'last_swept_at'):
+        days = SWEEP_CADENCE_DAYS.get(cadence or 'weekly', 7)
+        if days is None:                       # 'off' — client opted out
+            skipped += 1
+            continue
+        if (not ignore_due and last_swept
+                and (now - last_swept) < timedelta(days=days) - SWEEP_CADENCE_GRACE):
+            skipped += 1                       # swept recently enough
+            continue
+        due.append(domain_id)
+    return (None if skipped == 0 else due), skipped
+
+
 # NOTE: max_retries here is inert — there is no autoretry_for and no self.retry()
 # call, so a failure ends the task. Do not add a retry without also passing
 # force=True on the retried entry call: a retry reuses the original args, so it
 # would come back with last_id=0 and be refused by the cooldown this same run
 # recorded, silently turning a retry into a no-op.
 @shared_task(bind=True, ignore_result=True, max_retries=3)
-def schedule_weekly_prompt_batches(self, last_id: int = 0, force: bool = False, tier: str = None):
+def schedule_weekly_prompt_batches(self, last_id: int = 0, force: bool = False, tier: str = None,
+                                   domain_ids=None):
     """
     Weekly batch re-scheduler for prompt analytics.
     - Resets prompts (excluding PROC) to INIT in batches
@@ -141,6 +192,15 @@ def schedule_weekly_prompt_batches(self, last_id: int = 0, force: bool = False, 
       'monthly'  — only the domains NOT listed
     The two tiers carry separate cooldown stamps so neither refuses the other,
     but they share one kill switch — see weekly_sweep_guard._KILLSWITCH_ALIAS.
+
+    When the env list is empty (the default) the untiered run instead honours
+    each domain's own `sweep_cadence`, skipping the ones that are off or not due
+    yet. The resulting id list rides the chain in `domain_ids` so every batch of
+    one sweep covers the same domains: the entry batch stamps `last_swept_at`,
+    which would otherwise make the continuations think those domains had just
+    been swept and sweep nothing. `domain_ids=None` means no domain filter, so
+    an in-flight chained message from a previous deploy behaves exactly as it
+    did before.
     """
     weekly_ids = list(getattr(settings, 'WEEKLY_SWEEP_WEEKLY_DOMAIN_IDS', []) or [])
     # An empty list means tiering is not configured, so a 'weekly'/'monthly' run
@@ -166,6 +226,26 @@ def schedule_weekly_prompt_batches(self, last_id: int = 0, force: bool = False, 
             return blocked
         weekly_sweep_guard.record_sweep_start(sweep_key)
 
+        # Per-domain cadence applies to the untiered run only. Where an operator
+        # has configured the env tiering, that stays in charge: two schedules
+        # deciding the same thing is a way to sweep less than either meant.
+        if tier is None:
+            domain_ids, skipped = _cadence_due_domain_ids(ignore_due=force)
+            if skipped:
+                logger.info(
+                    f"[{label}] Cadence: sweeping {len(domain_ids)} domain(s), "
+                    f"skipping {skipped} switched off or not due yet"
+                )
+                if not domain_ids:
+                    logger.info(f"[{label}] No domain is due this run")
+                    return {'done': True, 'queued': 0, 'skipped_domains': skipped}
+            # Stamped before anything is enqueued, so a crash mid-sweep does not
+            # leave the domains looking un-swept. The continuations read
+            # `domain_ids`, never this stamp, so an early write is safe.
+            Domain.objects.filter(
+                **({'id__in': domain_ids} if domain_ids is not None else {})
+            ).update(last_swept_at=timezone.now())
+
     # Skip organisations that have switched AI monitoring off. A sweep is the one
     # job that re-queries an entire org at once, so an org that is not using the
     # feature would otherwise pay for a full platform fan-out nobody reads.
@@ -181,6 +261,8 @@ def schedule_weekly_prompt_batches(self, last_id: int = 0, force: bool = False, 
         qs = qs.filter(group__domain_id__in=weekly_ids)
     elif tier == 'monthly':
         qs = qs.exclude(group__domain_id__in=weekly_ids)
+    elif domain_ids is not None:
+        qs = qs.filter(group__domain_id__in=domain_ids)
     qs = qs.order_by('id').values_list('id', flat=True)[:WEEKLY_PROMPT_BATCH_SIZE]
 
     ids = list(qs)
@@ -201,7 +283,10 @@ def schedule_weekly_prompt_batches(self, last_id: int = 0, force: bool = False, 
         # Chain next batch. `tier` MUST ride along: without it the continuation
         # would drop back to the untiered queryset and sweep the whole corpus,
         # which is the exact cost this tiering exists to avoid.
-        schedule_weekly_prompt_batches.delay(last_id=ids[-1], tier=tier)
+        # `domain_ids` MUST ride along for the same reason `tier` does: a
+        # continuation without it would drop back to the whole corpus.
+        schedule_weekly_prompt_batches.delay(
+            last_id=ids[-1], tier=tier, domain_ids=domain_ids)
     except Exception:
         # The cooldown was stamped before any work was enqueued, so a crash here
         # leaves a partial sweep that will NOT retry on its own and will be

@@ -122,6 +122,9 @@ const App = () => (
                   <Dashboard />
                 </ProtectedRoute>
               } />
+              {/* Schedules sits under Overview beside the Dashboard, and rides
+                  the same DASHBOARD permission: it is a read-only view of when
+                  analysis runs, so anyone who can see the dashboard can see it. */}
               
               {/* Tracking */}
               <Route path="/mentions" element={

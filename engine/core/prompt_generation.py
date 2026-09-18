@@ -33,9 +33,19 @@ logger = logging.getLogger(__name__)
 # on an empty balance, so "Generate with AI" keeps working at $0. The paid model
 # is always tried first, so a funded key still gets full paid quality.
 FREE_INTERNAL_MODELS = [
-    'minimax/minimax-m3:free',
-    'google/gemma-4-31b-it:free',
-    'z-ai/glm-5.2:free',
+    # Verified against OpenRouter on 2026-09-17 with a real completion each:
+    # every slug here answered, and the two that did not (nemotron-3.5-lightning
+    # timed out at 181s, inkling-small returned 403) are deliberately absent.
+    #
+    # Free slugs are retired without notice - 'minimax/minimax-m3:free' sat at
+    # the top of this list until it stopped being listed at all. Order is
+    # fastest-verified first, so the common case costs one call.
+    'google/gemma-4-31b-it:free',          # 1.4s
+    'inclusionai/ling-3.0-flash-vl:free',  # 1.3s
+    'nex-agi/nex-n2.5-mini:free',          # 3.5s
+    'nvidia/nemotron-3-super-120b-a12b:free',
+    'z-ai/glm-5.2:free',                   # slowest, and truncates on a tight
+                                           # max_tokens - keep it last
 ]
 
 # Intent taxonomy. `branded` marks intents that name the brand by definition —

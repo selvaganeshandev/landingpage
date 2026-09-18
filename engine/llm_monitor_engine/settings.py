@@ -468,6 +468,13 @@ WEEKLY_SWEEP_BEAT_ENABLED = config('WEEKLY_SWEEP_BEAT_ENABLED', default=False, c
 # EMPTY (the default) means NO tiering: one weekly sweep over every domain,
 # exactly as before. That keeps the change inert until an operator opts in, and
 # an unknown or deleted id in the list is harmless — it simply matches nothing.
+#
+# SUPERSEDED by Domain.sweep_cadence, which does the same thing as data a client
+# can set on the Schedules screen rather than as a deploy. Leave this EMPTY: the
+# single weekly cron then covers every cadence by itself, because the sweep
+# skips the domains that are off or not due yet. Setting it hands control back
+# to this list and the per-domain cadence is ignored — two schedules deciding
+# the same thing is a way to sweep less than either meant.
 WEEKLY_SWEEP_WEEKLY_DOMAIN_IDS = config(
     'WEEKLY_SWEEP_WEEKLY_DOMAIN_IDS',
     default='',

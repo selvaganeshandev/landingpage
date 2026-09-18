@@ -252,6 +252,41 @@ class Domain(models.Model):
         default='NOT_READY',
         help_text="Competitor analysis status for this domain"
     )
+
+    # How often the full sweep re-runs this domain's prompts.
+    #
+    # The sweep is the one job that re-queries a whole corpus at once, and its
+    # cost scales with it (~15,760 LLM calls a run on production). The corpus is
+    # long-tailed — a handful of domains hold most of the prompts — so the tail
+    # does not need the same cadence as the head. Before this field the tiers
+    # came from a server env list (WEEKLY_SWEEP_WEEKLY_DOMAIN_IDS), which meant
+    # a deploy to change one client's cadence; this makes it per-domain data a
+    # client can set for themselves.
+    #
+    # 'weekly' is the default so behaviour is unchanged for every existing
+    # domain: the untiered sweep already ran everything weekly.
+    SWEEP_CADENCE_CHOICES = [
+        ('weekly', 'Weekly'),
+        ('biweekly', 'Every 15 days'),
+        ('monthly', 'Every 30 days'),
+        ('off', 'Off - no sweep'),
+    ]
+    sweep_cadence = models.CharField(
+        max_length=10,
+        choices=SWEEP_CADENCE_CHOICES,
+        default='weekly',
+        help_text="How often the full prompt sweep re-runs this domain",
+    )
+
+    # When the full sweep last re-queued this domain's prompts. Set by the sweep
+    # itself, so a cadence longer than the weekly cron has something to measure
+    # "is this domain due yet?" against. NULL means never swept since this field
+    # existed, which counts as due — no domain is silently skipped on rollout.
+    last_swept_at = models.DateTimeField(
+        blank=True,
+        null=True,
+        help_text="When the full prompt sweep last covered this domain",
+    )
     last_competitor_analysis_at = models.DateTimeField(
         null=True,
         blank=True,

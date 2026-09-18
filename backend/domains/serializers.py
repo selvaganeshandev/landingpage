@@ -17,6 +17,7 @@ class DomainSerializer(serializers.ModelSerializer):
     latest_health_grade = serializers.SerializerMethodField()
     latest_health_grade_color = serializers.SerializerMethodField()
     prompt_count = serializers.SerializerMethodField()
+    group_count = serializers.SerializerMethodField()
     prompts_in_flight = serializers.SerializerMethodField()
 
     class Meta:
@@ -36,11 +37,16 @@ class DomainSerializer(serializers.ModelSerializer):
             'total_mentions', 'total_citations', 'visibility_score',
             'average_position', 'active_alerts', 'sentiment_category',
             'sentiment_score', 'processing_status', 'track_message', 'tracked_at',
+            # Sweep schedule (migration 0012). Writable so the Schedules screen
+            # can save a cadence through the PUT this serializer already backs —
+            # no new endpoint. last_swept_at is the engine's own stamp, so it is
+            # read-only here: a client may choose the cadence, not claim a run.
+            'sweep_cadence', 'last_swept_at',
             'created_at', 'modified_at',
             'latest_health_score', 'latest_health_grade', 'latest_health_grade_color',
-            'prompt_count', 'prompts_in_flight',
+            'prompt_count', 'group_count', 'prompts_in_flight',
         ]
-        read_only_fields = ['id', 'created_at', 'modified_at']
+        read_only_fields = ['id', 'created_at', 'modified_at', 'last_swept_at']
 
     def get_prompt_count(self, obj):
         """How many prompts this project tracks.
@@ -55,6 +61,20 @@ class DomainSerializer(serializers.ModelSerializer):
             return annotated
         from prompts.models import Prompt
         return Prompt.objects.filter(group__domain=obj).count()
+
+    def get_group_count(self, obj):
+        """How many prompt groups this project has.
+
+        The groups are what a sweep actually walks, so the Schedules screens
+        show this next to the cadence as "N groups". Annotated on the list
+        queryset for the same reason prompt_count is - a per-row COUNT(*) across
+        71 projects is 71 extra queries on a list that every page loads.
+        """
+        annotated = getattr(obj, 'group_count_annotated', None)
+        if annotated is not None:
+            return annotated
+        from prompts.models import PromptGroup
+        return PromptGroup.objects.filter(domain=obj).count()
 
     def get_prompts_in_flight(self, obj):
         """Prompts still being crawled (INIT/SCHD/PROC).

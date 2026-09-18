@@ -25,6 +25,7 @@ import {
   SearchCheck,
   MessageSquareText,
   ScanSearch,
+  CalendarClock,
 } from 'lucide-react';
 
 export interface NavItem {
@@ -85,6 +86,11 @@ const allNavGroups: NavGroup[] = [
       // Label only — the route stays /insights so existing links and bookmarks
       // keep working. The underlying module is already MODULES.DASHBOARD.
       { name: "Dashboard", path: "/insights", icon: LayoutDashboard, module: MODULES.DASHBOARD },
+    ],
+  },
+  {
+    name: "Schedules",
+    items: [
     ],
   },
   {
