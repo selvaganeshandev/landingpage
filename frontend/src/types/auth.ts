@@ -83,6 +83,7 @@ export const MODULES = {
   REPORTS: 'reports',
   ORGANIZATION_SETTINGS: 'organization_settings',
   TEAM_MANAGEMENT: 'team_management',
+  AUDIT_ENGINE: 'audit_engine',
   // SEO Monitoring modules
   KEYWORD_RANKINGS: 'keyword_rankings',
   SEO_COMPETITORS: 'seo_competitors',

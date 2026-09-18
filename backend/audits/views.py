@@ -46,18 +46,28 @@ def _refused(exc):
 
 
 def _visible_audits(user):
-    """None when the user may not see the leads table at all."""
+    """None when the user may not see the leads table at all.
+
+    Admins and super admins hold this by role. A member needs the
+    `audit_engine` permission, and then sees exactly what an admin of their
+    organisation sees — the leads table is organisation-scoped either way, so
+    the grant decides *whether* they see it, never *whose* audits.
+    """
     role = getattr(user, 'role', '')
     if role == 'super_admin':
         return Audit.objects.all()
-    if role == 'admin':
-        org = getattr(user, 'organisation', None)
-        if org is None:
-            return Audit.objects.none()
-        return Audit.objects.filter(
-            Q(requested_by__organisation=org) | Q(claimed_domain__organisation=org)
-        ).distinct()
-    return None
+
+    if role != 'admin':
+        from core.permissions import user_has_module_permission
+        if not user_has_module_permission(user, 'audit_engine'):
+            return None
+
+    org = getattr(user, 'organisation', None)
+    if org is None:
+        return Audit.objects.none()
+    return Audit.objects.filter(
+        Q(requested_by__organisation=org) | Q(claimed_domain__organisation=org)
+    ).distinct()
 
 
 def _public_urls(request, audit):

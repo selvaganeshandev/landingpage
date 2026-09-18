@@ -29,7 +29,7 @@ from rest_framework.test import APIClient
 
 from audits import services
 from audits.models import Audit, AuditPageResult, AuditPromptResult
-from authentication.models import Account, Organisation
+from authentication.models import Account, UserPermission, Organisation
 from domains.models import Domain, DomainAccess
 
 ON = dict(AUDIT_ENGINE_ENABLED=True, AUDIT_REPEAT_HOURS=24, AUDIT_PER_IP_DAILY=3, AUDIT_GLOBAL_DAILY=50)
@@ -298,6 +298,60 @@ class ListTests(_Base):
         self.assertFalse(row['is_claimed'])
         self.assertIn('public_token', row)
         self.assertNotIn('report', row)
+
+
+@override_settings(**ON)
+class AuditEnginePermissionTests(_Base):
+    """The leads table has its own module rather than borrowing one.
+
+    It used to ride on `organization_settings`, so the only way to give a
+    member the leads table was to hand them the whole organisation settings
+    screen — and there was no way to take just the Audit Engine away again.
+    """
+
+    def _member(self, grant=False):
+        member = _user(self.org, 'user', '9')
+        if grant:
+            UserPermission.objects.create(user=member, module='audit_engine', permission_level='read', granted_by=self.admin)
+        return member
+
+    def test_a_member_without_the_grant_is_refused(self):
+        self.assertEqual(_client(self._member()).get('/audits/').status_code, 403)
+
+    def test_a_member_with_the_grant_sees_the_leads_table(self):
+        _done_audit(host='mine.com', website='https://mine.com', requested_by=self.admin)
+        r = _client(self._member(grant=True)).get('/audits/')
+        self.assertEqual(r.status_code, 200)
+        self.assertEqual([row['host'] for row in r.data['results']], ['mine.com'])
+
+    def test_the_grant_does_not_widen_what_they_see(self):
+        """It decides whether they see the table, never whose audits."""
+        _done_audit(host='mine.com', website='https://mine.com', requested_by=self.admin)
+        _done_audit(host='theirs.com', website='https://theirs.com', requested_by=self.other_admin)
+        r = _client(self._member(grant=True)).get('/audits/')
+        self.assertEqual(r.status_code, 200)
+        self.assertEqual([row['host'] for row in r.data['results']], ['mine.com'])
+
+    def test_organization_settings_no_longer_opens_it(self):
+        """The whole point: the two rights are separate now."""
+        member = _user(self.org, 'user', '8')
+        UserPermission.objects.create(user=member, module='organization_settings', permission_level='read', granted_by=self.admin)
+        self.assertEqual(_client(member).get('/audits/').status_code, 403)
+
+    def test_admins_keep_it_by_role(self):
+        for who in (self.admin, self.superadmin):
+            self.assertEqual(_client(who).get('/audits/').status_code, 200)
+
+    def test_it_is_not_handed_out_when_a_member_is_invited(self):
+        """A new member gets a read row for every module except the privileged
+        ones. The leads table carries who ran an audit and their email, so it
+        is a decision an admin makes deliberately rather than a default."""
+        from authentication.auth_views import PRIVILEGED_MODULES
+        self.assertIn('audit_engine', PRIVILEGED_MODULES)
+
+    def test_a_client_never_gets_it_even_with_a_grant(self):
+        UserPermission.objects.create(user=self.client_user, module='audit_engine', permission_level='read', granted_by=self.admin)
+        self.assertEqual(_client(self.client_user).get('/audits/').status_code, 403)
 
 
 @override_settings(**ON)

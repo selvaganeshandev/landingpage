@@ -136,7 +136,11 @@ def _build_api_keys_payload(org):
 # blanket "grant everything" defaults. They are granted only when an admin
 # deliberately sets them, because team_management gates invitation sending —
 # a read-level row here previously let any user mint new ADMIN accounts.
-PRIVILEGED_MODULES = ('organization_settings', 'team_management')
+# Not granted on invitation. A new member gets a read row for every other
+# module, which is fine for viewing data — but these three are decisions an
+# admin should make deliberately. audit_engine is the leads table: who ran an
+# audit, their email, and the pipeline behind it.
+PRIVILEGED_MODULES = ('organization_settings', 'team_management', 'audit_engine')
 
 
 def _has_team_management(user):

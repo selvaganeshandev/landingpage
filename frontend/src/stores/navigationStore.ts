@@ -208,14 +208,13 @@ const allNavGroups: NavGroup[] = [
   },
   // Audit Engine sits under Strategy as its own row, not inside the fly-out:
   // it is where new business comes from rather than a view of an existing
-  // project, so it is worth a click of its own. Still an admin tool — the
-  // backend scopes the leads table to admin / super_admin, so it rides on the
-  // organization_settings module rather than a new one: super_admin always
-  // passes, admins pass unless explicitly restricted, clients never do.
+  // project, so it is worth a click of its own. It has its own module, so a
+  // member can be given the leads table without the organisation settings
+  // screen, and taken off it without losing anything else.
   {
     name: "Audit Engine",
     items: [
-      { name: "Audit Engine", path: "/audits", icon: ScanSearch, module: MODULES.ORGANIZATION_SETTINGS },
+      { name: "Audit Engine", path: "/audits", icon: ScanSearch, module: MODULES.AUDIT_ENGINE },
     ],
   },
 ];

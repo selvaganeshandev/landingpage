@@ -109,12 +109,12 @@ const App = () => (
 
               {/* Overview */}
               <Route path="/audits" element={
-                <ProtectedRoute requiredPermission={MODULES.ORGANIZATION_SETTINGS}>
+                <ProtectedRoute requiredPermission={MODULES.AUDIT_ENGINE}>
                   <AuditEngine />
                 </ProtectedRoute>
               } />
               <Route path="/audits/:id" element={
-                <ProtectedRoute requiredPermission={MODULES.ORGANIZATION_SETTINGS}>
+                <ProtectedRoute requiredPermission={MODULES.AUDIT_ENGINE}>
                   <AuditDetail />
                 </ProtectedRoute>
               } />

@@ -34,6 +34,7 @@ import {
   Loader2,
   Calendar,
   SearchCheck,
+  ScanSearch,
 } from "lucide-react";
 
 const featureCategories = [
@@ -109,6 +110,12 @@ const featureCategories = [
     name: "Reporting",
     features: [
       { id: "reports", name: "Reports", icon: FileText, description: "Create and view reports" },
+    ]
+  },
+  {
+    name: "Audit Engine",
+    features: [
+      { id: "audit_engine", name: "Audit Engine", icon: ScanSearch, description: "Run audits and see the leads table for this organisation" },
     ]
   },
   {

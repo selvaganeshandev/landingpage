@@ -547,6 +547,9 @@ class UserPermission(models.Model):
         # Reporting
         ('reports', 'Reports'),
         
+        # Audit Engine
+        ('audit_engine', 'Audit Engine'),
+
         # Administration
         ('organization_settings', 'Organization Settings'),
         ('team_management', 'Team Management'),
