@@ -84,6 +84,14 @@ export const creditsPerSweep = (domain: Domain, platforms: string[]): number =>
   platforms.reduce((sum, p) => sum + (CALL_COST[p] ?? FALLBACK_CALL_COST), 0);
 
 /**
+ * What this project costs in a 28-day month: one sweep, times how many sweeps
+ * its cadence gets. A cadence of "off" has no runs, so it costs nothing —
+ * which is the honest answer rather than a blank.
+ */
+export const creditsPerMonth = (domain: Domain, platforms: string[]): number =>
+  creditsPerSweep(domain, platforms) * optionFor(cadenceOf(domain)).runsPerMonth;
+
+/**
  * LLM calls this project costs in a 28-day month.
  *
  * The card header prints the org-wide total from this, and it MUST include the

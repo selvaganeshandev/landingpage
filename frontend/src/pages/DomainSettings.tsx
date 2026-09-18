@@ -29,6 +29,7 @@ import {
   ArrowLeft,
   Plus,
   Loader2,
+  Palette,
   Sparkles,
   Download,
   X,
@@ -67,7 +68,7 @@ import { PageLoader } from "@/components/PageLoader";
 import { getFaviconUrl, handleFaviconError } from "@/utils/faviconHelper";
 import { useDomainStore } from "@/stores/domainStore";
 import {
-  CADENCE_OPTIONS, cadenceOf, creditsPerSweep, describeNextSweep, type Cadence,
+  CADENCE_OPTIONS, cadenceOf, creditsPerMonth, creditsPerSweep, describeNextSweep, type Cadence,
 } from "@/lib/sweep-cadence";
 import { useAuth } from "@/contexts/AuthContext";
 
@@ -154,6 +155,8 @@ export default function DomainSettings() {
   const [targetAudience, setTargetAudience] = useState("");
   const [brandValues, setBrandValues] = useState("");
   const [keyCompetitors, setKeyCompetitors] = useState("");
+  const [isSavingBrandIdentity, setIsSavingBrandIdentity] = useState(false);
+  const [isFillingBrandIdentity, setIsFillingBrandIdentity] = useState(false);
 
   // AI auto-fill for the two guideline tabs. Each button fills only the fields
   // its own tab owns, and only the ones that are still empty — a click must
@@ -1100,11 +1103,12 @@ export default function DomainSettings() {
    * saved: the model is instructed to "make reasonable inferences", so the user
    * reviews it and presses Save themselves.
    */
-  /** Fills every blank field on the Brand Guidelines tab. Anything the user
-   *  has already written is left alone. */
-  const autoFillFields = async (): Promise<void> => {
+  const autoFillFields = async (
+    which: "guidelines" | "brand-identity",
+  ): Promise<void> => {
     if (!domain) return;
-    setIsFillingGuidelines(true);
+    const setBusy = which === "guidelines" ? setIsFillingGuidelines : setIsFillingBrandIdentity;
+    setBusy(true);
     try {
       const res = (await apiClient.fetchBrandInfo(
         domain.name || "",
@@ -1131,7 +1135,7 @@ export default function DomainSettings() {
         [keyCompetitors, setKeyCompetitors, "key_competitors", 0],
       ];
 
-      const targets = [...guidelineFields, ...brandFields];
+      const targets = which === "guidelines" ? guidelineFields : brandFields;
       let filled = 0;
       let skipped = 0;
 
@@ -1179,7 +1183,7 @@ export default function DomainSettings() {
         variant: "destructive",
       });
     } finally {
-      setIsFillingGuidelines(false);
+      setBusy(false);
     }
   };
 
@@ -1297,28 +1301,29 @@ export default function DomainSettings() {
     });
   };
 
-  /** Saves all seven fields: identity and voice are one document now. */
   const handleSaveGuidelines = async () => {
     if (!domain) return;
 
     try {
       setIsSavingGuidelines(true);
-      const fields = {
+      await apiClient.updateDomain(domain.id, {
         tone_of_voice: toneOfVoice.trim() || null,
         content_style: contentStyle.trim() || null,
         key_messages: keyMessages.trim() || null,
         topics_to_avoid: topicsToAvoid.trim() || null,
-        target_audience: targetAudience.trim() || null,
-        brand_values: brandValues.trim() || null,
-        key_competitors: keyCompetitors.trim() || null,
-      };
-      await apiClient.updateDomain(domain.id, fields);
+      });
 
-      setDomain({ ...domain, ...fields });
+      setDomain({
+        ...domain,
+        tone_of_voice: toneOfVoice.trim() || null,
+        content_style: contentStyle.trim() || null,
+        key_messages: keyMessages.trim() || null,
+        topics_to_avoid: topicsToAvoid.trim() || null,
+      });
 
       toast({
-        title: "Brand guidelines saved",
-        description: "Your brand guidelines have been updated successfully.",
+        title: "Guidelines saved",
+        description: "Content guidelines have been updated successfully.",
       });
     } catch (error: any) {
       toast({
@@ -1339,6 +1344,39 @@ export default function DomainSettings() {
       keyMessages !== (domain.key_messages || "") ||
       topicsToAvoid !== (domain.topics_to_avoid || "")
     );
+  };
+
+  const handleSaveBrandIdentity = async () => {
+    if (!domain) return;
+
+    try {
+      setIsSavingBrandIdentity(true);
+      await apiClient.updateDomain(domain.id, {
+        target_audience: targetAudience.trim() || null,
+        brand_values: brandValues.trim() || null,
+        key_competitors: keyCompetitors.trim() || null,
+      });
+
+      setDomain({
+        ...domain,
+        target_audience: targetAudience.trim() || null,
+        brand_values: brandValues.trim() || null,
+        key_competitors: keyCompetitors.trim() || null,
+      });
+
+      toast({
+        title: "Brand identity saved",
+        description: "Brand identity has been updated successfully.",
+      });
+    } catch (error: any) {
+      toast({
+        title: "Error saving brand identity",
+        description: error.message || "Failed to save brand identity.",
+        variant: "destructive",
+      });
+    } finally {
+      setIsSavingBrandIdentity(false);
+    }
   };
 
   const hasBrandIdentityChanged = () => {
@@ -1779,7 +1817,13 @@ export default function DomainSettings() {
           {!isTeamMember && !isClient && (
               <TabsTrigger value="content-guidelines" className="gap-2 data-[state=active]:gradient-primary data-[state=active]:shadow-md data-[state=active]:shadow-primary/20 data-[state=active]:text-white">
               <FileText className="h-4 w-4" />
-              Brand Guidelines
+              Content Guidelines
+            </TabsTrigger>
+          )}
+          {!isTeamMember && !isClient && (
+              <TabsTrigger value="brand-identity" className="gap-2 data-[state=active]:gradient-primary data-[state=active]:shadow-md data-[state=active]:shadow-primary/20 data-[state=active]:text-white">
+              <Palette className="h-4 w-4" />
+              Brand Identity
             </TabsTrigger>
           )}
           {!isTeamMember && !isClient && (
@@ -1905,10 +1949,9 @@ export default function DomainSettings() {
             <CardHeader>
               <div className="flex items-start justify-between gap-4">
                 <div className="space-y-1.5">
-                  <CardTitle>Brand Guidelines</CardTitle>
+                  <CardTitle>Content Guidelines</CardTitle>
                   <CardDescription>
-                    Who your brand is and how it should sound. Everything here steers the content
-                    the AI writes for you, and is auto-populated when a new brand is created.
+                    Define content guidelines and tone of voice for AI-generated content
                   </CardDescription>
                 </div>
                 {/* Fills only the blank fields on this tab. Anything already
@@ -1917,7 +1960,7 @@ export default function DomainSettings() {
                   variant="outline"
                   size="sm"
                   className="gap-2 shrink-0"
-                  onClick={autoFillFields}
+                  onClick={() => autoFillFields("guidelines")}
                   disabled={isFillingGuidelines || isSavingGuidelines || !domain}
                 >
                   {isFillingGuidelines ? (
@@ -1930,48 +1973,6 @@ export default function DomainSettings() {
               </div>
             </CardHeader>
             <CardContent className="space-y-4">
-              <div className="space-y-1 pb-1">
-                <h3 className="text-sm font-semibold">Brand Identity</h3>
-                <p className="text-xs text-muted-foreground">
-                  Who you are, who you sell to, and who you are measured against.
-                </p>
-              </div>
-              <div className="space-y-2">
-                <Label htmlFor="target-audience">Target Audience</Label>
-                <Textarea
-                  id="target-audience"
-                  value={targetAudience}
-                  onChange={(e) => setTargetAudience(e.target.value)}
-                  placeholder="Describe your target audience demographics and preferences..."
-                  className="min-h-[100px]"
-                />
-              </div>
-              <div className="space-y-2">
-                <Label htmlFor="brand-values">Brand Values</Label>
-                <Textarea
-                  id="brand-values"
-                  value={brandValues}
-                  onChange={(e) => setBrandValues(e.target.value)}
-                  placeholder="List your brand's core values..."
-                  className="min-h-[100px]"
-                />
-              </div>
-              <div className="space-y-2">
-                <Label htmlFor="competitors-brand">Key Competitors</Label>
-                <Textarea
-                  id="competitors-brand"
-                  value={keyCompetitors}
-                  onChange={(e) => setKeyCompetitors(e.target.value)}
-                  placeholder="List your main competitors..."
-                  className="min-h-[100px]"
-                />
-              </div>
-              <div className="space-y-1 pt-4 pb-1 border-t border-border">
-                <h3 className="text-sm font-semibold pt-3">Content Guidelines</h3>
-                <p className="text-xs text-muted-foreground">
-                  How the AI should write for you — and what it should stay away from.
-                </p>
-              </div>
               <div className="space-y-2">
                 <Label htmlFor="tone-of-voice">Tone of Voice</Label>
                 <Textarea
@@ -2015,7 +2016,7 @@ export default function DomainSettings() {
               <div className="flex justify-end">
                 <Button
                   onClick={handleSaveGuidelines}
-                  disabled={isSavingGuidelines || !(hasGuidelinesChanged() || hasBrandIdentityChanged())}
+                  disabled={isSavingGuidelines || !hasGuidelinesChanged()}
                 >
                   {isSavingGuidelines ? (
                     <>
@@ -2023,7 +2024,84 @@ export default function DomainSettings() {
                       Saving...
                     </>
                   ) : (
-                    "Save Brand Guidelines"
+                    "Save Guidelines"
+                  )}
+                </Button>
+              </div>
+            </CardContent>
+          </Card>
+        </TabsContent>
+
+        {/* Brand Identity Tab */}
+        <TabsContent value="brand-identity" className="space-y-4 mt-6">
+          <Card className="border border-border">
+            <CardHeader>
+              <div className="flex items-start justify-between gap-4">
+                <div className="space-y-1.5">
+                  <CardTitle>Brand Identity</CardTitle>
+                  <CardDescription>
+                    Define your brand's identity and market positioning. These values are auto-populated using AI when you create a new brand.
+                  </CardDescription>
+                </div>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="gap-2 shrink-0"
+                  onClick={() => autoFillFields("brand-identity")}
+                  disabled={isFillingBrandIdentity || isSavingBrandIdentity || !domain}
+                >
+                  {isFillingBrandIdentity ? (
+                    <Loader2 className="h-4 w-4 animate-spin" />
+                  ) : (
+                    <Sparkles className="h-4 w-4" />
+                  )}
+                  {isFillingBrandIdentity ? "Generating..." : "Auto-fill with AI"}
+                </Button>
+              </div>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              <div className="space-y-2">
+                <Label htmlFor="target-audience">Target Audience</Label>
+                <Textarea
+                  id="target-audience"
+                  value={targetAudience}
+                  onChange={(e) => setTargetAudience(e.target.value)}
+                  placeholder="Describe your target audience demographics and preferences..."
+                  className="min-h-[100px]"
+                />
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="brand-values">Brand Values</Label>
+                <Textarea
+                  id="brand-values"
+                  value={brandValues}
+                  onChange={(e) => setBrandValues(e.target.value)}
+                  placeholder="List your brand's core values..."
+                  className="min-h-[100px]"
+                />
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="competitors-brand">Key Competitors</Label>
+                <Textarea
+                  id="competitors-brand"
+                  value={keyCompetitors}
+                  onChange={(e) => setKeyCompetitors(e.target.value)}
+                  placeholder="List your main competitors..."
+                  className="min-h-[100px]"
+                />
+              </div>
+              <div className="flex justify-end">
+                <Button
+                  onClick={handleSaveBrandIdentity}
+                  disabled={isSavingBrandIdentity || !hasBrandIdentityChanged()}
+                >
+                  {isSavingBrandIdentity ? (
+                    <>
+                      <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                      Saving...
+                    </>
+                  ) : (
+                    "Save Brand Identity"
                   )}
                 </Button>
               </div>
@@ -2292,7 +2370,7 @@ export default function DomainSettings() {
                 const stored = domains.find((x) => x.id === domain.id);
                 const draft = stored && { ...stored, sweep_cadence: sweepCadence };
                 return (
-                  <div className="grid gap-4 sm:grid-cols-3">
+                  <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
                     <div className="rounded-lg border p-3">
                       <div className="text-2xl font-bold tabular-nums">
                         {(stored?.prompt_count ?? 0).toLocaleString()}
@@ -2307,6 +2385,18 @@ export default function DomainSettings() {
                       </div>
                       <div className="text-xs text-muted-foreground mt-0.5">
                         cost per sweep
+                      </div>
+                    </div>
+                    {/* Reads the draft cadence, so picking a different one in
+                        the dropdown below updates this before you save. */}
+                    <div className="rounded-lg border p-3">
+                      <div className="text-2xl font-bold tabular-nums">
+                        {draft && sweep?.platforms?.length
+                          ? `$\u2009${creditsPerMonth(draft, sweep.platforms).toFixed(2)}`
+                          : "—"}
+                      </div>
+                      <div className="text-xs text-muted-foreground mt-0.5">
+                        approx. cost a month
                       </div>
                     </div>
                     <div className="rounded-lg border p-3">

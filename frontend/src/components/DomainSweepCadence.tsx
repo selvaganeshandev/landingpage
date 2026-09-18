@@ -6,7 +6,7 @@ import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { useDomainStore } from "@/stores/domainStore";
 import {
-  CADENCE_OPTIONS, cadenceOf, callsPerMonth, creditsPerSweep, describeNextSweep,
+  CADENCE_OPTIONS, cadenceOf, callsPerMonth, creditsPerMonth, creditsPerSweep, describeNextSweep,
   optionFor, type Cadence,
 } from "@/lib/sweep-cadence";
 import { getFaviconUrl, handleFaviconError } from "@/utils/faviconHelper";
@@ -83,8 +83,7 @@ export const DomainSweepCadence = () => {
           members,
           prompts: members.reduce((s, d) => s + (d.prompt_count ?? 0), 0),
           creditsPerMonth: members.reduce(
-            (s, d) =>
-              s + creditsPerSweep(d, sweep?.platforms ?? []) * option.runsPerMonth,
+            (s, d) => s + creditsPerMonth(d, sweep?.platforms ?? []),
             0,
           ),
         };
