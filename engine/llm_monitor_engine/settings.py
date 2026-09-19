@@ -205,6 +205,15 @@ AUDIT_RATE_LIMIT_RETRIES = config('AUDIT_RATE_LIMIT_RETRIES', default=4, cast=in
 AUDIT_RATE_LIMIT_BASE_DELAY = config('AUDIT_RATE_LIMIT_BASE_DELAY', default=2.0, cast=float)
 AUDIT_RATE_LIMIT_MAX_WAIT = config('AUDIT_RATE_LIMIT_MAX_WAIT', default=120.0, cast=float)
 
+# How many blocked pages an audit may re-fetch through DataBlue, which renders
+# JavaScript and bills per page. Only pages our own crawler could not read are
+# retried, and only while a DATABLUE_API_KEY exists. 0 disables the rescue.
+#
+# Declared here rather than read straight off the module constant: without a
+# config() line the .env value is silently ignored, which is the exact failure
+# this setting exists to prevent.
+AUDIT_DATABLUE_RESCUE_PAGES = config('AUDIT_DATABLUE_RESCUE_PAGES', default=6, cast=int)
+
 # A PromptGroup left in SCHD longer than this is assumed dead (deploy, kill -9,
 # OOM) and reaped back to INIT by the prompt scheduler's reaper.
 #

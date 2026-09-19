@@ -474,6 +474,15 @@ class RescueFetchTests(SimpleTestCase):
         self.assertEqual(calls, [], 'a page we could read must not cost a DataBlue credit')
         self.assertNotIn('rescued', page)
 
+    def test_the_budget_is_a_real_setting(self):
+        """It is read with getattr(settings, ...), so without a config() line in
+        settings.py an operator could put it in .env and be silently ignored —
+        leaving the rescue spending at its default while the file says 0."""
+        from django.conf import settings
+        self.assertTrue(hasattr(settings, 'AUDIT_DATABLUE_RESCUE_PAGES'))
+        with self.settings(AUDIT_DATABLUE_RESCUE_PAGES=0):
+            self.assertEqual(settings.AUDIT_DATABLUE_RESCUE_PAGES, 0)
+
     def test_rescue_is_off_unless_asked_for(self):
         calls = []
         with patch.object(c, 'fetch_response', return_value={'text': None, 'status': 403, 'error': '', 'headers': {}}), \
