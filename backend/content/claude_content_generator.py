@@ -11,6 +11,7 @@ from django.conf import settings
 from decouple import config
 
 from core.openrouter_client import OpenRouterAnthropicClient
+from core.model_fallback import free_fallback_enabled, paid_only_error
 from .humanise_validation import (
     raise_if_truncated as _raise_if_truncated,
     output_ceiling as _output_ceiling,
@@ -45,6 +46,21 @@ OPENROUTER_KEY_PREFIX = 'sk-or-'
 # excerpt, while a short system prompt succeeds on the full article. Same mechanism
 # already documented for gpt-5-mini in engine/core/analytics_helpers.py.
 NO_REASONING = {'enabled': False}
+
+
+class RewriteNotApplied(Exception):
+    """A rewrite came back unusable, so it must NOT replace the user's text.
+
+    The editor's "Optimize with custom prompt" splices whatever the API returns
+    straight over the selected passage (ContentEditor.tsx writes it with
+    innerHTML), so returning a truncated or empty reply silently destroys what
+    the user had written. Raising instead leaves the passage untouched and puts
+    a message on screen.
+
+    Carries a finished, user-facing sentence: rewrite_text re-raises this
+    unwrapped rather than folding it into "Claude API error during rewrite",
+    which it is not.
+    """
 
 # Splits HTML into tags and the text between them, keeping the tags in the list
 # so a join round-trips exactly.
@@ -2969,19 +2985,25 @@ Return ONLY the regenerated HTML content for this specific section."""
         )
 
     def _create_with_fallback(self, primary_model=None, **kwargs):
-        """Try the configured (paid) model FIRST for best quality; if it fails
-        — e.g. the account is out of credits (402) — fall back to the free
-        models so the feature still works. Returns the first response that has
-        content. Raises only if every model is unavailable.
+        """Run the configured (paid) model. Returns the first response that has
+        content.
 
-        This is what makes a funded OpenRouter key give full paid quality while
-        a $0 balance still works on free models instead of erroring.
+        PAID ONLY by default. If the paid model fails, this raises
+        ``PaidModelUnavailable`` naming the real cause — "recharge the
+        OpenRouter API key" for an exhausted balance (402), "try again" for a
+        transient provider fault. It no longer drops to the shared `:free`
+        pool, which answered its own 429 and made an empty balance look like a
+        free model's problem three failures up the chain.
+
+        Set ``ALLOW_FREE_MODEL_FALLBACK=True`` to restore the old free-model
+        fallback (local boxes, deliberate degraded mode).
 
         `primary_model` optionally overrides the paid model for THIS call only
         (used for multi-model humanisation, where different refine passes run
         through different models to break any single model's writing pattern).
-        The free-model fallback is unchanged, so the feature never errors even
-        if the chosen primary model is unavailable."""
+        Humanisation guards every pass with ``_pass_or_keep``, so a refine that
+        raises here keeps the previous good version rather than failing the
+        article."""
         last_err = None
         model_to_use = primary_model or self.model
         # 1. Paid / configured model first.
@@ -2992,8 +3014,15 @@ Return ONLY the regenerated HTML content for this specific section."""
             last_err = Exception(f"{model_to_use} returned empty content")
         except Exception as e:
             last_err = e
-            logger.warning("Paid model %s unavailable (%s); falling back to free models", model_to_use, e)
-        # 2. Free models fallback (clamp output to the free-model ceiling).
+            logger.warning("Paid model %s unavailable: %s", model_to_use, e)
+
+        # 2. Paid-only (the production default): stop here and say why. Falling
+        # through to the shared `:free` pool hid an empty balance behind a free
+        # model's own 429, so the message named the wrong model entirely.
+        if not free_fallback_enabled():
+            raise paid_only_error(last_err, model_to_use)
+
+        # 3. Free models fallback (clamp output to the free-model ceiling).
         free_kwargs = dict(kwargs)
         free_ceiling = getattr(settings, 'CONTENT_FREE_MAX_TOKENS', self._FREE_MAX_TOKENS)
         if int(free_kwargs.get('max_tokens', 0) or 0) > free_ceiling:
@@ -3725,7 +3754,16 @@ Rewritten text:"""
         for attempt in range(max_retries):
             try:
                 response = self._create_with_fallback(
-                    max_tokens=2048,
+                    # A rewrite has to re-emit the WHOLE selection, so the
+                    # budget has to follow the selection's size. This was a flat
+                    # 2048 (~8k characters), which silently cut off any
+                    # selection bigger than roughly 1,500 words — the reply
+                    # ended mid-sentence and the editor wrote that fragment over
+                    # the user's text. Same defect, and the same fix, as the
+                    # 8192 cap that truncated article 285 in humanisation.
+                    # A high ceiling is free when the output is short: billing
+                    # follows tokens actually generated, not the ceiling.
+                    max_tokens=_output_ceiling(original_text),
                     temperature=0.7,
                     system=system_prompt,
                     messages=[
@@ -3736,7 +3774,35 @@ Rewritten text:"""
                     ]
                 )
 
+                # stop_reason == 'length' means the model was cut off, so what
+                # came back is a fragment — and a truncated reply is a perfectly
+                # successful HTTP response, which is why this went unnoticed.
+                # Refuse it: losing the rewrite is recoverable, losing the
+                # user's original passage is not.
+                try:
+                    _raise_if_truncated("Rewrite", response, original_text)
+                except RewriteNotApplied:
+                    raise
+                except Exception as trunc_err:
+                    raise RewriteNotApplied(
+                        "The selected text was too long to rewrite in one pass, so the "
+                        "result came back cut off. Your original text has NOT been "
+                        "changed — select a smaller section and try again."
+                    ) from trunc_err
+
                 rewritten_text = response.content[0].text.strip()
+
+                # Deliberately NO length-ratio check here, unlike the
+                # humanisation passes. A rewrite is allowed to change length by
+                # any amount — "summarise this", "make it one line" and "expand
+                # this" are all ordinary instructions — so a short reply is not
+                # evidence of failure. Empty is, and stop_reason above catches
+                # the rest.
+                if not rewritten_text:
+                    raise RewriteNotApplied(
+                        "The rewrite came back empty. Your original text has NOT been "
+                        "changed — please try again."
+                    )
 
                 # Post-processing: clean up Claude's response so the editor
                 # renders real HTML instead of literal tags.
@@ -3785,6 +3851,11 @@ Rewritten text:"""
 
                 return rewritten_text
 
+            except RewriteNotApplied:
+                # Already a finished, user-facing sentence, and deterministic:
+                # a selection too big for one pass is just as big on a retry.
+                # Re-raise unwrapped so the editor shows it as-is.
+                raise
             except Exception as e:
                 last_error = e
                 error_str = str(e).lower()

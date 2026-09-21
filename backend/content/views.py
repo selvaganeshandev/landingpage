@@ -26,7 +26,7 @@ from .serializers import (
     ContentCommentSerializer, CreateContentCommentSerializer,
     BulkUploadBatchSerializer, BulkUploadBatchListSerializer, BulkUploadItemSerializer
 )
-from .claude_content_generator import ClaudeContentGenerator
+from .claude_content_generator import ClaudeContentGenerator, RewriteNotApplied
 from .ai_detection import (
     AIDetectionError,
     AIDetectionModelLoading,
@@ -35,6 +35,7 @@ from .ai_detection import (
     strip_html_tags,
 )
 from .humanise_validation import validate_pass_output as _validate_pass_output
+from core.model_fallback import free_fallback_enabled, paid_only_error
 from domains.models import Domain, ReferenceDocument
 from django.db import transaction, connection
 from django.db.models import Count, Q
@@ -582,6 +583,17 @@ def rewrite_content(request):
             'message': 'Content rewritten successfully',
             'rewritten_text': rewritten_text
         }, status=status.HTTP_200_OK)
+
+    except RewriteNotApplied as e:
+        # The rewrite was refused (cut off, or empty) and the user's text is
+        # untouched. That is a usable outcome the user can act on, not a server
+        # fault, so it goes back as 400 with the message unchanged — the editor
+        # shows it verbatim.
+        logger.warning(f"Rewrite not applied: {e}")
+        return Response({
+            'status': 'error',
+            'message': str(e)
+        }, status=status.HTTP_400_BAD_REQUEST)
 
     except Exception as e:
         logger.error(f"Error rewriting content: {str(e)}", exc_info=True)
@@ -4398,13 +4410,20 @@ FREE_SUGGESTION_MODELS = [
 
 
 def _suggest_with_free_model(generator, system_prompt, user_prompt, max_tokens=800):
-    """Run a small suggestion prompt, PAID model first, then FREE models as a
-    fallback. A funded key gets full paid quality; a $0 balance still works on
-    free models instead of erroring. Returns (response_text, model_used).
-    Raises the last error only if every model is unavailable."""
+    """Run a small suggestion prompt on the PAID model.
+
+    Returns (response_text, model_used). Paid-only by default: if the paid model
+    fails, this raises ``PaidModelUnavailable`` saying whether the key needs
+    recharging or the provider is simply busy, rather than degrading onto the
+    shared `:free` pool. ``ALLOW_FREE_MODEL_FALLBACK=True`` restores the old
+    free-model chain.
+
+    The name is kept so existing call sites are untouched."""
     last_err = None
-    # Paid / configured model first, then the free models.
-    for idx, model in enumerate([generator.model] + FREE_SUGGESTION_MODELS):
+    candidates = [generator.model]
+    if free_fallback_enabled():
+        candidates += FREE_SUGGESTION_MODELS
+    for idx, model in enumerate(candidates):
         try:
             resp = generator.client.messages.create(
                 model=model,
@@ -4423,6 +4442,8 @@ def _suggest_with_free_model(generator, system_prompt, user_prompt, max_tokens=8
             tag = "Paid" if idx == 0 else "Free"
             logger.warning("%s suggestion model %s unavailable: %s", tag, model, e)
             continue
+    if not free_fallback_enabled():
+        raise paid_only_error(last_err, generator.model)
     if last_err:
         raise last_err
     raise Exception("No suggestion model returned content")
