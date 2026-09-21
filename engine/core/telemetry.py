@@ -66,16 +66,39 @@ def init_laminar():
         logger.warning("ENABLE_LAMINAR is on but LMNR_PROJECT_API_KEY is missing — skipping init")
         return
     try:
-        from lmnr import Laminar
+        from lmnr import Instruments, Laminar
 
-        # Default instrument set (all providers). This requires opentelemetry
-        # pinned to the 1.43 line — lmnr's bundled OpenAI instrumentor imports
-        # opentelemetry._events, which 1.44 removed; the pins live in
-        # engine/requirements.txt. Pass the key explicitly (decouple keeps it out
-        # of os.environ). base_url -> self-hosted instance.
+        # Only the providers this engine actually calls. The default is ALL 42
+        # instruments, and one of them — TRANSFORMERS — imports the HuggingFace
+        # transformers package, which imports torch: measured at 342 MB per
+        # process on production (10 MB baseline -> 351.7 MB after `import
+        # torch`) and 3.6 seconds of start-up time. Every Celery process paid
+        # that to instrument a library the engine never calls, which is most of
+        # why the box sat at 169 MB free with 1,280 MB swapped out.
+        #
+        # OpenRouter is OpenAI-compatible, so OPENAI covers the ChatGPT and
+        # Perplexity paths as well. Widen via LAMINAR_INSTRUMENTS (comma-
+        # separated names from lmnr.Instruments) without a deploy; an unknown
+        # name is ignored rather than crashing telemetry.
+        #
+        # This still requires opentelemetry pinned to the 1.43 line — lmnr's
+        # bundled OpenAI instrumentor imports opentelemetry._events, which 1.44
+        # removed; the pins live in engine/requirements.txt. Pass the key
+        # explicitly (decouple keeps it out of os.environ).
+        # base_url -> self-hosted instance.
+        wanted = _env("LAMINAR_INSTRUMENTS", "OPENAI,ANTHROPIC,GOOGLE_GENAI")
+        instruments = set()
+        for name in (n.strip().upper() for n in wanted.split(",") if n.strip()):
+            member = getattr(Instruments, name, None)
+            if member is None:
+                logger.warning("Unknown Laminar instrument %r — ignoring", name)
+            else:
+                instruments.add(member)
+
         init_kwargs = {
             "project_api_key": api_key,
             "metadata": {"environment": _env("ENVIRONMENT", "dev")},
+            "instruments": instruments,
         }
         base_url = _env("LMNR_BASE_URL", "")
         if base_url:
