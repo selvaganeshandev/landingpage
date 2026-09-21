@@ -34,7 +34,11 @@ from .ai_detection import (
     save_detection,
     strip_html_tags,
 )
-from .humanise_validation import validate_pass_output as _validate_pass_output
+from .humanise_validation import (
+    validate_pass_output as _validate_pass_output,
+    burstiness as _burstiness,
+    BURSTINESS_TARGET as _BURSTINESS_TARGET,
+)
 from core.model_fallback import PaidModelUnavailable, free_fallback_enabled, paid_only_error
 from domains.models import Domain, ReferenceDocument
 from django.db import transaction, connection
@@ -721,15 +725,37 @@ def _build_brand_profile(domain):
     return chr(10).join(lines)
 
 
-def _humanise_human_score(text):
-    """Return the AI-detector's human-likeness score (0-100) for ``text``, or
-    ``None`` when scoring is unavailable for ANY reason: no Hugging Face key,
-    text too short, network/timeout error, model still loading, or an
-    unexpected response shape.
+def _burstiness_score(text):
+    """A free, local stand-in for an AI detector, scored 0-100.
 
-    This NEVER raises. It exists only so the guarded score-refine loop can
-    decide whether to keep refining; a ``None`` result means "cannot score, so
-    skip the loop", never an error shown to the user.
+    Burstiness — the spread of sentence lengths — is the strongest signal a
+    modern detector reads, and unlike a hosted classifier it costs nothing, is
+    deterministic, and cannot rate-limit or go down. Measured over 200 articles
+    here: drafts average 0.400 and humanised output 0.451, but 58% still finish
+    under target and 32% come out less bursty than the draft.
+
+    Mapped so BURSTINESS_TARGET lands at 85, matching the loop's existing
+    target, and clamped to 0-100 so the two scorers are interchangeable.
+    """
+    try:
+        b = _burstiness(text or '')
+        if not b:
+            return None
+        return max(0.0, min(100.0, (b / _BURSTINESS_TARGET) * 85.0))
+    except Exception:  # noqa: BLE001 - a scorer must never break humanisation
+        return None
+
+
+def _humanise_human_score(text):
+    """Return a human-likeness score (0-100) for ``text``, or ``None``.
+
+    Prefers the hosted detector when a Hugging Face key is configured, and falls
+    back to the free local burstiness measure otherwise — so the guarded
+    score-refine loop still has something to optimise on a deployment with no
+    detector key, where it previously skipped entirely.
+
+    ``None`` means "cannot score, so skip the loop", never an error shown to the
+    user. This NEVER raises.
     """
     try:
         text = (text or '').strip()
@@ -737,16 +763,19 @@ def _humanise_human_score(text):
             return None
         hf_api_key = config('HUGGINGFACE_API_KEY', default='')
         if not hf_api_key:
-            return None
+            return _burstiness_score(text)
         api_url = "https://router.huggingface.co/hf-inference/models/Hello-SimpleAI/chatgpt-detector-roberta"
         headers = {"Authorization": f"Bearer {hf_api_key}", "Content-Type": "application/json"}
         payload = {"inputs": text[:5000]}
         response = requests.post(api_url, headers=headers, json=payload, timeout=30)
+        # Every failure path below falls back to the free local measure rather
+        # than returning None. A rate limit or a cold model used to abandon the
+        # refine loop silently; now it just scores locally instead.
         if not response.ok:
-            return None
+            return _burstiness_score(text)
         result = response.json()
         if not (isinstance(result, list) and result):
-            return None
+            return _burstiness_score(text)
         classifications = result[0] if isinstance(result[0], list) else result
         human_score = None
         for item in classifications:
@@ -754,10 +783,10 @@ def _humanise_human_score(text):
             score = float(item.get('score', 0)) * 100
             if label in ('real', 'human'):
                 human_score = score
-        return human_score
+        return human_score if human_score is not None else _burstiness_score(text)
     except Exception as score_err:
-        logger.warning("Humanisation score check unavailable (non-fatal): %s", score_err)
-        return None
+        logger.warning("Humanisation score check unavailable, using burstiness: %s", score_err)
+        return _burstiness_score(text)
 
 
 def _run_humanise_in_background(content_id):

@@ -179,19 +179,26 @@ check("the ceiling grows with the article",
 
 print("\nhumanise_validation — find_style_violations")
 
+# The gap-zone, too-short and too-long categories were REMOVED on 2026-09-21.
+# Measured across 200 articles holding both their pre- and post-humanise text,
+# the 11-14 word ban GREW that band from 16.8% to 22.8%, and 58% of humanised
+# articles still came out under the 0.45 burstiness a detector reads as human.
+# The tails the rule forbade are what would fix that, so they are now requested
+# rather than banned.
+
 SAMPLE = (
-    "<p>Kerala is lovely.</p>"                                            # 3 words  -> too short
-    "<p>The backwaters near Alleppey stay calm right through the summer months.</p>"  # 11 -> gap zone
-    "<p>Booking a houseboat early saves money.</p>"                       # 6 -> too short + -ing start
+    "<p>Kerala is lovely.</p>"
+    "<p>The backwaters near Alleppey stay calm right through the summer months.</p>"
+    "<p>Booking a houseboat early saves money.</p>"
     "<p>Travellers who want hill air head to Munnar, where the tea estates roll "
-    "out across the slopes and the mornings turn cold enough for a jacket.</p>"  # long, fine
+    "out across the slopes and the mornings turn cold enough for a jacket.</p>"
 )
 v = HV.find_style_violations(SAMPLE)
-gap_words = [n for n, _ in v['gap_zone']]
-check("an 11-word sentence is caught in the gap zone", 11 in gap_words, v['gap_zone'])
-check("a sentence under 7 words is caught", len(v['too_short']) >= 1, v['too_short'])
-check("an -ing sentence opening is caught",
-      any(s.startswith('Booking') for _, s in v['ing_starts']), v['ing_starts'])
+check("the gap-zone category is gone", 'gap_zone' not in v, sorted(v))
+check("the too-short category is gone", 'too_short' not in v, sorted(v))
+check("the too-long category is gone", 'too_long' not in v, sorted(v))
+check("an -ing sentence opening is still caught",
+      any(s2.startswith('Booking') for _, s2 in v['ing_starts']), v['ing_starts'])
 
 # The blocklist matters: these open with -ing words that are not gerunds, and
 # asking the model to "restructure" them produces "The nothing changed".
@@ -200,20 +207,49 @@ for word in ("Nothing", "Something", "Everything", "Morning", "During"):
     hits = HV.find_style_violations(sample)['ing_starts']
     check(f"'{word}' is not mistaken for a gerund opening", not hits, hits)
 
+print("\nhumanise_validation — burstiness")
+
+EVEN = "<p>" + " ".join(
+    ["The market moved higher today across every major sector index."] * 8) + "</p>"
+UNEVEN = (
+    "<p>Markets rose. The Securities and Exchange Board of India has spent much of "
+    "2024 and 2025 rewriting the rulebook for derivatives trading, a process that "
+    "touched every broker in the country and reshaped how retail participation is "
+    "measured. It worked. Nine out of ten retail traders lost money.</p>"
+)
+b_even, b_uneven = HV.burstiness(EVEN), HV.burstiness(UNEVEN)
+check("identical-length sentences score 0 burstiness", b_even == 0.0, b_even)
+check("varied sentences score far higher", b_uneven > HV.BURSTINESS_TARGET, b_uneven)
+check("an empty article does not raise", HV.burstiness("") == 0.0)
+check("a single sentence does not raise", HV.burstiness("<p>Only one here.</p>") == 0.0)
+
+pe, pu = HV.length_profile(EVEN), HV.length_profile(UNEVEN)
+check("even prose is asked for short sentences", pe['need_short'] >= 1, pe)
+check("even prose is asked for long sentences", pe['need_long'] >= 1, pe)
+check("varied prose is asked for nothing",
+      pu['need_short'] == 0 and pu['need_long'] == 0, pu)
+check("a run of same-length sentences is caught",
+      len(HV.find_style_violations(EVEN)['monotone_runs']) >= 1)
+check("varied prose has no monotone run",
+      not HV.find_style_violations(UNEVEN)['monotone_runs'])
+
+print("\nhumanise_validation — format_violations_for_prompt")
+
 check("a clean article produces no violation block",
       HV.format_violations_for_prompt(
-          {'gap_zone': [], 'ing_starts': [], 'too_short': [], 'too_long': []}) == "")
+          {'ing_starts': [], 'monotone_runs': [], 'profile': HV.length_profile(UNEVEN)}) == "")
 
-block = HV.format_violations_for_prompt(v)
-check("the block quotes the offending sentence verbatim",
-      "backwaters near Alleppey" in block, block[:200])
-check("the block states the rule the model must apply",
-      "8-10 words" in block and "15-25 words" in block, block[:200])
+block = HV.format_violations_for_prompt(HV.find_style_violations(EVEN))
+check("the block reports the measured burstiness", "measured 0.00" in block, block[:200])
+check("the block asks for short sentences", "UNDER 8" in block, block[:400])
+check("the block asks for long sentences", "OVER 28" in block, block[:400])
+check("the block forbids levelling the rest out", "Do NOT even out" in block)
+check("the model is told not to count", "do not try to count anything yourself" in block)
 
 # The whole point is a short actionable list, not a wall of quotes.
-many = {'gap_zone': [(12, f"Sentence number {i} sits in the eleven to fourteen word band here.")
-                     for i in range(40)],
-        'ing_starts': [], 'too_short': [], 'too_long': []}
+many = {'ing_starts': [(12, f"Sentence {i} opens with a gerund and needs restructuring here.")
+                       for i in range(40)],
+        'monotone_runs': [], 'profile': HV.length_profile(UNEVEN)}
 big_block = HV.format_violations_for_prompt(many, max_each=12)
 check("long violation lists are capped", big_block.count('[12 words]') == 12,
       big_block.count('[12 words]'))

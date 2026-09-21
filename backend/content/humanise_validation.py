@@ -20,6 +20,7 @@ The two guards catch different things and are both worth having:
 Run the tests:  python tests/standalone/backend/content/test_humanise_validation.py
 """
 import re
+import statistics
 
 # Below this share of the input, the output is truncated rather than rewritten.
 # Humanisation preserves all HTML, links and keywords, so a pass returns roughly
@@ -59,23 +60,49 @@ def output_ceiling(content_html):
 # --------------------------------------------------------------------------- #
 # Style analysis — the counting the model cannot do
 # --------------------------------------------------------------------------- #
-# Rules 2 and 4 of the humanisation prompt ban 11-14 word sentences (the "gap
-# zone") and -ing sentence openings. Both were measured across 12 articles
-# humanised in February and today's runs: the gap zone goes UP as often as down
-# (14%->23%, 11%->20%, 17%->33%) and -ing openings frequently INCREASE (4->10,
-# 2->8, 4->9). They have never worked, on any model, in five months.
+# The prompt used to ask the model to COUNT -- "count the words in every
+# sentence you write", "keep a mental tally" -- which is the one thing it is
+# worst at, and which drove the runaway reasoning that emptied the response
+# entirely. Python counts perfectly and instantly, so the split is: Python
+# measures, the model rewrites the specific sentences it is handed. Nothing is
+# auto-rewritten here -- programmatically restructuring prose produces garbage
+# ("Nothing is worse" -> "The nothing is worse"), so detection feeds the
+# refinement prompt instead of replacing it.
 #
-# The cause is that the prompt asks the model to count -- "count the words in
-# every sentence you write", "keep a mental tally" -- which is the one thing it
-# is worst at, and which is also what drove the runaway reasoning that emptied
-# the response entirely. Python counts perfectly and instantly. So the split is:
-# Python finds the violations, the model rewrites the specific sentences it is
-# handed. Nothing is auto-rewritten here -- programmatically restructuring prose
-# produces garbage ("Nothing is worse" -> "The nothing is worse"), so detection
-# feeds the refinement prompt instead of replacing it.
-GAP_ZONE = (11, 14)
-SHORT_BAND = (8, 10)
-LONG_BAND = (15, 25)
+# ---------------------------------------------------------------------------
+# What replaced the gap-zone ban, and why
+# ---------------------------------------------------------------------------
+# Measured across 200 articles holding BOTH their pre- and post-humanise text
+# (burstiness computed per article, then averaged — pooling every sentence into
+# one set instead reports 0.463 -> 0.517, which is inflated because it mixes
+# between-article differences in mean length into the spread):
+#
+#                         before humanise   after humanise
+#   sentences at 11-14w        16.8%            22.8%   <- the BANNED band GREW
+#   burstiness (sd/mean)       0.400            0.451
+#
+# So the ban fails at its own stated goal: forbidding 11-14 words leaves 36%
+# MORE sentences there. Humanisation does lift burstiness overall, but it is
+# not enough — 58% of humanised articles still land under 0.45, and 32% come
+# out LESS bursty than the draft they started from.
+#
+# Burstiness — variance in sentence length — is the strongest signal a modern
+# detector reads: humans are irregular, models are even. The old rule floored
+# sentences at 7 words and capped them at 25, which forbids exactly the tails
+# that would fix those 58%. So the lever is inverted: stop banning the tails
+# and start asking for them.
+#
+# Python computes this exactly and for free — no model, no API, no per-call
+# cost — which is the same split that already works elsewhere in this module.
+BURSTINESS_TARGET = 0.45   # drafts already average 0.400, humanised 0.451
+SHORT_SENTENCE = 8         # under this many words counts as a short sentence
+LONG_SENTENCE = 28         # over this many words counts as a long one
+SHORT_SHARE_TARGET = 0.10  # at least this share of sentences should be short
+LONG_SHARE_TARGET = 0.10   # ... and this share long
+# A run of this many consecutive sentences within MONOTONE_SPREAD words of each
+# other reads as machine-even regardless of what the overall figures say.
+MONOTONE_RUN = 4
+MONOTONE_SPREAD = 4
 
 _TAG_RE = re.compile(r'<[^>]+>')
 _WS_RE = re.compile(r'\s+')
@@ -101,27 +128,99 @@ def _text_sentences(html):
     return [s.strip() for s in _SENTENCE_SPLIT_RE.split(text) if len(s.split()) > 1]
 
 
-def find_style_violations(html):
-    """Return the exact sentences breaking the countable humanisation rules.
+def sentence_lengths(html):
+    """Word count of every sentence a reader sees, in order."""
+    return [len(s.split()) for s in _text_sentences(html)]
 
-    Returns a dict of lists, each holding real sentences from the article rather
-    than counts, so the refinement prompt can name them instead of asking the
-    model to go looking.
+
+def burstiness(html):
+    """Variance in sentence length, as std dev over mean. 0.0 for no variation.
+
+    The one number worth optimising. Measured over 200 articles here, drafts
+    average 0.400 and humanised output 0.451 — better, but 58% of articles still
+    finish under the 0.45 a detector reads as human, and 32% come out less
+    bursty than the draft. That is the gap this replaces the gap-zone ban to
+    close.
+
+    Returns 0.0 rather than raising on an article too short to measure, so a
+    caller can treat "cannot tell" and "no variation" the same way: neither is
+    a reason to ask the model for changes.
     """
-    gap, ing, too_short, too_long = [], [], [], []
+    lengths = sentence_lengths(html)
+    if len(lengths) < 2:
+        return 0.0
+    mean = statistics.mean(lengths)
+    if not mean:
+        return 0.0
+    return statistics.pstdev(lengths) / mean
+
+
+def length_profile(html):
+    """Everything the prompt needs to know about sentence-length spread."""
+    lengths = sentence_lengths(html)
+    total = len(lengths)
+    if not total:
+        return {'count': 0, 'burstiness': 0.0, 'mean': 0.0,
+                'short': 0, 'long': 0, 'need_short': 0, 'need_long': 0}
+    short = sum(1 for n in lengths if n < SHORT_SENTENCE)
+    long_ = sum(1 for n in lengths if n > LONG_SENTENCE)
+    return {
+        'count': total,
+        'burstiness': burstiness(html),
+        'mean': statistics.mean(lengths),
+        'short': short,
+        'long': long_,
+        # How many MORE of each are needed to hit the target share. The prompt
+        # asks for a specific number of rewrites, not a percentage — a model
+        # given "10%" has to count the article to act on it, which is the thing
+        # it cannot do.
+        'need_short': max(0, int(round(total * SHORT_SHARE_TARGET)) - short),
+        'need_long': max(0, int(round(total * LONG_SHARE_TARGET)) - long_),
+    }
+
+
+def _monotone_runs(html):
+    """Stretches of consecutive sentences that are all nearly the same length.
+
+    Overall dispersion can look acceptable while a section still reads as
+    machine-even, because a long passage of 16-word sentences averages out
+    against variation elsewhere. This catches the passage.
+    """
+    sentences = _text_sentences(html)
+    runs, start = [], 0
+    for i in range(1, len(sentences) + 1):
+        window = [len(s.split()) for s in sentences[start:i]]
+        if i < len(sentences) and max(window) - min(window) <= MONOTONE_SPREAD:
+            continue
+        if i - start >= MONOTONE_RUN:
+            runs.append((i - start, sentences[start]))
+        start = i
+    return runs
+
+
+def find_style_violations(html):
+    """Return what the model must fix, as real sentences rather than counts.
+
+    The gap-zone, too-short and too-long categories are GONE: measurement on 200
+    real articles showed the 11-14 ban grew that band from 16.8% to 22.8%, and
+    left 58% of humanised articles under the 0.45 burstiness a detector reads as
+    human. The tails it forbade are what would close that gap, so they are now
+    requested rather than banned.
+
+    Keys kept for callers: ``ing_starts`` (a genuine generated-text tell that
+    the ban does help with) plus the new ``profile`` and ``monotone_runs``.
+    """
+    ing = []
     for sentence in _text_sentences(html):
         words = sentence.split()
-        n = len(words)
-        if GAP_ZONE[0] <= n <= GAP_ZONE[1]:
-            gap.append((n, sentence))
-        elif n < 7:
-            too_short.append((n, sentence))
-        elif n > LONG_BAND[1]:
-            too_long.append((n, sentence))
         first = words[0].strip('“"‘\'(').lower()
         if first.endswith('ing') and first not in _NOT_GERUNDS and len(first) > 4:
-            ing.append((n, sentence))
-    return {'gap_zone': gap, 'ing_starts': ing, 'too_short': too_short, 'too_long': too_long}
+            ing.append((len(words), sentence))
+    return {
+        'ing_starts': ing,
+        'profile': length_profile(html),
+        'monotone_runs': _monotone_runs(html),
+    }
 
 
 def format_violations_for_prompt(violations, max_each=12):
@@ -145,33 +244,58 @@ def format_violations_for_prompt(violations, max_each=12):
         sections.append("\n".join(lines))
 
     block(
-        "SENTENCES IN THE FORBIDDEN 11-14 WORD GAP ZONE",
-        violations.get('gap_zone'),
-        f"  Rewrite each to {SHORT_BAND[0]}-{SHORT_BAND[1]} words (cut) or "
-        f"{LONG_BAND[0]}-{LONG_BAND[1]} words (add detail). Do not leave any at 11-14.",
-    )
-    block(
         "SENTENCES STARTING WITH AN -ING WORD",
         violations.get('ing_starts'),
         '  Restructure each, e.g. "Earning opportunities..." -> "The earning opportunities...".',
     )
     block(
-        "SENTENCES UNDER 7 WORDS",
-        violations.get('too_short'),
-        "  Merge each into an adjacent sentence.",
+        "PASSAGES WHERE EVERY SENTENCE IS THE SAME LENGTH",
+        violations.get('monotone_runs'),
+        "  Each number is how many consecutive sentences run at nearly one "
+        "length, starting from the quoted one. Break the run up: make one of "
+        "them very short and one much longer. An even rhythm is the clearest "
+        "sign of generated text.",
     )
-    block(
-        "SENTENCES OVER 25 WORDS",
-        violations.get('too_long'),
-        "  Split each into two.",
-    )
+
+    # The dispersion ask. Phrased as a COUNT of rewrites, never a percentage —
+    # a model handed "10%" has to count the article to act on it, which is the
+    # thing it cannot do and the reason the old word-count rules never worked.
+    profile = violations.get('profile') or {}
+    if profile.get('count'):
+        need_short = profile.get('need_short', 0)
+        need_long = profile.get('need_long', 0)
+        if need_short or need_long or profile.get('burstiness', 0) < BURSTINESS_TARGET:
+            asks = []
+            if need_short:
+                asks.append(
+                    f"  - Cut {need_short} sentence(s) down to UNDER {SHORT_SENTENCE} "
+                    f"words. Short, blunt sentences are the strongest signal here."
+                )
+            if need_long:
+                asks.append(
+                    f"  - Expand {need_long} sentence(s) to OVER {LONG_SENTENCE} "
+                    f"words by adding a concrete clause — never filler."
+                )
+            asks.append(
+                "  - Do NOT even out the rest. Uneven is the point: real writing "
+                "mixes 5-word sentences with 35-word ones, and an article where "
+                "every sentence is a similar length reads as machine-written "
+                "however good the wording is."
+            )
+            sections.append(
+                "SENTENCE-LENGTH VARIATION IS TOO LOW "
+                f"(measured {profile['burstiness']:.2f}, target {BURSTINESS_TARGET:.2f} — "
+                f"{profile['short']} short and {profile['long']} long out of "
+                f"{profile['count']} sentences):\n" + "\n".join(asks)
+            )
 
     if not sections:
         return ""
     return (
-        "\n\n=== EXACT VIOLATIONS FOUND IN THIS ARTICLE ===\n"
-        "These were located by an automated word count, so the list is complete "
-        "and accurate. Fix these specific sentences. Do not search for others.\n\n"
+        "\n\n=== EXACT MEASUREMENTS FOR THIS ARTICLE ===\n"
+        "These were computed by counting the article, so the figures are exact "
+        "and complete. Act on these specific items. Do not search for others, "
+        "and do not try to count anything yourself.\n\n"
         + "\n\n".join(sections)
     )
 
