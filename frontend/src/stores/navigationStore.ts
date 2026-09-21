@@ -25,6 +25,7 @@ import {
   SearchCheck,
   MessageSquareText,
   ScanSearch,
+  HeartPulse,
   CalendarClock,
 } from 'lucide-react';
 
@@ -215,6 +216,24 @@ const allNavGroups: NavGroup[] = [
     name: "Audit Engine",
     items: [
       { name: "Audit Engine", path: "/audits", icon: ScanSearch, module: MODULES.AUDIT_ENGINE },
+    ],
+  },
+  // SEO Tech Section — same two-part shape as Strategy above: a section label
+  // and separator, then the row itself. Clients reach the health report here
+  // rather than through the settings screen; every other role still has the
+  // per-project gear in the switcher, so the row is gated on `tech_health`,
+  // which AuthContext grants to clients only.
+  {
+    name: "SEO Tech",
+    sectionLabel: true,
+    separator: true,
+    items: [],
+  },
+  {
+    name: "Tech Health Analysis",
+    icon: HeartPulse,
+    items: [
+      { name: "Tech Health Analysis", path: "/tech-health", icon: HeartPulse, module: MODULES.TECH_HEALTH },
     ],
   },
 ];

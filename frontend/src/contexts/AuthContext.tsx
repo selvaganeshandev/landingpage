@@ -331,6 +331,14 @@ export function AuthProvider({ children }: AuthProviderProps) {
     const permission = state.permissions.find(p => p.module === module);
 
     // Super admin shortcut: full access
+    // tech_health is the CLIENT-facing name for the domain health report, and
+    // it is checked before the super_admin shortcut on purpose: every other
+    // role already reaches that report through the per-project gear in the
+    // switcher, so granting it here would put a second, duplicate row in their
+    // sidebar. This is the one module that is narrower for an admin than for a
+    // client, which is why it cannot sit with the rules below.
+    if (module === 'tech_health') return state.user?.role === 'client';
+
     if (state.user?.role === 'super_admin') {
       return true;
     }
@@ -354,6 +362,16 @@ export function AuthProvider({ children }: AuthProviderProps) {
       // hides every other tab from a client, and the backend scopes the data
       // by DomainAccess - a client sees their projects and no others.
       if (module === 'team_management') return false;
+      // The Audit Engine is an internal tool: it spends real DataForSEO and
+      // LLM budget per run and reports on prospects, not on the client's own
+      // project. The backend already refuses it — audits/views.py requires the
+      // `audit_engine` module and core.permissions returns False for every
+      // client — so without this the nav row rendered and then 403'd on click.
+      if (module === 'audit_engine') return false;
+      // Tech Health Analysis: the health report as its own sidebar row, so a
+      // client reaches it directly instead of through the settings screen.
+      // Clients only — everyone else already has the per-project gear.
+      if (module === 'tech_health') return requiredLevel === 'read';
       if (module === 'organization_settings') return requiredLevel === 'read';
       return requiredLevel === 'read';
     }

@@ -198,7 +198,13 @@ export const DomainSelector = () => {
 
   // Same gate as the /organization-settings/domains/:id route. Team members
   // land on Integrations, matching the gear in Organization Settings.
-  const canOpenSettings = checkPermission(MODULES.ORGANIZATION_SETTINGS, 'read');
+  //
+  // Clients are excluded even though they hold organization_settings at read:
+  // they reach the same health report from the "Tech Health Analysis" row in
+  // the sidebar instead, so the gear would be a second, settings-shaped door to
+  // a screen they should never see as settings.
+  const canOpenSettings =
+    user?.role !== 'client' && checkPermission(MODULES.ORGANIZATION_SETTINGS, 'read');
   const openDomainSettings = (domainId: number) => {
     setOpen(false);
     navigate(`/organization-settings/domains/${domainId}${user?.role === 'user' ? '?tab=integrations' : ''}`);

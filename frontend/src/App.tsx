@@ -284,6 +284,15 @@ const App = () => (
                   <DomainSettings />
                 </ProtectedRoute>
               } />
+
+              {/* Tech Health Analysis — the same screen, without the settings
+                  URL, reading the project from the switcher. Gated on
+                  tech_health, which only clients hold. */}
+              <Route path="/tech-health" element={
+                <ProtectedRoute requiredPermission={MODULES.TECH_HEALTH} requiredLevel="read">
+                  <DomainSettings standalone />
+                </ProtectedRoute>
+              } />
               
               {/* Profile */}
               <Route path="/profile" element={

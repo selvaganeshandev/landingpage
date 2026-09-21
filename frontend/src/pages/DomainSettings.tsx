@@ -72,12 +72,24 @@ import {
 } from "@/lib/sweep-cadence";
 import { useAuth } from "@/contexts/AuthContext";
 
-export default function DomainSettings() {
-  const { domainId } = useParams();
+/**
+ * `standalone` renders this screen at /tech-health instead of
+ * /organization-settings/domains/:id. The project then comes from the sidebar
+ * switcher rather than the URL, which is what lets a static nav row point at
+ * it. Used for the client-facing "Tech Health Analysis" row; a client is
+ * already locked to the health tab below, so that is all the page shows.
+ */
+export default function DomainSettings({ standalone = false }: { standalone?: boolean } = {}) {
+  const { domainId: routeDomainId } = useParams();
   const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
   const { toast } = useToast();
   const { setSelectedDomain, selectedDomain, domains, setDomains, sweep } = useDomainStore();
+
+  // Standalone has no :domainId, so the switcher IS the source of truth.
+  const domainId = standalone
+    ? (selectedDomain?.id != null ? String(selectedDomain.id) : undefined)
+    : routeDomainId;
 
   // Keep the page on whichever project the sidebar switcher points at.
   //
@@ -90,13 +102,17 @@ export default function DomainSettings() {
   // while another project is selected would bounce straight back to it.
   const lastSelectedId = useRef<number | null>(selectedDomain?.id ?? null);
   useEffect(() => {
+    // Standalone tracks the store by construction, so there is nothing to
+    // redirect to — and redirecting would drop the client into the settings
+    // URL this row exists to avoid.
+    if (standalone) return;
     const selected = selectedDomain?.id ?? null;
     if (selected === lastSelectedId.current) return;
     lastSelectedId.current = selected;
     if (selected !== null && String(selected) !== String(domainId)) {
       navigate(`/organization-settings/domains/${selected}`, { replace: true });
     }
-  }, [selectedDomain?.id, domainId, navigate]);
+  }, [selectedDomain?.id, domainId, navigate, standalone]);
   // Draft state, like every other field in Basic Information: choosing a
   // cadence arms Save, and nothing reaches the server until Save is pressed.
   // It used to write immediately, which made it the one control on the card

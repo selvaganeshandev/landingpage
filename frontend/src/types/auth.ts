@@ -84,6 +84,10 @@ export const MODULES = {
   ORGANIZATION_SETTINGS: 'organization_settings',
   TEAM_MANAGEMENT: 'team_management',
   AUDIT_ENGINE: 'audit_engine',
+  // Client-facing name for the domain health report. It is its own module so
+  // the sidebar row can be shown to clients without also handing them
+  // organization_settings, which carries the agency-side tabs.
+  TECH_HEALTH: 'tech_health',
   // SEO Monitoring modules
   KEYWORD_RANKINGS: 'keyword_rankings',
   SEO_COMPETITORS: 'seo_competitors',

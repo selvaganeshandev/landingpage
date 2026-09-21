@@ -77,8 +77,14 @@ import { getFaviconUrl, handleFaviconError } from "@/utils/faviconHelper";
    only the label weight changes when active, which keeps the column quiet and
    the eye on the content. */
 const ROW_BASE =
-  "relative flex items-center gap-2.5 rounded-md text-sm transition-colors";
-const ROW_OPEN = "px-2.5 py-1.5 w-full";
+  // cursor-pointer: group rows are <button>, which browsers give the default
+  // arrow rather than the hand a <Link> gets, so the two halves of the menu
+  // behaved differently under the mouse.
+  // select-none: without it the label text takes an I-beam on hover and a
+  // drag across the panel highlights the words like a paragraph.
+  "relative flex items-center gap-2.5 rounded-md text-sm transition-colors "
+  + "cursor-pointer select-none";
+const ROW_OPEN = "px-2.5 py-0.5 w-full";
 const ROW_COLLAPSED = "justify-center aspect-square w-9 h-9 p-0 mx-auto";
 const ROW_ACTIVE = "bg-accent text-foreground font-medium";
 const ROW_IDLE =
@@ -101,7 +107,7 @@ const NavGroup = ({ group, location, isSidebarOpen, onItemClick, navigate, isDom
       return <Separator className="my-1.5" />;
     }
     return (
-      <div className="px-2.5 pt-2.5 pb-0.5">
+      <div className="px-2.5 pt-1 pb-0 select-none">
         <p className="text-[10px] font-semibold uppercase tracking-wider text-foreground/55">
           {group.name}
         </p>
@@ -343,10 +349,10 @@ export const Sidebar = () => {
   return (
     <TooltipProvider>
       <aside className={cn(
-        "bg-card border-r border-border h-screen sticky top-0 overflow-y-auto flex flex-col transition-all duration-150",
+        "bg-card border-r border-border h-screen sticky top-0 overflow-hidden flex flex-col transition-all duration-150",
         isOpen ? "w-64" : "w-16"
       )}>
-        <div className={cn("border-b border-border transition-all duration-150", isOpen ? "px-3 pt-3 pb-2" : "px-2 py-3")}>
+        <div className={cn("border-b border-border transition-all duration-150", isOpen ? "px-3 pt-2 pb-1.5" : "px-2 py-2")}>
           <div className="flex items-center justify-between">
           {isOpen ? (
             <>
@@ -493,7 +499,7 @@ export const Sidebar = () => {
           )}
         </div>
         {isOpen && (
-          <div className="mt-2.5">
+          <div className="mt-1.5">
             <DomainSelector />
           </div>
         )}
@@ -501,7 +507,15 @@ export const Sidebar = () => {
 
       {/* Tighter rhythm: the section labels already mark the boundaries, so the
           horizontal rules between them were redundant and cost ~16px each. */}
-      <nav className={cn("space-y-0.5 flex-1", isOpen ? "px-3 py-1" : "px-2 py-1")}>
+      <nav className={cn(
+        // Distribute whatever height is left BETWEEN the sections rather than
+        // letting it pool as dead space under the last one. The panel is
+        // h-screen, so on a tall window the menu used to bunch at the top with
+        // a visible empty band above the account footer. justify-between spreads
+        // that slack across the section boundaries, which is where extra air
+        // reads as deliberate grouping instead of a gap.
+        "flex-1 min-h-0 overflow-y-auto flex flex-col justify-between",
+        isOpen ? "px-3 py-0.5" : "px-2 py-0.5")}>
           {filteredNavGroups.map((group, index) => (
             <div key={index}>
               <NavGroup
@@ -517,7 +531,7 @@ export const Sidebar = () => {
 
       </nav>
 
-      <div className={cn("border-t border-border mt-auto pt-1.5", isOpen ? "px-2 pb-2" : "px-2 pb-2")}>
+      <div className={cn("border-t border-border mt-auto pt-1", isOpen ? "px-2 pb-1.5" : "px-2 pb-1.5")}>
           {/* Account menu: name, email · role, then Settings / What's new /
               Sign out. The Settings targets are the same the old fly-out had
               (Organization / Billing / Profile, gated by role). Switching
