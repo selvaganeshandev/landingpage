@@ -14,15 +14,21 @@ import logging
 
 logger = logging.getLogger(__name__)
 
-try:
-    from sentence_transformers import SentenceTransformer
-except ImportError:  # pragma: no cover
-    SentenceTransformer = None
-
-try:
-    from sklearn.cluster import KMeans
-except ImportError:  # pragma: no cover
-    KMeans = None
+# sentence_transformers and sklearn are imported INSIDE
+# _group_prompts_with_sentence_transformers, the one method that uses them, not
+# here at module scope.
+#
+# Importing sentence_transformers pulls in torch, measured at 342 MB per
+# process on the production box (10 MB baseline -> 352 MB after `import
+# torch`). Celery autodiscovers tasks, which imports core.processing_tasks,
+# which imports this module — so every engine process paid that cost at start-up
+# whether or not it ever grouped a prompt. celery-beat, which only decides WHEN
+# tasks fire and runs none of them, was holding 658 MB, and 102 torch regions
+# were mapped into it including libc10_cuda.so on a server with no GPU.
+#
+# The result was 1,280 MB of swap in use with 169 MB of RAM free: roughly the
+# whole shortage was torch sitting in processes that never touch it. Deferring
+# the import means only the process actually grouping prompts pays for it.
 from datetime import date
 
 
@@ -1296,6 +1302,19 @@ class DomainProcessor:
     def _group_prompts_with_sentence_transformers(self, prompts: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
         if not prompts:
             return []
+
+        # Deferred so importing this module does not drag in torch — see the
+        # note where these imports used to live. Same try/except contract as
+        # before: a missing package raises the explanatory RuntimeError rather
+        # than an ImportError from somewhere deep in the call stack.
+        try:
+            from sentence_transformers import SentenceTransformer
+        except ImportError:  # pragma: no cover
+            SentenceTransformer = None
+        try:
+            from sklearn.cluster import KMeans
+        except ImportError:  # pragma: no cover
+            KMeans = None
 
         if SentenceTransformer is None:
             raise RuntimeError("sentence_transformers is required but not installed.")
