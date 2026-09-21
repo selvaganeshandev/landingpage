@@ -11,7 +11,11 @@ from django.conf import settings
 from decouple import config
 
 from core.openrouter_client import OpenRouterAnthropicClient
-from core.model_fallback import free_fallback_enabled, paid_only_error
+from core.model_fallback import (
+    PaidModelUnavailable,
+    free_fallback_enabled,
+    paid_only_error,
+)
 from .humanise_validation import (
     raise_if_truncated as _raise_if_truncated,
     output_ceiling as _output_ceiling,
@@ -2879,6 +2883,12 @@ Return ONLY the regenerated HTML content for this specific section."""
 
             return response.content[0].text
 
+        except PaidModelUnavailable:
+            # Already a finished, user-facing sentence ("OpenRouter API key is
+            # out of credit..."). Wrapping it in "Claude API error during X"
+            # buries the one line the user can act on behind a prefix that
+            # points at the wrong thing.
+            raise
         except Exception as e:
             raise Exception(f"Claude API error during regeneration: {str(e)}")
 
@@ -3300,6 +3310,12 @@ Return ONLY the JSON array, nothing else."""
 
         except json.JSONDecodeError as e:
             raise Exception(f"Failed to parse outline JSON: {str(e)}")
+        except PaidModelUnavailable:
+            # Already a finished, user-facing sentence ("OpenRouter API key is
+            # out of credit..."). Wrapping it in "Claude API error during X"
+            # buries the one line the user can act on behind a prefix that
+            # points at the wrong thing.
+            raise
         except Exception as e:
             raise Exception(f"Claude API error during outline generation: {str(e)}")
 
@@ -3856,6 +3872,10 @@ Rewritten text:"""
                 # a selection too big for one pass is just as big on a retry.
                 # Re-raise unwrapped so the editor shows it as-is.
                 raise
+            except PaidModelUnavailable:
+                # Finished, user-facing sentence — re-raise unwrapped, and do
+                # NOT retry: an empty balance is the same on the next attempt.
+                raise
             except Exception as e:
                 last_error = e
                 error_str = str(e).lower()
@@ -4087,6 +4107,11 @@ The content may contain locked placeholders written as HTML comments, e.g. <!--P
 
                 return humanised_content
 
+            except PaidModelUnavailable:
+                # Finished, user-facing sentence — re-raise unwrapped. Also not
+                # retried: an empty balance is identical on the next attempt, so
+                # the transient-retry branch below would just burn the wait.
+                raise
             except Exception as e:
                 last_error = e
                 error_str = str(e).lower()
@@ -4246,6 +4271,11 @@ Any HTML comment like <!--PMX_FROZEN_0--> is a locked placeholder — reproduce 
 
                 return refined_content
 
+            except PaidModelUnavailable:
+                # Finished, user-facing sentence — re-raise unwrapped. Also not
+                # retried: an empty balance is identical on the next attempt, so
+                # the transient-retry branch below would just burn the wait.
+                raise
             except Exception as e:
                 last_error = e
                 error_str = str(e).lower()

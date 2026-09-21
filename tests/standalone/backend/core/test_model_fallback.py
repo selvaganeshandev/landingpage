@@ -128,9 +128,15 @@ busy_exc = paid_only_error(Exception("Error code: 429 - overloaded"), "anthropic
 check("a busy provider says to retry", UNAVAILABLE_MESSAGE in str(busy_exc))
 check("a busy provider does NOT say to recharge", RECHARGE_MESSAGE not in str(busy_exc))
 
-check("the underlying provider error is kept for the log",
-      "429" in str(busy_exc) and "anthropic/claude-sonnet-4.5" in str(busy_exc))
-check("the cause is retrievable", busy_exc.cause is not None)
+# The provider's own error must NOT reach the user. A real 402/429 body carries
+# 'metadata', 'remedy_hint', 'headers' and a user_id, and appending it put that
+# whole wall of JSON in a red box on screen — the exact thing these messages
+# exist to replace.
+check("no raw provider error in the user's message", "429" not in str(busy_exc))
+check("no JSON blob in the user's message", "{" not in str(busy_exc))
+check("the message stays short", len(str(busy_exc)) < 160, len(str(busy_exc)))
+check("the cause is retrievable for code", busy_exc.cause is not None)
+check("the provider detail survives on the cause", "429" in str(busy_exc.cause))
 check("the model is retrievable", busy_exc.model == "anthropic/claude-sonnet-4.5")
 
 # Every existing caller wraps these paths in `except Exception`. If this stops

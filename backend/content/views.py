@@ -35,7 +35,7 @@ from .ai_detection import (
     strip_html_tags,
 )
 from .humanise_validation import validate_pass_output as _validate_pass_output
-from core.model_fallback import free_fallback_enabled, paid_only_error
+from core.model_fallback import PaidModelUnavailable, free_fallback_enabled, paid_only_error
 from domains.models import Domain, ReferenceDocument
 from django.db import transaction, connection
 from django.db.models import Count, Q
@@ -244,6 +244,17 @@ def generate_content(request):
             'data': response_serializer.data
         }, status=status.HTTP_201_CREATED)
 
+    except PaidModelUnavailable as e:
+        # A finished, user-facing sentence ("OpenRouter API key is out of
+        # credit..."). Returned bare, with no "Error doing X:" prefix and no
+        # provider JSON, as 402 Payment Required so the UI can tell an empty
+        # balance apart from a genuine server fault.
+        logger.warning(f"Paid model unavailable: {e}")
+        return Response({
+            'status': 'error',
+            'message': str(e)
+        }, status=status.HTTP_402_PAYMENT_REQUIRED)
+
     except Exception as e:
         logger.error(f"Error generating content: {str(e)}", exc_info=True)
         _log_content_usage(
@@ -358,6 +369,17 @@ def generate_outline(request):
             'message': 'Outline generated successfully',
             'data': outline_result
         }, status=status.HTTP_200_OK)
+
+    except PaidModelUnavailable as e:
+        # A finished, user-facing sentence ("OpenRouter API key is out of
+        # credit..."). Returned bare, with no "Error doing X:" prefix and no
+        # provider JSON, as 402 Payment Required so the UI can tell an empty
+        # balance apart from a genuine server fault.
+        logger.warning(f"Paid model unavailable: {e}")
+        return Response({
+            'status': 'error',
+            'message': str(e)
+        }, status=status.HTTP_402_PAYMENT_REQUIRED)
 
     except Exception as e:
         logger.error(f"Error generating outline: {str(e)}", exc_info=True)
@@ -526,6 +548,17 @@ def generate_content_from_outline(request):
             'message': 'Content generated successfully from outline',
             'data': response_serializer.data
         }, status=status.HTTP_201_CREATED)
+
+    except PaidModelUnavailable as e:
+        # A finished, user-facing sentence ("OpenRouter API key is out of
+        # credit..."). Returned bare, with no "Error doing X:" prefix and no
+        # provider JSON, as 402 Payment Required so the UI can tell an empty
+        # balance apart from a genuine server fault.
+        logger.warning(f"Paid model unavailable: {e}")
+        return Response({
+            'status': 'error',
+            'message': str(e)
+        }, status=status.HTTP_402_PAYMENT_REQUIRED)
 
     except Exception as e:
         logger.error(f"Error generating content from outline: {str(e)}", exc_info=True)
@@ -4541,6 +4574,17 @@ Return ONLY a JSON array."""
                 }
             })
 
+    except PaidModelUnavailable as e:
+        # A finished, user-facing sentence ("OpenRouter API key is out of
+        # credit..."). Returned bare, with no "Error doing X:" prefix and no
+        # provider JSON, as 402 Payment Required so the UI can tell an empty
+        # balance apart from a genuine server fault.
+        logger.warning(f"Paid model unavailable: {e}")
+        return Response({
+            'status': 'error',
+            'message': str(e)
+        }, status=status.HTTP_402_PAYMENT_REQUIRED)
+
     except Exception as e:
         logger.error(f"Error suggesting keywords: {str(e)}", exc_info=True)
         _m = str(e).lower()
@@ -4658,6 +4702,17 @@ Content type: {article_type}
             'status': 'success',
             'data': {'suggestions': suggestions[:8]}
         })
+
+    except PaidModelUnavailable as e:
+        # A finished, user-facing sentence ("OpenRouter API key is out of
+        # credit..."). Returned bare, with no "Error doing X:" prefix and no
+        # provider JSON, as 402 Payment Required so the UI can tell an empty
+        # balance apart from a genuine server fault.
+        logger.warning(f"Paid model unavailable: {e}")
+        return Response({
+            'status': 'error',
+            'message': str(e)
+        }, status=status.HTTP_402_PAYMENT_REQUIRED)
 
     except Exception as e:
         logger.error(f"Error suggesting anchor links: {str(e)}", exc_info=True)
@@ -4977,6 +5032,17 @@ Return ONLY the refurbished HTML content."""
             'message': f'Content refurbished successfully ({refurbish_type})',
             'data': serializer.data
         }, status=status.HTTP_201_CREATED)
+
+    except PaidModelUnavailable as e:
+        # A finished, user-facing sentence ("OpenRouter API key is out of
+        # credit..."). Returned bare, with no "Error doing X:" prefix and no
+        # provider JSON, as 402 Payment Required so the UI can tell an empty
+        # balance apart from a genuine server fault.
+        logger.warning(f"Paid model unavailable: {e}")
+        return Response({
+            'status': 'error',
+            'message': str(e)
+        }, status=status.HTTP_402_PAYMENT_REQUIRED)
 
     except Exception as e:
         logger.error(f"Error refurbishing content: {str(e)}", exc_info=True)

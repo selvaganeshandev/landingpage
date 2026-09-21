@@ -99,7 +99,7 @@ print("\nthe user is told the credit is over")
 # --------------------------------------------------------------------------- #
 credits_msg = paid_only_message(Exception("Error code: 402 - insufficient credits"),
                                 "openai/gpt-5-mini")
-check("says the credit is over", "credit is over" in credits_msg.lower())
+check("says the key is out of credit", "out of credit" in credits_msg.lower())
 check("says to recharge", "recharge" in credits_msg.lower())
 check("links the credits page", "openrouter.ai/settings/credits" in credits_msg)
 check("matches the shared constant", RECHARGE_MESSAGE in credits_msg)
@@ -108,8 +108,12 @@ busy_msg = paid_only_message(Exception("Error code: 429 - overloaded"), "openai/
 check("a busy provider says to retry", UNAVAILABLE_MESSAGE in busy_msg)
 check("a busy provider does NOT mention credits",
       "recharge" not in busy_msg.lower())
-check("the provider error is kept for the log",
-      "429" in busy_msg and "openai/gpt-5-mini" in busy_msg)
+# The provider's own error must NOT reach the user — a real body carries
+# 'metadata', 'remedy_hint', 'headers' and a user_id, and showing it is the
+# thing this message replaces. It stays on the [PAID_MODEL_FAILED] log line.
+check("no raw provider error in the user's message", "429" not in busy_msg)
+check("no JSON blob in the user's message", "{" not in busy_msg)
+check("the message stays short", len(busy_msg) < 160, len(busy_msg))
 
 # --------------------------------------------------------------------------- #
 print("\na free slug is recognised")

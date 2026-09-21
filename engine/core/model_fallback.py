@@ -30,8 +30,8 @@ OPENROUTER_CREDITS_URL = "https://openrouter.ai/settings/credits"
 
 # Shown verbatim to whoever clicked "Generate with AI".
 RECHARGE_MESSAGE = (
-    "The OpenRouter credit is over. Please recharge the OpenRouter API key at "
-    f"{OPENROUTER_CREDITS_URL} and try again."
+    "OpenRouter API key is out of credit. "
+    f"Please recharge it at {OPENROUTER_CREDITS_URL} and try again."
 )
 
 UNAVAILABLE_MESSAGE = (
@@ -100,11 +100,13 @@ def paid_only_message(exc: BaseException | None, model: str = "") -> str:
     """
     is_credits = looks_like_credit_exhaustion(exc)
     headline = RECHARGE_MESSAGE if is_credits else UNAVAILABLE_MESSAGE
+    # The provider's own error goes to the LOG ONLY — appending it put a wall of
+    # raw JSON on screen, which is the thing this message exists to replace.
     logger.error(
         "[PAID_MODEL_FAILED] model=%s credits_exhausted=%s error=%s",
         model, is_credits, exc,
     )
-    return f"{headline} (model: {model}; {exc})"
+    return headline
 
 
 def free_primary_message(model: str, setting_name: str) -> str | None:

@@ -36,7 +36,7 @@ OPENROUTER_CREDITS_URL = "https://openrouter.ai/settings/credits"
 # Shown to the user verbatim when the paid model is out of credits. Written for
 # whoever is staring at the red toast, not for a log reader.
 RECHARGE_MESSAGE = (
-    "The OpenRouter API key has run out of credits. "
+    "OpenRouter API key is out of credit. "
     f"Please recharge it at {OPENROUTER_CREDITS_URL} and try again."
 )
 
@@ -150,9 +150,13 @@ def paid_only_error(exc: BaseException | None, model: str = "") -> PaidModelUnav
     """
     is_credits = looks_like_credit_exhaustion(exc)
     headline = RECHARGE_MESSAGE if is_credits else UNAVAILABLE_MESSAGE
-    detail = f" (model: {model}; {exc})" if exc is not None else f" (model: {model})"
+    # The provider's own error goes to the LOG ONLY. It used to be appended to
+    # the message, which put a wall of raw JSON — 'metadata', 'remedy_hint',
+    # 'headers', a user_id — on screen in a red box, exactly the thing this was
+    # meant to replace. Everything needed to debug is on this line; `.cause`
+    # keeps the original exception for anyone who wants it in code.
     logger.error(
         "[PAID_MODEL_FAILED] model=%s credits_exhausted=%s error=%s",
         model, is_credits, exc,
     )
-    return PaidModelUnavailable(headline + detail, model=model, cause=exc)
+    return PaidModelUnavailable(headline, model=model, cause=exc)
