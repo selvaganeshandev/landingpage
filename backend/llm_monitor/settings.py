@@ -321,6 +321,15 @@ IMAGE_RENDER_MODEL = config('IMAGE_RENDER_MODEL', default='google/gemini-2.5-fla
 CONTENT_MAX_TOKENS = config('CONTENT_MAX_TOKENS', default=64000, cast=int)
 CONTENT_FREE_MAX_TOKENS = config('CONTENT_FREE_MAX_TOKENS', default=8192, cast=int)
 
+# Free-model fallback. OFF in production: every OpenRouter path (content,
+# humanisation, keyword suggestions, chat, domain analysis) uses the PAID model
+# only, and an exhausted balance surfaces as "recharge the OpenRouter API key"
+# instead of silently degrading onto the shared `:free` pool — which is rate
+# limited, lower quality, and reports its own 429 as if it were the real fault.
+# Set True on a local box or for a deliberate degraded mode. See
+# core.model_fallback for the policy this switch drives.
+ALLOW_FREE_MODEL_FALLBACK = config('ALLOW_FREE_MODEL_FALLBACK', default=False, cast=bool)
+
 # Multi-model humanisation. The guarded score-refine loop rotates each refine
 # pass through these models (comma-separated slugs) instead of always using the
 # paid Claude model — a different model per pass breaks the single-model writing
