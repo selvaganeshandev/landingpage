@@ -1,4 +1,5 @@
-import { useState, useEffect, useCallback, useMemo } from "react";
+import { useState, useEffect, useMemo } from "react";
+import { useQuery, keepPreviousData } from "@tanstack/react-query";
 import { apiClient } from "@/services/api";
 import { useDomainStore } from "@/stores/domainStore";
 import { useToast } from "@/hooks/use-toast";
@@ -177,10 +178,6 @@ export default function SeoBacklinks() {
   const { selectedDomain } = useDomainStore();
   const activeDomainId = selectedDomain ? String(selectedDomain.id) : "";
 
-  const [overview, setOverview] = useState<Overview | null>(null);
-  const [list, setList] = useState<ListResponse | null>(null);
-  const [loading, setLoading] = useState(false);
-  const [listLoading, setListLoading] = useState(false);
   const [starting, setStarting] = useState(false);
   const [exporting, setExporting] = useState(false);
 
@@ -195,53 +192,78 @@ export default function SeoBacklinks() {
   const [sort, setSort] = useState("rank");
   const [direction, setDirection] = useState("desc");
 
+  // Cached per project. This page used to fetch into local state on mount, so
+  // every visit discarded everything and showed the full-page loader again —
+  // which read as the app reloading on every sidebar click. React Query keeps
+  // the last result, so coming back is instant and the refetch happens quietly
+  // underneath.
+  const overviewQuery = useQuery({
+    queryKey: ["seo-backlinks", "overview", activeDomainId],
+    queryFn: () => apiClient.getSeoBacklinks(activeDomainId) as Promise<Overview>,
+    enabled: !!activeDomainId,
+    // Poll ONLY while a pull is actually running — the old manual setInterval,
+    // expressed as a property of the query so it cannot outlive the page.
+    refetchInterval: (query) =>
+      (query.state.data as Overview | undefined)?.is_fetching ? POLL_MS : false,
+  });
+
+  const overview = overviewQuery.data ?? null;
+  // isPending, not isFetching: a background refresh of cached data must not put
+  // the loader back over a page the user is already reading.
+  const loading = overviewQuery.isPending && !!activeDomainId;
+
   const snapshot = overview?.snapshot ?? null;
   const isFetching = overview?.is_fetching ?? false;
   // First-ever pull is gated server-side; default false so the button never
   // flashes enabled while the overview is still loading.
   const canFetchFirst = overview?.can_fetch_first ?? false;
 
-  const loadOverview = useCallback(async () => {
-    if (!activeDomainId) { setOverview(null); return; }
-    try {
-      const data = (await apiClient.getSeoBacklinks(activeDomainId)) as Overview;
-      setOverview(data);
-      setLockedUntil(data.can_refresh ? null : data.next_refresh_allowed_at);
-      return data;
-    } catch (err: any) {
+  // The table. Keyed on every server-side filter, so paging, sorting and
+  // searching each get their own cache entry and going back to a page you have
+  // already seen is instant. keepPreviousData holds the current rows on screen
+  // while the next page loads instead of blanking the table.
+  const listQuery = useQuery({
+    queryKey: [
+      "seo-backlinks", "list", activeDomainId, snapshot?.id ?? null,
+      page, debouncedSearch, linkType, sort, direction,
+    ],
+    queryFn: () => apiClient.getSeoBacklinkList({
+      domain_id: activeDomainId,
+      page, search: debouncedSearch, link_type: linkType, sort, direction,
+    }) as Promise<ListResponse>,
+    enabled: !!activeDomainId && !!snapshot,
+    placeholderData: keepPreviousData,
+  });
+
+  const list = listQuery.data ?? null;
+  const listLoading = listQuery.isFetching;
+
+  // The lock is ALSO set by a 429 on the refresh button, before any reload has
+  // happened, so it stays local state and mirrors the query rather than being
+  // read straight off it.
+  useEffect(() => {
+    if (overview) {
+      setLockedUntil(overview.can_refresh ? null : overview.next_refresh_allowed_at);
+    }
+  }, [overview]);
+
+  // Errors used to be toasted inside the fetch helpers. useQuery owns the call
+  // now, so the toast watches the query's error instead.
+  useEffect(() => {
+    if (overviewQuery.error) {
       toast({
         title: "Could not load backlinks",
-        description: err?.message || "Please try again.",
+        description: overviewQuery.error.message || "Please try again.",
         variant: "destructive",
       });
-      setOverview(null);
     }
-  }, [activeDomainId, toast]);
+  }, [overviewQuery.error, toast]);
 
-  const loadList = useCallback(async () => {
-    if (!activeDomainId) { setList(null); return; }
-    setListLoading(true);
-    try {
-      setList((await apiClient.getSeoBacklinkList({
-        domain_id: activeDomainId,
-        page, search: debouncedSearch, link_type: linkType, sort, direction,
-      })) as ListResponse);
-    } catch (err: any) {
+  useEffect(() => {
+    if (listQuery.error) {
       toast({ title: "Could not load the backlink table", variant: "destructive" });
-    } finally {
-      setListLoading(false);
     }
-  }, [activeDomainId, page, debouncedSearch, linkType, sort, direction, toast]);
-
-  // Initial load per domain.
-  useEffect(() => {
-    setLoading(true);
-    loadOverview().finally(() => setLoading(false));
-  }, [loadOverview]);
-
-  useEffect(() => {
-    if (snapshot) loadList();
-  }, [snapshot?.id, loadList]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [listQuery.error, toast]);
 
   // Search debounce — the table filters server-side.
   useEffect(() => {
@@ -249,12 +271,7 @@ export default function SeoBacklinks() {
     return () => clearTimeout(t);
   }, [search]);
 
-  // Poll only while a pull is actually running.
-  useEffect(() => {
-    if (!isFetching) return;
-    const t = setInterval(() => { loadOverview(); }, POLL_MS);
-    return () => clearInterval(t);
-  }, [isFetching, loadOverview]);
+  // (Polling while a pull runs is now overviewQuery's refetchInterval above.)
 
   const handleFetch = async () => {
     if (!activeDomainId) return;
@@ -265,7 +282,7 @@ export default function SeoBacklinks() {
         title: "Fetching backlinks",
         description: "This takes a moment — the page updates when it finishes.",
       });
-      await loadOverview();
+      await overviewQuery.refetch();
     } catch (err: any) {
       // 429 is the monthly guard, not a failure. The backend sends the exact
       // date back so the alert never has to compute it.
@@ -281,10 +298,10 @@ export default function SeoBacklinks() {
           title: "Fetching new projects is switched off",
           description: err?.data?.error || "Projects that already have backlink data can still be refreshed.",
         });
-        await loadOverview();
+        await overviewQuery.refetch();
       } else if (err?.status === 409) {
         toast({ title: "A fetch is already running for this project." });
-        await loadOverview();
+        await overviewQuery.refetch();
       } else {
         toast({
           title: "Could not start the fetch",

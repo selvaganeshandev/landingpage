@@ -68,7 +68,21 @@ const Profile = lazy(() => import("./pages/Profile"));
 const SessionExpired = lazy(() => import("./pages/SessionExpired"));
 import { MODULES } from "@/types/auth";
 
-const queryClient = new QueryClient();
+// Cached by default. With no options at all every query carried staleTime: 0,
+// so any page using React Query refetched on every mount — leave a page, come
+// back, and you get the full-page loader again as if the app had reloaded.
+// A minute of freshness makes returning to a page instant while still picking
+// up changes on any real navigation, and refetchOnWindowFocus stays off so
+// alt-tabbing does not fire a burst of requests.
+const queryClient = new QueryClient({
+  defaultOptions: {
+    queries: {
+      staleTime: 60_000,
+      gcTime: 5 * 60_000,
+      refetchOnWindowFocus: false,
+    },
+  },
+});
 
 /* RouteFallback moved to components/RouteFallback so Layout can mount its own
  * Suspense boundary around the content area. This outer boundary now only

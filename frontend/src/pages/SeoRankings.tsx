@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback, useMemo, useRef } from "react";
+import { useQuery } from "@tanstack/react-query";
 import { useNavigate } from "react-router-dom";
 import { apiClient } from "@/services/api";
 import { useDomainStore } from "@/stores/domainStore";
@@ -440,20 +441,46 @@ const SeoRankings = () => {
   }, [stopPolling, resetRefreshState, activeDomainId]);
 
   // Fetch SEO data — also detects active refresh on page load/reload
-  const fetchSeoData = useCallback(async () => {
-    if (!activeDomainId) {
-      setLoading(false);
-      return;
-    }
-    setLoading(true);
-    try {
+  // Cached per project, so returning to this page paints from cache instead of
+  // showing the full-page loader again — which read as the app reloading on
+  // every sidebar click.
+  //
+  // The result is MIRRORED into the existing `seoKeywords` / `overview` state
+  // rather than read straight off the query, because six places on this page
+  // mutate that state optimistically (add, delete, per-row refresh, reset).
+  // Rewriting those onto the cache is a much larger change than the loading
+  // problem warrants, so the query owns fetching and caching only.
+  const seoDataQuery = useQuery({
+    queryKey: ["seo-keywords", activeDomainId],
+    queryFn: async () => {
       const [keywordsRes, overviewRes] = await Promise.all([
         apiClient.getSeoKeywords({ domain_id: activeDomainId }) as Promise<SeoKeyword[]>,
         apiClient.getSeoDomainOverview(activeDomainId) as Promise<OverviewData>,
       ]);
-      setSeoKeywords((keywordsRes || []).map(mapKeywordForUI));
-      setOverview(overviewRes || null);
+      return { keywords: keywordsRes || [], overview: overviewRes || null };
+    },
+    enabled: !!activeDomainId,
+  });
 
+  useEffect(() => {
+    if (!seoDataQuery.data) return;
+    setSeoKeywords(seoDataQuery.data.keywords.map(mapKeywordForUI));
+    setOverview(seoDataQuery.data.overview);
+  }, [seoDataQuery.data]);
+
+  // isPending, not isFetching: a background refresh of cached data must not put
+  // the loader back over a page the user is already reading.
+  useEffect(() => {
+    setLoading(!!activeDomainId && seoDataQuery.isPending);
+  }, [activeDomainId, seoDataQuery.isPending]);
+
+  // Is a scrape already running for this project? Split out of the old
+  // fetchSeoData so it can run once when the page opens WITHOUT dragging a
+  // full data refetch along with it — that refetch is what made every visit
+  // show the loader.
+  const checkRefreshStatus = useCallback(async () => {
+    if (!activeDomainId) return;
+    try {
       // Check the refresh-status endpoint to see if a refresh is actually in progress.
       // Do two checks 5s apart to verify progress is actually moving (not stale state).
       if (!pollIntervalRef.current) {
@@ -497,15 +524,34 @@ const SeoRankings = () => {
         }
       }
     } catch (err) {
-      console.error("Failed to fetch SEO data:", err);
-    } finally {
-      setLoading(false);
+      console.error("Failed to check SEO refresh status:", err);
     }
   }, [activeDomainId, startRefreshPolling]);
 
+  // Refetch + re-probe. Still used by the reset and refresh flows, which need
+  // server truth immediately rather than whatever the cache holds.
+  const fetchSeoData = useCallback(async () => {
+    if (!activeDomainId) {
+      setLoading(false);
+      return;
+    }
+    try {
+      const { data } = await seoDataQuery.refetch();
+      if (data) {
+        setSeoKeywords(data.keywords.map(mapKeywordForUI));
+        setOverview(data.overview);
+      }
+      await checkRefreshStatus();
+    } catch (err) {
+      console.error("Failed to fetch SEO data:", err);
+    }
+  }, [activeDomainId, seoDataQuery, checkRefreshStatus]);
+
+  // Probe once per project when the page opens. The DATA comes from the cached
+  // query above, so this no longer forces a refetch on every visit.
   useEffect(() => {
-    fetchSeoData();
-  }, [fetchSeoData]);
+    checkRefreshStatus();
+  }, [checkRefreshStatus]);
 
   const handleRefresh = async () => {
     if (!activeDomainId || refreshing) return;

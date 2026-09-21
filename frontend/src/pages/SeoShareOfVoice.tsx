@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback, useMemo } from "react";
+import { useQuery } from "@tanstack/react-query";
 import { apiClient } from "@/services/api";
 import { useDomainStore } from "@/stores/domainStore";
 import { useToast } from "@/hooks/use-toast";
@@ -66,35 +67,32 @@ export default function SeoShareOfVoice() {
   const { selectedDomain } = useDomainStore();
   const activeDomainId = selectedDomain ? String(selectedDomain.id) : "";
 
-  const [data, setData] = useState<SovResponse | null>(null);
-  const [loading, setLoading] = useState(false);
   const [rivalsOnly, setRivalsOnly] = useState(true);
 
-  const load = useCallback(async () => {
-    if (!activeDomainId) {
-      setData(null);
-      return;
-    }
-    setLoading(true);
-    try {
-      setData(
-        (await apiClient.getSeoShareOfVoice({ domain_id: activeDomainId })) as SovResponse
-      );
-    } catch (err: any) {
-      toast({
-        title: "Could not load share of voice",
-        description: err?.message || "Please try again.",
-        variant: "destructive",
-      });
-      setData(null);
-    } finally {
-      setLoading(false);
-    }
-  }, [activeDomainId, toast]);
+  // Cached per project. Fetching into local state meant every visit discarded
+  // the result and showed the loader again, which read as the page reloading
+  // on each sidebar click.
+  const query = useQuery({
+    queryKey: ["seo-share-of-voice", activeDomainId],
+    queryFn: () =>
+      apiClient.getSeoShareOfVoice({ domain_id: activeDomainId }) as Promise<SovResponse>,
+    enabled: !!activeDomainId,
+  });
+
+  const data = query.data ?? null;
+  // isPending, not isFetching: a background refresh of cached data must not put
+  // the loader back over a page the user is already reading.
+  const loading = query.isPending && !!activeDomainId;
 
   useEffect(() => {
-    load();
-  }, [load]);
+    if (query.error) {
+      toast({
+        title: "Could not load share of voice",
+        description: query.error.message || "Please try again.",
+        variant: "destructive",
+      });
+    }
+  }, [query.error, toast]);
 
   const rows = useMemo(() => {
     if (!data) return [];
