@@ -340,6 +340,14 @@ OPENAI_INTERNAL_MODEL = config('OPENAI_INTERNAL_MODEL', default='gpt-4o-mini')
 # ever needs to diverge from the internal one again.
 OPENROUTER_INTERNAL_MODEL = config('OPENROUTER_INTERNAL_MODEL', default='openai/gpt-5-mini')
 
+# Free-model fallback. OFF in production: prompt generation uses the PAID model
+# only, and an exhausted balance surfaces as "the OpenRouter credit is over,
+# please recharge" instead of silently degrading onto the shared `:free` pool —
+# which is rate limited, lower quality, and reports its own 429 as if it were
+# the real fault. Same setting name as the backend, so one line per .env turns
+# free models off across both projects. See core.model_fallback.
+ALLOW_FREE_MODEL_FALLBACK = config('ALLOW_FREE_MODEL_FALLBACK', default=False, cast=bool)
+
 # ==================== GEMINI BACKEND: AI Studio vs Vertex AI ====================
 # 'aistudio' (default) keeps the API-key path via google.generativeai.
 # 'vertex' routes Gemini through Vertex AI on a GCP project so calls bill against

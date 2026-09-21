@@ -27,11 +27,17 @@ from typing import Any, Dict, List
 from django.conf import settings
 from django.utils import timezone
 
+from core.model_fallback import (
+    free_fallback_enabled,
+    free_primary_message,
+    paid_only_message,
+)
+
 logger = logging.getLogger(__name__)
 
-# Free OpenRouter models used as a fallback when the internal (paid) model 402s
-# on an empty balance, so "Generate with AI" keeps working at $0. The paid model
-# is always tried first, so a funded key still gets full paid quality.
+# Free OpenRouter models, used ONLY when ALLOW_FREE_MODEL_FALLBACK=True. Off in
+# production: an empty balance now reports "the OpenRouter credit is over"
+# rather than quietly finishing the run on a free model at lower quality.
 FREE_INTERNAL_MODELS = [
     # Verified against OpenRouter on 2026-09-17 with a real completion each:
     # every slug here answered, and the two that did not (nemotron-3.5-lightning
@@ -139,12 +145,22 @@ def _chat(client, model, system, user, *, max_tokens=2000, temperature=0.7):
         {"role": "system", "content": system},
         {"role": "user", "content": user},
     ]
-    # PAID internal model first, then FREE models on failure (e.g. a 402 on an
-    # empty balance). Reasoning-only params (extra_body) are for the paid
-    # reasoning model, so they are dropped on the free attempts.
+    # PAID internal model only. Free models are tried after it solely when
+    # ALLOW_FREE_MODEL_FALLBACK=True; in production an exhausted balance stops
+    # here and says so, rather than degrading onto the shared `:free` pool and
+    # reporting that pool's own 429 as the fault. Reasoning-only params
+    # (extra_body) are for the paid reasoning model, so they are dropped on any
+    # free attempt.
+    config_problem = free_primary_message(model, 'OPENROUTER_INTERNAL_MODEL')
+    if config_problem:
+        raise GenerationError(config_problem)
+
+    candidates = [model]
+    if free_fallback_enabled():
+        candidates += FREE_INTERNAL_MODELS
     resp = None
     last_exc = None
-    for idx, _m in enumerate([model] + FREE_INTERNAL_MODELS):
+    for idx, _m in enumerate(candidates):
         kwargs = dict(model=_m, messages=messages, temperature=temperature, max_tokens=max_tokens)
         if idx == 0:
             kwargs['extra_body'] = {"reasoning": {"effort": "low"}}
@@ -159,6 +175,8 @@ def _chat(client, model, system, user, *, max_tokens=2000, temperature=0.7):
             )
             continue
     if resp is None:
+        if not free_fallback_enabled():
+            raise GenerationError(paid_only_message(last_exc, model)) from last_exc
         raise GenerationError(f"LLM call failed: {last_exc}") from last_exc
 
     usage = getattr(resp, 'usage', None)

@@ -23,6 +23,7 @@ from .models import Domain, DomainAccess, InternalLinkMap, ReferenceDocument, Br
 from authentication.models import UserPermission, Account
 from authentication.services import ClientService, ClientDomainError
 from core.permissions import CanManageUsers
+from core.model_fallback import assert_paid_model, free_fallback_enabled, paid_only_error
 from .serializers import (
     DomainMinimalSerializer, DomainSerializer, DomainDetailSerializer,
     DomainAccessSerializer, DomainAccessCreateSerializer,
@@ -108,18 +109,26 @@ FREE_INTERNAL_MODELS = [
 
 
 def create_with_free_fallback(client, **kwargs):
-    """chat.completions.create — PAID internal model first, then FREE models.
+    """chat.completions.create on the PAID internal model.
 
-    A funded key gets full paid quality; a $0 balance still works on free models
-    instead of failing with a 402. Any ``model`` in kwargs is ignored in favour
-    of the configured internal model for the first attempt. Reasoning-only params
-    (extra_body) are dropped on the free attempts, since the free models are not
-    reasoning models. Raises the last error only if every model is unavailable.
+    Any ``model`` in kwargs is ignored in favour of the configured internal
+    model. Paid-only by default: a failure raises ``PaidModelUnavailable``
+    naming the real cause — recharge the OpenRouter key (402), or retry a busy
+    provider — instead of degrading domain analysis and keyword seeding onto
+    the shared `:free` pool. ``ALLOW_FREE_MODEL_FALLBACK=True`` restores the old
+    chain, where reasoning-only params (extra_body) are dropped on the free
+    attempts since the free models are not reasoning models.
+
+    The name is kept so existing call sites are untouched.
     """
     paid_model = getattr(settings, "OPENROUTER_INTERNAL_MODEL", "openai/gpt-5-mini")
+    assert_paid_model(paid_model, "OPENROUTER_INTERNAL_MODEL")
     kwargs.pop('model', None)
     last_err = None
-    for idx, model in enumerate([paid_model] + FREE_INTERNAL_MODELS):
+    candidates = [paid_model]
+    if free_fallback_enabled():
+        candidates += FREE_INTERNAL_MODELS
+    for idx, model in enumerate(candidates):
         call_kwargs = dict(kwargs)
         if idx > 0:
             call_kwargs.pop('extra_body', None)
@@ -130,6 +139,8 @@ def create_with_free_fallback(client, **kwargs):
             tag = "Paid" if idx == 0 else "Free"
             logger.warning("%s internal model %s unavailable: %s", tag, model, e)
             continue
+    if not free_fallback_enabled():
+        raise paid_only_error(last_err, paid_model)
     raise last_err or Exception("No internal model available")
 
 

@@ -24,6 +24,7 @@ from .tools import CHAT_TOOLS
 from .services import ChatbotService
 from domains.models import Domain, DomainAccess
 from alerts.models import AlertRule
+from core.model_fallback import assert_paid_model, free_fallback_enabled, paid_only_error
 
 logger = logging.getLogger(__name__)
 
@@ -38,13 +39,21 @@ FREE_CHAT_MODELS = [
 
 
 def _chat_completion_free(client, **kwargs):
-    """chat.completions.create — PAID model first, then FREE models as a
-    fallback. A funded key gets full paid quality; a $0 balance still works on
-    free models instead of failing with a 402. Raises the last error only if
-    every model is unavailable."""
+    """chat.completions.create on the PAID model.
+
+    Paid-only by default: a failure raises ``PaidModelUnavailable`` telling the
+    user to recharge the OpenRouter key (402) or to retry (anything else),
+    rather than answering from the shared `:free` pool at lower quality.
+    ``ALLOW_FREE_MODEL_FALLBACK=True`` restores the old free-model chain.
+
+    The name is kept so existing call sites are untouched."""
     paid_model = getattr(settings, "OPENROUTER_INTERNAL_MODEL", "openai/gpt-5-mini")
+    assert_paid_model(paid_model, "OPENROUTER_INTERNAL_MODEL")
     last_err = None
-    for idx, model in enumerate([paid_model] + FREE_CHAT_MODELS):
+    candidates = [paid_model]
+    if free_fallback_enabled():
+        candidates += FREE_CHAT_MODELS
+    for idx, model in enumerate(candidates):
         try:
             return client.chat.completions.create(model=model, **kwargs)
         except Exception as e:
@@ -52,6 +61,8 @@ def _chat_completion_free(client, **kwargs):
             tag = "Paid" if idx == 0 else "Free"
             logger.warning("%s chat model %s unavailable: %s", tag, model, e)
             continue
+    if not free_fallback_enabled():
+        raise paid_only_error(last_err, paid_model)
     raise last_err or Exception("No chat model available")
 
 
