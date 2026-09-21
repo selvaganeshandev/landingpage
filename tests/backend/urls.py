@@ -8,4 +8,5 @@ urlpatterns = [
     path("alerts/", include("alerts.urls")),
     path("audits/", include("audits.urls")),
     path("prompts/", include("prompts.urls")),
+    path("integrations/", include("integrations.urls")),
 ]
