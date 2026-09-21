@@ -12,6 +12,7 @@ from .google_oauth import (
     get_gsc_sites,
     select_gsc_site,
 )
+from .google_proxy import ga4_run_report, gsc_search_analytics
 
 router = DefaultRouter()
 router.register(r'integrations', IntegrationViewSet, basename='integration')
@@ -30,6 +31,10 @@ urlpatterns = [
     # Google Search Console endpoints
     path('google/search-console/sites/', get_gsc_sites, name='get_gsc_sites'),
     path('google/search-console/select-site/', select_gsc_site, name='select_gsc_site'),
+    # Raw report proxies for external consumers (service API keys). GET-only;
+    # caller describes dimensions/metrics/filters, Google returns the rows.
+    path('google/ga4/run-report/', ga4_run_report, name='ga4_run_report'),
+    path('google/search-console/query/', gsc_search_analytics, name='gsc_search_analytics'),
     
     # Traffic insights endpoints
     path('start/', start_traffic_processing, name='start_traffic_processing'),  # Deprecated - use engine endpoints

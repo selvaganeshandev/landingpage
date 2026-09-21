@@ -115,6 +115,13 @@ run 1, mention 6) are overridable via `SMOKE_*` env vars.
 | M6 organic reports | `list_report_sheets`, `get_report_sheet_data` (GSC/GA; empty without Google integrations) |
 | M7 keyword universe | `list_keyword_universe`, `get_active_generation_run`, `get_generation_run` |
 
+Not wrapped: the raw GA4 / Search Console proxies
+(`/integrations/google/ga4/run-report/`, `/integrations/google/search-console/query/`).
+They accept caller-defined dimensions, metrics and filters and hit Google live
+on every call — see `docs/GOOGLE_DATA_API.md`. Wrap them here only with a
+fixed, small parameter surface so a tool call cannot burn the property's GA4
+quota.
+
 Normalization applied throughout (`normalize.py`): display fields stripped
 from mentions, Tailwind classes scrubbed from analytics, sentiment tagged with
 its scale, camelCase gap keys converted to snake_case, `/keywords/` filtered
