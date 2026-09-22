@@ -8,6 +8,7 @@
  */
 import { useState } from "react";
 import { cleanDomain, emailMatchesDomain, isDomain, isEmail, titleCase } from "@/lib/audit";
+import { freeEmailProvider, workEmailMessage } from "@/lib/free-email";
 
 export interface FormValues {
   domain: string;
@@ -15,7 +16,7 @@ export interface FormValues {
   email: string;
 }
 
-const EMAIL_HINT = "Must be on your website's domain — that's how we know it's really you.";
+const EMAIL_HINT = "Your work email, on your website's domain — no Gmail or Yahoo. That's how we know it's really you.";
 
 export function AuditForm({ busy, serverError, onSubmit, prefill }: {
   /** From the email-blast link: ?d=<domain>&e=<email>&b=<brand>. */
@@ -43,7 +44,13 @@ export function AuditForm({ busy, serverError, onSubmit, prefill }: {
     if (!isDomain(d)) next.domain = "Enter your website, like yourbrand.com";
     if (b.length < 2) next.brand = "Tell us what to call you";
     if (!isEmail(m)) next.email = "Enter a valid email address";
-    else if (!next.domain && !emailMatchesDomain(m, d)) next.email = `Use an email on ${d} — that's how we know it's really you.`;
+    else {
+      // Name the provider before the domain rule: "use an email on acme.com"
+      // reads like a bug to someone who just typed their own Gmail.
+      const provider = freeEmailProvider(m);
+      if (provider) next.email = workEmailMessage(provider);
+      else if (!next.domain && !emailMatchesDomain(m, d)) next.email = `Use an email on ${d} — that's how we know it's really you.`;
+    }
     setErrs(next);
     if (Object.keys(next).length) {
       const first = (["domain", "brand", "email"] as const).find((k) => next[k]);

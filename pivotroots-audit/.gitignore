@@ -5,3 +5,9 @@ out
 next-env.d.ts
 .env*.local
 .DS_Store
+
+# The repo root ignores every `lib/` directory (a Python build artefact there).
+# This app's src/lib is source, so take it back - without this the page's API
+# client, stage table and config are silently left out of every commit.
+!src/lib/
+!src/lib/**

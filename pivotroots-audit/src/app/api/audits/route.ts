@@ -9,6 +9,7 @@
 import type { NextRequest } from "next/server";
 import { API_URL, DEFAULT_COUNTRY, forwardHeaders, relayJson, unavailable } from "@/lib/backend";
 import { cleanDomain, emailMatchesDomain, isDomain, isEmail } from "@/lib/audit";
+import { freeEmailProvider, workEmailMessage } from "@/lib/free-email";
 
 export const dynamic = "force-dynamic";
 
@@ -27,6 +28,8 @@ export async function POST(req: NextRequest) {
 
   if (!isDomain(domain)) return Response.json({ error: "Enter your website, like yourbrand.com" }, { status: 400 });
   if (!isEmail(email)) return Response.json({ error: "Enter a valid work email address." }, { status: 400 });
+  const freeProvider = freeEmailProvider(email);
+  if (freeProvider) return Response.json({ error: workEmailMessage(freeProvider) }, { status: 400 });
   if (!emailMatchesDomain(email, domain)) {
     return Response.json({ error: `Use an email on ${domain} — that's how we know it's really you.` }, { status: 400 });
   }
