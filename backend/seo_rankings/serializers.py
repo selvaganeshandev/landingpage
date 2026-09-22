@@ -53,38 +53,47 @@ class SeoKeywordRankSerializer(serializers.ModelSerializer):
         ]
 
 
+# Fields the rankings list never reads. Each is declared in the page's
+# TypeScript interface and then never accessed off a list row — the same
+# finding, checked the same way, as the three SERP blobs that were dropped
+# before.
+#
+# Verified against mapKeywordForUI in SeoRankings.tsx, the only place a list
+# row is turned into something the table renders. It reads 26 fields; the
+# endpoint was sending 44. `kw.keyword` does appear in that file, but on the
+# MAPPED object, where it holds keyword_text — not this serializer's `keyword`,
+# which is the foreign key id. `target_url` carries its own note in the page:
+# "unset on all 3,140 rows".
+#
+# Measured on domain 157 (2,428 keywords), 200 rows sampled:
+#   44 fields -> 1,114 B per row -> 2,641 KB for the page
+#   26 fields ->   640 B per row -> 1,517 KB      (-43%)
+#
+# Anything needing these should call the keyword detail endpoint, which still
+# uses the full serializer.
+_LIST_UNUSED_FIELDS = (
+    'snippets_details', 'keyword_snippet', 'cannibalisation',
+    'keyword', 'domain', 'domain_name',
+    'max_tracked_rank', 'rank_since_start',
+    'month_val', 'month_mark', 'status_from_start',
+    'review', 'total_rating', 'total_review',
+    'target_url', 'search_results',
+    'geo_target', 'geo_target_uule',
+    'auto_refresh_count',
+    'created_at', 'modified_at',
+)
+
+
 class SeoKeywordRankListSerializer(SeoKeywordRankSerializer):
-    """The rankings list, without the per-keyword SERP blobs.
+    """The rankings list, trimmed to what the page actually renders.
 
-    Identical to SeoKeywordRankSerializer minus three fields the list page
-    never reads — it declares them in its TypeScript interface but accesses
-    none of them; only the keyword detail page does.
-
-    They dominate the response. Measured on the largest domain (1,765
-    keywords): 3.4 KB per row, of which
-
-        snippets_details  1,841 B   (~9.4 competitors at ~193 B each)
-        keyword_snippet     529 B
-        cannibalisation       5 B
-
-    is 70% sent and thrown away — 5.87 MB for one page load. Dropping them
-    takes a row to roughly 1 KB, so 3,000 keywords is ~3 MB rather than ~10 MB.
-
-    This also decouples the list from competitor storage depth. Competitors
-    used to be capped at rank 10; they are now stored to the full scraped depth
-    (DATABLUE_PAGES x ~10) so the detail page's "After You" filter works, which
-    would have grown snippets_details to ~5.8 KB per row and taken a
-    3,000-keyword domain past 20 MB. The list no longer sends the field at all,
-    so scrape depth can grow without touching this page.
-
-    Anything needing these fields should call the keyword detail endpoint,
-    which still uses the full serializer.
+    See _LIST_UNUSED_FIELDS above for what is dropped and why.
     """
 
     class Meta(SeoKeywordRankSerializer.Meta):
         fields = [
             f for f in SeoKeywordRankSerializer.Meta.fields
-            if f not in ('snippets_details', 'keyword_snippet', 'cannibalisation')
+            if f not in _LIST_UNUSED_FIELDS
         ]
 
 
