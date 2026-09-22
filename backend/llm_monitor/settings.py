@@ -331,6 +331,21 @@ CONTENT_FREE_MAX_TOKENS = config('CONTENT_FREE_MAX_TOKENS', default=8192, cast=i
 # core.model_fallback for the policy this switch drives.
 ALLOW_FREE_MODEL_FALLBACK = config('ALLOW_FREE_MODEL_FALLBACK', default=False, cast=bool)
 
+# Competitor-informed outlines. The outline used to be written from the title
+# and keywords alone; it now also sees the heading structures of the pages that
+# already rank for the keyword, read from the SERP stored against that keyword
+# and scraped through DataBlue. See content/competitor_outline.py.
+#
+# Every failure returns no brief and the outline is built exactly as before, so
+# this is safe to leave on. Turn it off to stop the scrape entirely (it costs
+# DataBlue calls), lower MAX_PAGES to scrape fewer, or raise DEADLINE if pages
+# are being dropped for slowness — the scrape runs against one wall-clock
+# budget, so DEADLINE is the worst case, not the sum of the fetches.
+CONTENT_COMPETITOR_OUTLINE_ENABLED = config(
+    'CONTENT_COMPETITOR_OUTLINE_ENABLED', default=True, cast=bool)
+CONTENT_COMPETITOR_MAX_PAGES = config('CONTENT_COMPETITOR_MAX_PAGES', default=5, cast=int)
+CONTENT_COMPETITOR_DEADLINE = config('CONTENT_COMPETITOR_DEADLINE', default=45, cast=int)
+
 # Multi-model humanisation. The guarded score-refine loop rotates each refine
 # pass through these models (comma-separated slugs) instead of always using the
 # paid Claude model — a different model per pass breaks the single-model writing
