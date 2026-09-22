@@ -128,6 +128,7 @@ def _create(request):
     try:
         audit, reused = services.create_audit(
             data['url'], country=data['country'], user=user, email=data['email'],
+            brand_name=data['brand_name'],
             ip=services.client_ip(request), force=data['force'], via_api_key=via_api_key,
         )
     except services.AuditRefused as exc:

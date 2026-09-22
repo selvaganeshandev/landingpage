@@ -110,6 +110,14 @@ class CreateTests(_Base):
         self.assertIn(f'/audits/public/{audit.public_token}/', r.data['status_url'])
         self.assertFalse(r.data['reused'])
 
+    def test_brand_name_from_the_form_is_kept(self):
+        r = _client().post('/audits/', {'url': 'hdfcbank.com', 'brand_name': '  HDFC Bank  '}, format='json')
+        self.assertEqual(r.status_code, 201, r.data)
+        self.assertEqual(Audit.objects.get().brand_name, 'HDFC Bank')
+        # Optional: the old two-field form still works.
+        self.assertEqual(_client().post('/audits/', {'url': 'other.com'}, format='json').status_code, 201)
+        self.assertEqual(Audit.objects.get(host='other.com').brand_name, '')
+
     def test_forwarded_ip_is_used_behind_proxy(self):
         _client().post('/audits/', {'url': 'hdfcbank.com'}, format='json',
                        HTTP_X_FORWARDED_FOR='198.51.100.7, 10.0.0.1', REMOTE_ADDR='10.0.0.1')
@@ -223,6 +231,33 @@ class PublicTests(_Base):
             self.assertNotIn(leaked, r.data)
         audit.refresh_from_db()
         self.assertEqual(audit.opens, 0)
+
+    def test_live_feed_while_running_then_empty_when_done(self):
+        audit = Audit.objects.create(host='x.com', website='https://x.com', brand_name='X')
+        audit.set_stage('engines', done=2, total=48)
+        AuditPromptResult.objects.create(
+            audit=audit, prompt_index=1, prompt_text='Best X alternative?', platform='ChatGPT',
+            status='ok', is_mention=True, is_cited=True, position=2,
+        )
+        AuditPromptResult.objects.create(
+            audit=audit, prompt_index=1, prompt_text='Best X alternative?', platform='Perplexity',
+            status='ok', is_mention=False, is_cited=False, competitors_mentioned=['Rival Co'],
+            cited_domains=['rival.com', 'x.com'],
+        )
+        AuditPromptResult.objects.create(
+            audit=audit, prompt_index=2, prompt_text='Broken', platform='Grok', status='failed',
+        )
+        r = _client().get(f'/audits/public/{audit.public_token}/')
+        live = r.data['live']
+        # Only answered rows, newest first, and never the response text.
+        self.assertEqual([x['engine'] for x in live], ['Perplexity', 'ChatGPT'])
+        self.assertEqual(live[0]['result'], 'absent')
+        self.assertEqual(live[0]['instead'], 'Rival Co')
+        self.assertEqual(live[1]['result'], 'cited')
+        self.assertEqual(live[1]['position'], 2)
+        self.assertNotIn('response_text', live[0])
+        Audit.objects.filter(pk=audit.pk).update(status='DONE', stage='publish', report={'geo': {}})
+        self.assertEqual(_client().get(f'/audits/public/{audit.public_token}/').data['live'], [])
 
     def test_done_returns_report_and_counts_opens(self):
         audit = _done_audit()

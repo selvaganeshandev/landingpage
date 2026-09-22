@@ -456,7 +456,13 @@ class AuditProcessor:
                 competitors.append({'name': name, 'host': normalize_host(site)})
 
         from core.audit_scoring import normalize_host
-        audit.brand_name = (data.get('brand_name') or '').strip()[:255] or audit.host.split('.')[0].title()
+        # A name the requester typed on the form wins over the model's guess:
+        # it is what they call themselves, and what mention detection looks for.
+        audit.brand_name = (
+            (audit.brand_name or '').strip()[:255]
+            or (data.get('brand_name') or '').strip()[:255]
+            or audit.host.split('.')[0].title()
+        )
         audit.industry = (data.get('industry') or '').strip()[:255]
         audit.competitors = competitors[:5]
         audit.tech_stack = _detect_stack(html)

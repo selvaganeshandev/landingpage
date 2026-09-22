@@ -94,7 +94,7 @@ def _check_caps(ip, privileged):
         raise AuditRefused('You have run the maximum number of audits for today.', status=429)
 
 
-def create_audit(url, *, country='us', user=None, email='', ip=None, source=None, force=False, via_api_key=False):
+def create_audit(url, *, country='us', user=None, email='', brand_name='', ip=None, source=None, force=False, via_api_key=False):
     """Validate, guard, create the row and dispatch it. Returns (audit, reused).
 
     `reused` is True when a recent audit of the same host was returned instead
@@ -110,6 +110,7 @@ def create_audit(url, *, country='us', user=None, email='', ip=None, source=None
 
     country = (country or 'us').strip().lower()[:2] or 'us'
     email = (email or '').strip()[:254]
+    brand_name = (brand_name or '').strip()[:255]
     privileged = bool(user is not None and getattr(user, 'is_authenticated', False)
                       and getattr(user, 'role', '') in ('admin', 'super_admin'))
     if via_api_key:
@@ -132,6 +133,7 @@ def create_audit(url, *, country='us', user=None, email='', ip=None, source=None
         website=f'https://{host}',
         country=country,
         source=source,
+        brand_name=brand_name,
         requested_by=user if (user is not None and getattr(user, 'is_authenticated', False)) else None,
         requester_email=email,
         requester_ip=ip,

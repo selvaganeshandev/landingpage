@@ -57,6 +57,9 @@ class PublicAuditSerializer(_ProgressMixin, serializers.ModelSerializer):
     report = serializers.SerializerMethodField()
     seo_enabled = serializers.SerializerMethodField()
     landing_url = serializers.SerializerMethodField()
+    live = serializers.SerializerMethodField()
+
+    LIVE_ROWS = 8
 
     class Meta:
         model = Audit
@@ -65,6 +68,7 @@ class PublicAuditSerializer(_ProgressMixin, serializers.ModelSerializer):
             'landing_url',
             'competitors', 'tech_stack',
             'status', 'stage', 'stage_index', 'stage_total', 'stage_label', 'progress', 'stage_detail',
+            'live',
             'error',
             'geo_score', 'geo_stage', 'appearances', 'cited_runs', 'total_runs',
             'engines_preferred', 'engines_total', 'share_of_voice',
@@ -98,6 +102,34 @@ class PublicAuditSerializer(_ProgressMixin, serializers.ModelSerializer):
         if obj.status != 'FAIL':
             return ''
         return 'This audit could not be completed. Please try again later.'
+
+    def get_live(self, obj):
+        """The newest engine answers while the audit runs — the landing page's
+        "watch it run" feed. Empty once it is DONE or FAIL: the report carries
+        the full evidence, and a finished feed would just be a stale replay.
+        No response text; only what the feed row shows.
+        """
+        if obj.status not in ('INIT', 'PROC'):
+            return []
+        from .models import AuditPromptResult
+        rows = (
+            AuditPromptResult.objects.filter(audit=obj, status='ok')
+            .order_by('-created_at', '-id')[:self.LIVE_ROWS]
+            .values('platform', 'prompt_text', 'is_mention', 'is_cited', 'position', 'competitors_mentioned', 'cited_domains', 'created_at')
+        )
+        out = []
+        for r in rows:
+            rivals = r.get('competitors_mentioned') or []
+            cited = [h for h in (r.get('cited_domains') or []) if h and obj.host not in h]
+            out.append({
+                'engine': r['platform'],
+                'prompt': r['prompt_text'],
+                'result': 'cited' if r['is_cited'] else 'mentioned' if r['is_mention'] else 'absent',
+                'position': int(r['position']) if r['position'] is not None else None,
+                'instead': rivals[0] if rivals else (cited[0] if cited else ''),
+                'at': r['created_at'].isoformat() if r.get('created_at') else '',
+            })
+        return out
 
     def get_report(self, obj):
         return obj.report if obj.status == 'DONE' else None
@@ -150,4 +182,8 @@ class AuditCreateSerializer(serializers.Serializer):
     url = serializers.CharField(max_length=2048)
     country = serializers.CharField(max_length=2, required=False, default='us')
     email = serializers.EmailField(required=False, allow_blank=True, default='')
+    # What the visitor calls the brand. The profile stage keeps it when set,
+    # so mention detection looks for the name they use, not the one the
+    # model guesses from the homepage.
+    brand_name = serializers.CharField(max_length=255, required=False, allow_blank=True, default='')
     force = serializers.BooleanField(required=False, default=False)
