@@ -129,6 +129,29 @@ class ClaudeContentGenerator:
                 org = Organisation.objects.filter(id=org_id).only(
                     'openrouter_api_key').first()
                 api_key = (org.openrouter_key or None) if org else None
+                # Same guard as the Content Generation key above, which this
+                # branch was missing. Anything that is not an sk-or- key sent to
+                # OpenRouter fails, and a value that is not header-safe fails
+                # worse: `openrouter_key` returns the raw Fernet ciphertext
+                # (gAAAAAB...) when decryption fails, which is dropped from the
+                # Authorization header entirely, so the provider answers
+                # "Missing Authentication header" rather than "invalid key" and
+                # the real cause — a mismatched API_KEY_ENCRYPTION_SECRET — is
+                # nowhere in the message.
+                #
+                # Decryption fails exactly when a database is restored onto a
+                # host whose secret differs from the one that encrypted it,
+                # which is the normal state of a developer machine holding a
+                # copy of production data.
+                if api_key and not api_key.startswith(OPENROUTER_KEY_PREFIX):
+                    logger.warning(
+                        "Org %s OpenRouter key is not an sk-or- key (starts %r). "
+                        "If it looks like ciphertext, API_KEY_ENCRYPTION_SECRET "
+                        "does not match the secret it was encrypted with. "
+                        "Ignoring it and using the system OPENROUTER_API_KEY.",
+                        org_id, api_key[:7],
+                    )
+                    api_key = None
             except Exception as e:
                 logger.warning(f"Could not resolve org OpenRouter key: {e}")
                 api_key = None
@@ -3184,6 +3207,19 @@ The content below was extracted from the reference URLs the user provided.
 **PRIORITY INSTRUCTIONS (from content creator — adapt the outline structure to honor these):**
 {additional_instructions}
 """
+
+        # What the pages already ranking for this keyword actually cover. Built
+        # by content.competitor_outline from the SERP stored against the tracked
+        # keyword, scraped through DataBlue. Empty string whenever that is not
+        # available — no tracked keyword, no scrape key, a slow page — in which
+        # case the outline is built exactly as it was before this existed.
+        #
+        # Placed AFTER the creator's priority instructions on purpose: evidence
+        # informs the structure, but a human who has asked for something
+        # specific still outranks it.
+        competitor_brief = params.get('competitor_brief', '')
+        if competitor_brief:
+            user_prompt += competitor_brief
 
         user_prompt += f"""
 Return a JSON array with this exact structure:

@@ -1,5 +1,6 @@
 import { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
+import { ALL_PLATFORMS, estimateRunCost } from "@/lib/sweep-cadence";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
@@ -160,7 +161,8 @@ export default function OrganizationSettings() {
   // Confirm dialogs
   const [confirmDomainId, setConfirmDomainId] = useState<number | null>(null);
   // "Track Prompts" per-domain refresh (confirm dialog target + in-flight flag)
-  const [trackPromptsDomain, setTrackPromptsDomain] = useState<{ id: number; name: string } | null>(null);
+  const [trackPromptsDomain, setTrackPromptsDomain] = useState<
+    { id: number; name: string; promptCount: number } | null>(null);
   const [trackingPrompts, setTrackingPrompts] = useState(false);
   const [confirmMemberId, setConfirmMemberId] = useState<number | null>(null);
   const [confirmInvitationId, setConfirmInvitationId] = useState<string | null>(null);
@@ -1758,7 +1760,11 @@ export default function OrganizationSettings() {
                           size="sm"
                           className="gap-1.5 h-8"
                           disabled={isProcessing || isTrackingPrompts}
-                          onClick={() => setTrackPromptsDomain({ id: domain.id, name: domain.name })}
+                          onClick={() => setTrackPromptsDomain({
+                            id: domain.id,
+                            name: domain.name,
+                            promptCount: (domain as { prompt_count?: number }).prompt_count ?? 0,
+                          })}
                           title="Re-run this domain's prompts across all platforms (costs tokens)"
                         >
                           <RefreshCw className="h-3.5 w-3.5" />
@@ -2988,11 +2994,53 @@ export default function OrganizationSettings() {
         <DialogContent>
           <DialogHeader>
             <DialogTitle>Track prompts for "{trackPromptsDomain?.name}"?</DialogTitle>
-            <DialogDescription>
-              This re-runs ALL of this domain's prompts across ChatGPT, Claude and
-              Perplexity to refresh their mention data. It takes a few minutes and
-              costs OpenRouter tokens — every prompt is re-checked on every platform.
-              Proceed only if that's OK.
+            <DialogDescription asChild>
+              <div className="space-y-3">
+                <p>
+                  This re-runs ALL of this domain's prompts across ChatGPT, Claude,
+                  Gemini and Perplexity to refresh their mention data. It takes a few
+                  minutes and spends OpenRouter credit — every prompt is re-checked on
+                  every platform.
+                </p>
+                {/* Always shown, including at zero: "nothing to run" is the
+                    answer a project with no prompts needs, and hiding the box
+                    left the dialog looking like the estimate had failed to
+                    load. */}
+                {trackPromptsDomain && (
+                  <div className="rounded-md border border-border bg-muted/40 px-3 py-2 text-sm">
+                    {trackPromptsDomain.promptCount > 0 ? (
+                      <>
+                        <span className="font-medium text-foreground">
+                          {trackPromptsDomain.promptCount.toLocaleString()} prompts
+                        </span>
+                        {` x ${ALL_PLATFORMS.length} platforms = `}
+                        <span className="font-medium text-foreground">
+                          {(trackPromptsDomain.promptCount * ALL_PLATFORMS.length).toLocaleString()} calls
+                        </span>
+                        {" · approx "}
+                        <span className="font-semibold text-foreground">
+                          ${estimateRunCost(trackPromptsDomain.promptCount).toFixed(2)}
+                        </span>
+                        <p className="mt-1 text-xs text-muted-foreground">
+                          An estimate from measured answer sizes, not a quote. The run
+                          fails and stores nothing if the OpenRouter balance cannot
+                          cover it.
+                        </p>
+                      </>
+                    ) : (
+                      <>
+                        <span className="font-medium text-foreground">
+                          No prompts to track · approx $0.00
+                        </span>
+                        <p className="mt-1 text-xs text-muted-foreground">
+                          This project has no prompts yet, so a run would do nothing.
+                          Add prompts first.
+                        </p>
+                      </>
+                    )}
+                  </div>
+                )}
+              </div>
             </DialogDescription>
           </DialogHeader>
           <DialogFooter>

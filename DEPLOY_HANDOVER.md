@@ -347,9 +347,41 @@ grep -rlo 'promtmaxxservice.rankmax.io' dist/assets/*.js | head -1   # must prin
 
 ### 3d. Upload
 
+**`--delete` removes the PREVIOUS build's chunks, and that breaks tabs that are
+already open.** Vite content-hashes every filename, so a browser still running
+the old `index.html` asks for chunk names that no longer exist and gets 404s on
+charts, calendars and the stylesheet. It looks like the app half-broke.
+
+Seen on 2026-09-22: two clients hit
+`open() "/var/www/html/assets/LineChart-5nrlpL32.js" failed` about 45 minutes
+after a deploy. New visitors were fine; anyone mid-session was not.
+
+So upload WITHOUT `--delete`, then prune old builds separately once sessions
+have turned over:
+
 ```bash
-rsync -az --delete -e "ssh -i ~/.ssh/llm_monitor" dist/ root@64.227.190.42:/var/www/html/
+rsync -az -e "ssh -i ~/.ssh/llm_monitor" dist/ root@64.227.190.42:/var/www/html/
 ssh promptmaxx 'rm -f /var/www/html/.DS_Store'
+```
+
+Assets are content-hashed, so leaving the old ones costs a few MB and nothing
+else — a stale chunk is never served to a new visitor, because the new
+`index.html` does not reference it.
+
+**No rsync on Windows?** Git Bash does not ship it. Tar, then extract OVER the
+existing directory rather than swapping it out, which keeps the old chunks for
+the same reason:
+
+```bash
+cd frontend && tar -czf /tmp/pmx-dist.tar.gz -C dist .
+scp /tmp/pmx-dist.tar.gz promptmaxx:/tmp/
+ssh promptmaxx 'tar -xzf /tmp/pmx-dist.tar.gz -C /var/www/html && rm -f /var/www/html/.DS_Store'
+```
+
+Prune later, once nobody is on the old build:
+
+```bash
+ssh promptmaxx 'find /var/www/html/assets -type f -mtime +7 -delete'
 ```
 
 ### 3e. Confirm the new bundle is live
@@ -369,7 +401,7 @@ It must match the filename `npm run build` printed in 3b.
 
 | Layer | Command |
 |---|---|
-| Frontend | `rsync -a --delete /var/www/html.bak-<ts>/ /var/www/html/` |
+| Frontend | `rsync -a --delete /var/www/html.bak-<ts>/ /var/www/html/`<br>No rsync, or want it instant: `mv /var/www/html /var/www/html.bad && mv /var/www/html.old /var/www/html`<br>`--delete` IS right here — a rollback is a full restore, unlike a deploy. |
 | Backend / engine | `git reset --hard <sha from 2a>` then restart the five services |
 | Migrations | `manage.py migrate <app> <previous_number>` — schema only |
 | Dropped data | `pg_restore` from the 2c snapshot; there is no other route |

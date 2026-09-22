@@ -78,6 +78,30 @@ const CALL_COST: Record<string, number> = {
 };
 const FALLBACK_CALL_COST = 0.0214;
 
+/** The platforms a run fans out to when the caller does not know which are
+ *  enabled. Track Prompts is triggered from Organization Settings, which does
+ *  not load the per-project platform list, and production has all four on — so
+ *  this is the honest default for an estimate shown before the run starts. */
+export const ALL_PLATFORMS = ["ChatGPT", "Claude", "Google Gemini", "Perplexity"];
+
+/**
+ * Rough dollar cost of re-running `promptCount` prompts across `platforms`.
+ *
+ * Shown in the Track Prompts confirmation so the cost is known BEFORE the run,
+ * not discovered afterwards. Uses the same CALL_COST table as the Schedules
+ * screen, so the two can never quote different numbers for the same work.
+ *
+ * An estimate, not a quote: CALL_COST is built from measured median output
+ * sizes and the provider rates of a given day, so a long-answering prompt costs
+ * more than this and a short one less.
+ */
+export const estimateRunCost = (
+  promptCount: number,
+  platforms: string[] = ALL_PLATFORMS,
+): number =>
+  Math.max(0, promptCount || 0) *
+  platforms.reduce((sum, p) => sum + (CALL_COST[p] ?? FALLBACK_CALL_COST), 0);
+
 /** Credits one sweep of this project costs: every prompt, on every platform. */
 export const creditsPerSweep = (domain: Domain, platforms: string[]): number =>
   (domain.prompt_count ?? 0) *
