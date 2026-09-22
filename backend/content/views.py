@@ -34,6 +34,7 @@ from .ai_detection import (
     save_detection,
     strip_html_tags,
 )
+from .competitor_outline import build_competitor_brief
 from .humanise_validation import (
     validate_pass_output as _validate_pass_output,
     burstiness as _burstiness,
@@ -353,6 +354,14 @@ def generate_outline(request):
         # content-generation step already applies).
         if generation_params.get('references'):
             generation_params['references'] = _enrich_references_with_content(generation_params['references'])
+
+        # What the pages currently ranking for this keyword actually cover.
+        # Returns '' for every failure mode — no tracked keyword, no DataBlue
+        # key, a scrape past its deadline — so the outline is produced exactly
+        # as before whenever the evidence is not available.
+        generation_params['competitor_brief'] = build_competitor_brief(
+            domain.id, validated_data['keywords'],
+        )
 
         # Generate outline
         logger.info(f"Generating outline for domain {domain.id}: {validated_data['title']}")

@@ -1107,27 +1107,51 @@ class PromptAnalyticsProcessor:
                 # Get previous metrics for comparison (7 days ago)
                 previous_date = timezone.now() - timedelta(days=7)
 
-                # Get previous snapshot if exists
+                # Get previous snapshot if exists.
+                #
+                # The column is snapshot_date; start_date does not exist on
+                # DomainMetricSnapshot and raised FieldError on every single
+                # run. Because this whole block is wrapped in try/except that
+                # surfaced only as a log line while alert rules silently never
+                # evaluated at all.
+                #
+                # platform is null on the domain-wide aggregate row. Without
+                # that filter this picks whichever per-platform snapshot sorts
+                # first and compares domain-wide metrics against one platform's
+                # numbers.
                 from shared_models.models import DomainMetricSnapshot
                 previous_snapshot = DomainMetricSnapshot.objects.filter(
                     domain_id=domain.id,
                     period_type='weekly',
-                    start_date__lte=previous_date
-                ).order_by('-start_date').first()
+                    platform__isnull=True,
+                    snapshot_date__lte=previous_date.date()
+                ).order_by('-snapshot_date').first()
 
                 # Calculate negative sentiment percentage
                 negative_sentiment_percent = 0
                 previous_negative_sentiment_percent = 0
 
-                if domain_analytics.exists():
-                    # Calculate average negative percentage across all platform analytics
-                    neg_avg = domain_analytics.aggregate(
-                        avg_neg=Avg('negative_sentiment_percentage')
-                    )
-                    negative_sentiment_percent = float(neg_avg['avg_neg'] or 0)
+                # Share of this domain's answers that came back negative.
+                #
+                # There is no negative_sentiment_percentage column to average —
+                # not on PromptAnalytics and not on DomainMetricSnapshot — so
+                # the old Avg() was a second FieldError waiting behind the
+                # first. sentiment_category is the field that actually records
+                # this, as 'positive' / 'neutral' / 'negative'.
+                total_analytics = domain_analytics.count()
+                if total_analytics:
+                    negative_count = domain_analytics.filter(
+                        sentiment_category='negative').count()
+                    negative_sentiment_percent = negative_count / total_analytics * 100
 
-                if previous_snapshot:
-                    previous_negative_sentiment_percent = float(previous_snapshot.negative_sentiment_percentage or 0)
+                # No snapshot column stores negative sentiment, so there is no
+                # historical figure to compare against. Hold the previous value
+                # equal to the current one — the same fallback every other
+                # metric below uses when a snapshot is missing — so the delta is
+                # zero and the rule stays quiet. Leaving it at 0 would make
+                # _check_sentiment_negative report a spike "from 0.0%" for any
+                # domain with ordinary negative sentiment.
+                previous_negative_sentiment_percent = negative_sentiment_percent
 
                 # Prepare metrics dict
                 metrics = {
@@ -1140,7 +1164,11 @@ class PromptAnalyticsProcessor:
                     'average_position': float(domain.average_position or 0),
                     'previous_average_position': float(previous_snapshot.average_position if previous_snapshot else domain.average_position or 0),
                     'total_mentions': int(domain.total_mentions or 0),
-                    'previous_total_mentions': int(previous_snapshot.total_mentions if previous_snapshot else domain.total_mentions or 0),
+                    # The snapshot's column is `mentions` (running total as at
+                    # snapshot_date); `total_mentions` is a Domain field, not a
+                    # snapshot one, and would have raised AttributeError the
+                    # first time a snapshot was actually found.
+                    'previous_total_mentions': int(previous_snapshot.mentions if previous_snapshot else domain.total_mentions or 0),
                     'time_window_hours': 168,  # 7 days
                 }
 
@@ -1215,7 +1243,36 @@ class PromptAnalyticsProcessor:
                         # same "only ungrouped keywords" guard.
 
                     else:
-                        logger.info(f"Domain {domain.id} already in status {domain_fresh.processing_status}, skipping")
+                        # Every group finished but the domain is not PROC, which
+                        # is what a Track Prompts run looks like: that path
+                        # deliberately never flips the domain to PROC —
+                        # a48bfac5, "flipping it would hide the dashboards and
+                        # can trigger keyword prompt generation on completion" —
+                        # so the branch above is skipped and tracked_at kept
+                        # whatever the last FULL processing run stamped. The
+                        # prompts and answers HAD refreshed; only the row's
+                        # "last tracked" time had not, which reads as though
+                        # nothing ran. Our Shopee showed this as an empty
+                        # track_message after a clean 200-answer run.
+                        #
+                        # So record the time and what happened, and touch
+                        # nothing else. processing_status is left exactly as it
+                        # was, which keeps the dashboards visible, and the
+                        # unused-keywords branch above is not taken, which is
+                        # what would have started keyword prompt generation.
+                        # Those two are the whole reason PROC is avoided here.
+                        domain_fresh.track_message = (
+                            f'Prompts re-run - {total_groups} prompt groups completed'
+                        )
+                        domain_fresh.tracked_at = timezone.now()
+                        domain_fresh.save(update_fields=[
+                            'track_message', 'tracked_at', 'modified_at'])
+                        logger.info(
+                            "[TrackPrompts] Domain %s (%s): %s groups done, stamped "
+                            "tracked_at; processing_status left at %s",
+                            domain.id, domain.name, total_groups,
+                            domain_fresh.processing_status,
+                        )
             else:
                 # Still have pending groups
                 pending_groups = total_groups - completed_groups
@@ -1250,6 +1307,34 @@ class PromptAnalyticsProcessor:
         already mid-run is never restarted underneath itself.
         """
         try:
+            # "The cycle has drained" has to be measured on PROMPTS, not groups.
+            #
+            # Track Prompts and the weekly sweep re-run a domain's prompts
+            # without ever moving the group off COMP — a48bfac5 made that
+            # deliberate, because flipping the group would hide the dashboards.
+            # So a group-only check reads zero busy for the WHOLE re-run, this
+            # guard never fires, and every group's aggregation runs the
+            # follow-ups again. Canara's 22 groups queued 22 misinformation
+            # scans and 22 topic passes for a single Track Prompts run; each
+            # scan then re-read the same 65 analytics for ~90 seconds while the
+            # domain sat there showing "Processing".
+            #
+            # prompts_in_flight is the signal the domain serializer and the
+            # Prompts page already use for exactly this question; this is the
+            # same count. Groups are still checked afterwards because a newly
+            # added group can sit in INIT before it has any prompt rows to
+            # count, and that is a cycle that has not started rather than one
+            # that has drained.
+            busy_prompts = Prompt.objects.filter(
+                group__domain=domain, track_status__in=['INIT', 'SCHD', 'PROC']
+            ).count()
+            if busy_prompts:
+                logger.debug(
+                    f"[Followups] Domain {domain.id}: {busy_prompts} prompt(s) "
+                    f"still in flight, deferring"
+                )
+                return
+
             busy_groups = PromptGroup.objects.filter(
                 domain=domain, track_status__in=['INIT', 'SCHD', 'PROC']
             ).count()
@@ -1290,7 +1375,14 @@ class PromptAnalyticsProcessor:
                     logger.error(f"[Followups] Competitor extraction failed for {domain.id}: {comp_error}")
 
                 try:
-                    from competitors.utils import sync_competitor_prompt_analytics
+                    # `competitors` is a BACKEND app and is not importable from
+                    # the engine: the engine's INSTALLED_APPS is shared_models /
+                    # integrations / core, and manage.py puts the repository
+                    # root on sys.path, not backend/. So this import raised
+                    # ModuleNotFoundError on every run and the sync never once
+                    # happened. The engine carries its own copy of the function,
+                    # same name and same signature.
+                    from .competitor_sync import sync_competitor_prompt_analytics
                     sync_stats = sync_competitor_prompt_analytics(domain_id=domain.id)
                     logger.info(f"✅ [Followups] Competitor sync for domain {domain.id}: {sync_stats}")
                 except Exception as sync_error:
