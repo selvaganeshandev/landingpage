@@ -10,6 +10,7 @@ import type { NextRequest } from "next/server";
 import { API_URL, DEFAULT_COUNTRY, forwardHeaders, relayJson, unavailable, verifyHuman, visitorIp } from "@/lib/backend";
 import { cleanDomain, emailMatchesDomain, isDomain, isEmail } from "@/lib/audit";
 import { freeEmailProvider, workEmailMessage } from "@/lib/free-email";
+import { isMarket } from "@/lib/site";
 
 export const dynamic = "force-dynamic";
 
@@ -24,7 +25,10 @@ export async function POST(req: NextRequest) {
   const domain = cleanDomain(String(body.url ?? ""));
   const email = String(body.email ?? "").trim().toLowerCase();
   const brand = String(body.brand_name ?? "").trim().slice(0, 255);
-  const country = (String(body.country ?? "") || DEFAULT_COUNTRY).toLowerCase().slice(0, 2);
+  // Only the markets the form offers; anything else falls back to the default
+  // rather than running an audit for a market the page never promised.
+  const asked = String(body.country ?? "").toLowerCase().slice(0, 2);
+  const country = isMarket(asked) ? asked : DEFAULT_COUNTRY;
 
   if (!isDomain(domain)) return Response.json({ error: "Enter your website, like yourbrand.com" }, { status: 400 });
   if (!isEmail(email)) return Response.json({ error: "Enter a valid work email address." }, { status: 400 });

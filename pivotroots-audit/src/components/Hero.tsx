@@ -62,8 +62,8 @@ export function Hero({ initialToken = null, params = {} }: { initialToken?: stri
     setBusy(true);
     setServerError(null);
     const campaign = params.c || "default";
-    const country = (params.m || "").toLowerCase().slice(0, 2) || undefined;
-    track("start", { domain: v.domain, brand: v.brand, email: v.email, campaign });
+    const country = v.country;
+    track("start", { domain: v.domain, brand: v.brand, email: v.email, market: country, campaign });
     try {
       const r = await createAudit({ url: v.domain, email: v.email, brand_name: v.brand, country, campaign, turnstile_token: v.captcha });
       setHost(r.host || v.domain);
@@ -96,7 +96,7 @@ export function Hero({ initialToken = null, params = {} }: { initialToken?: stri
 
         {!token && (
           <AuditForm busy={busy} serverError={serverError} onSubmit={start} captchaReset={captchaReset}
-            prefill={{ d: params.d || "", e: params.e || "", b: params.b || "" }} />
+            prefill={{ d: params.d || "", e: params.e || "", b: params.b || "", m: params.m || "" }} />
         )}
 
         {!token && (

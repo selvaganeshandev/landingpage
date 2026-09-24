@@ -6,25 +6,31 @@
  * until the visitor types their own, and prefills from email-blast links:
  * ?d=<domain>&e=<email>&b=<brand>.
  */
-import { useState } from "react";
+import { useState, useSyncExternalStore } from "react";
 import { cleanDomain, emailMatchesDomain, isDomain, isEmail, titleCase } from "@/lib/audit";
 import { freeEmailProvider, workEmailMessage } from "@/lib/free-email";
-import { TURNSTILE_SITE_KEY } from "@/lib/site";
+import { DEFAULT_MARKET, MARKETS, TURNSTILE_SITE_KEY, detectMarket, isMarket } from "@/lib/site";
+import { MarketPicker, Pin } from "./MarketPicker";
 import { Turnstile } from "./Turnstile";
 
 export interface FormValues {
   domain: string;
   brand: string;
   email: string;
+  /** Market code the audit runs for (MARKETS in lib/site). */
+  country: string;
   /** Cloudflare Turnstile token; "" when the human check is not configured. */
   captcha: string;
 }
 
-const EMAIL_HINT = "Your work email, on your website's domain — no Gmail or Yahoo. That's how we know it's really you.";
+/** The visitor's location doesn't change while the page is open. */
+const noSubscribe = () => () => {};
+
+const EMAIL_HINT ="Your work email, on your website's domain — no Gmail or Yahoo. That's how we know it's really you.";
 
 export function AuditForm({ busy, serverError, onSubmit, prefill, captchaReset = 0 }: {
-  /** From the email-blast link: ?d=<domain>&e=<email>&b=<brand>. */
-  prefill: { d: string; e: string; b: string };
+  /** From the email-blast link: ?d=<domain>&e=<email>&b=<brand>&m=<market>. */
+  prefill: { d: string; e: string; b: string; m?: string };
   busy: boolean;
   serverError: string | null;
   onSubmit: (v: FormValues) => void;
@@ -35,6 +41,14 @@ export function AuditForm({ busy, serverError, onSubmit, prefill, captchaReset =
   const [brand, setBrand] = useState(() => prefill.b);
   const [brandTouched, setBrandTouched] = useState(() => !!prefill.b);
   const [em, setEm] = useState(() => prefill.e);
+  // Market precedence: the visitor's own pick, then a campaign link's ?m=,
+  // then where the browser says they are, then the default. `detected` is ""
+  // on the server and the real guess after hydration.
+  const linkMarket = isMarket((prefill.m || "").toLowerCase()) ? (prefill.m || "").toLowerCase() : "";
+  const detected = useSyncExternalStore(noSubscribe, detectMarket, () => "");
+  const [picked, setMarket] = useState<string | null>(null);
+  const market = picked || linkMarket || detected || DEFAULT_MARKET;
+  const marketInfo = MARKETS.find((m) => m.code === market);
   const [captcha, setCaptcha] = useState<string | null>(null);
   const [errs, setErrs] = useState<Partial<Record<keyof FormValues, string>>>({});
 
@@ -65,7 +79,7 @@ export function AuditForm({ busy, serverError, onSubmit, prefill, captchaReset =
       if (first) document.getElementById(first === "domain" ? "dom" : first === "brand" ? "brand" : "em")?.focus();
       return;
     }
-    onSubmit({ domain: d, brand: b, email: m, captcha: captcha || "" });
+    onSubmit({ domain: d, brand: b, email: m, country: market, captcha: captcha || "" });
   };
 
   return (
@@ -98,6 +112,17 @@ export function AuditForm({ busy, serverError, onSubmit, prefill, captchaReset =
               onChange={(e) => { setEm(e.target.value); setErrs((x) => ({ ...x, email: undefined })); }} disabled={busy} required />
           </div>
           <div className="hint">{errs.email || EMAIL_HINT}</div>
+        </div>
+        <div className="field market">
+          <label htmlFor="mkt">Market</label>
+          <div className="in">
+            <MarketPicker value={market} detected={detected} onChange={setMarket} disabled={busy} />
+          </div>
+          <div className="hint mk-hint">
+            {market === detected
+              ? <><Pin /> Your location</>
+              : <>As a buyer in {marketInfo?.cities.split(" · ")[0]}</>}
+          </div>
         </div>
         <div className="go">
           <button className="btn acc" type="submit" disabled={busy}>{busy ? "Starting…" : "Get my free audit →"}</button>
