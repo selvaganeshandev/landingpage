@@ -93,8 +93,12 @@ async function parse<T>(res: Response): Promise<T> {
   return data as T;
 }
 
+// Next applies basePath to <Link> and its own assets, but not to fetch, <a href>
+// or history.replaceState — every raw path below goes through this prefix.
+const BASE_PATH = (process.env.NEXT_PUBLIC_BASE_PATH || "").replace(/\/$/, "");
+
 export async function createAudit(input: { url: string; email: string; brand_name: string; country?: string; campaign?: string }) {
-  const res = await fetch("/api/audits", {
+  const res = await fetch(`${BASE_PATH}/api/audits`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(input),
@@ -103,16 +107,16 @@ export async function createAudit(input: { url: string; email: string; brand_nam
 }
 
 export async function getAudit(token: string) {
-  const res = await fetch(`/api/audits/${encodeURIComponent(token)}`, { cache: "no-store" });
+  const res = await fetch(`${BASE_PATH}/api/audits/${encodeURIComponent(token)}`, { cache: "no-store" });
   return parse<PublicAudit>(res);
 }
 
 export function pdfUrl(token: string) {
-  return `/api/audits/${encodeURIComponent(token)}/pdf`;
+  return `${BASE_PATH}/api/audits/${encodeURIComponent(token)}/pdf`;
 }
 
 export function reportPath(token: string) {
-  return `/audit/${encodeURIComponent(token)}`;
+  return `${BASE_PATH}/audit/${encodeURIComponent(token)}`;
 }
 
 /* ---- form helpers (same rules as the original page) ---- */
