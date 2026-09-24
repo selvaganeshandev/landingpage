@@ -6,7 +6,7 @@ import { CONTACT_URL, ENGINE_COUNT, MINUTES_LABEL, PROMPT_COUNT, REPORT_TTL_DAYS
 
 export function WhatYouGet() {
   return (
-    <section className="alt">
+    <section className="alt" id="whats-in-it">
       <div className="wrap">
         <span className="tag">What&apos;s in it</span>
         <h2>One audit.<br />One honest answer.</h2>
@@ -41,7 +41,7 @@ export function WhatYouGet() {
 
 export function HowItWorks() {
   return (
-    <section>
+    <section id="how">
       <div className="wrap">
         <span className="tag">How it works</span>
         <h2>Two minutes.<br />Three fields.</h2>
@@ -87,7 +87,7 @@ const SAMPLE_ROWS: { q: string; dots: ("c" | "m" | "x")[] }[] = [
 
 export function Sample() {
   return (
-    <section className="alt">
+    <section className="alt" id="sample">
       <div className="wrap">
         <div className="sample">
           <div>
@@ -136,7 +136,7 @@ export function Sample() {
 
 export function WhyUs({ ctaHref = "#audit" }: { ctaHref?: string }) {
   return (
-    <section>
+    <section id="why">
       <div className="wrap">
         <span className="tag">Why us</span>
         <h2>We&apos;ve been flying<br />since before jetpacks.</h2>
@@ -173,7 +173,7 @@ export function WhyUs({ ctaHref = "#audit" }: { ctaHref?: string }) {
 
 export function Faq() {
   return (
-    <section className="alt">
+    <section className="alt" id="faq">
       <div className="wrap">
         <span className="tag">Questions</span>
         <h2>Fair questions.</h2>

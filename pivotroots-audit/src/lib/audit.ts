@@ -5,6 +5,7 @@
  * to the PromptMaxx backend's public audit endpoints (backend/audits/views.py).
  * Shapes mirror PublicAuditSerializer; only the fields this page reads are typed.
  */
+import { BASE_PATH } from "./site";
 
 export type AuditStatus = "INIT" | "PROC" | "DONE" | "FAIL";
 export type GeoStage = "absent" | "present" | "preferred" | "default" | "";
@@ -93,11 +94,9 @@ async function parse<T>(res: Response): Promise<T> {
   return data as T;
 }
 
-// Next applies basePath to <Link> and its own assets, but not to fetch, <a href>
-// or history.replaceState — every raw path below goes through this prefix.
-const BASE_PATH = (process.env.NEXT_PUBLIC_BASE_PATH || "").replace(/\/$/, "");
-
-export async function createAudit(input: { url: string; email: string; brand_name: string; country?: string; campaign?: string }) {
+export async function createAudit(input: {
+  url: string; email: string; brand_name: string; country?: string; campaign?: string; turnstile_token?: string;
+}) {
   const res = await fetch(`${BASE_PATH}/api/audits`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },

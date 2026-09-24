@@ -12,11 +12,21 @@ export const PROMPT_COUNT = 24;
 export const MINUTES_LABEL = "2 minutes";
 export const REPORT_TTL_DAYS = 30;
 
-export const CONTACT_URL = process.env.NEXT_PUBLIC_CONTACT_URL || "https://www.pivotroots.com/contact";
+/**
+ * Sub-path the app is served under (NEXT_PUBLIC_BASE_PATH, e.g. /pmx-landingpage).
+ * Next prefixes <Link> and its assets itself, but not fetch, <a href> or
+ * history.replaceState — every raw in-app path goes through this.
+ */
+export const BASE_PATH = (process.env.NEXT_PUBLIC_BASE_PATH || "").replace(/\/$/, "");
+export const HOME_AUDIT_HREF = `${BASE_PATH}/#audit`;
+
+export const CONTACT_URL =process.env.NEXT_PUBLIC_CONTACT_URL || "https://www.pivotroots.com/contact";
 export const PRIVACY_URL = "https://www.pivotroots.com/privacy-policy";
 export const TERMS_URL = "https://www.pivotroots.com/terms-and-conditions";
 export const LOGO_URL = "https://www.pivotroots.com/images/logo_black.svg";
-export const SHOW_POWERED_BY = process.env.NEXT_PUBLIC_SHOW_POWERED_BY === "true";
+/** Cloudflare Turnstile site key (public). Empty = no human check on the form. */
+export const TURNSTILE_SITE_KEY = process.env.NEXT_PUBLIC_TURNSTILE_SITE_KEY || "";
+export const SHOW_POWERED_BY =process.env.NEXT_PUBLIC_SHOW_POWERED_BY === "true";
 
 /** The engine's platform labels, shortened for a 92px chip. */
 export function engineLabel(platform: string): string {

@@ -7,7 +7,9 @@ import type { Metadata } from "next";
 import { Nav } from "@/components/Nav";
 import { Hero } from "@/components/Hero";
 import { Faq, FinalCta, HowItWorks, Sample, WhatYouGet, WhyUs } from "@/components/Sections";
+import { Platform } from "@/components/Platform";
 import { Footer } from "@/components/Footer";
+import { HOME_AUDIT_HREF } from "@/lib/site";
 
 export const metadata: Metadata = {
   title: "Your AI Visibility Audit · PivotRoots",
@@ -18,14 +20,15 @@ export default async function AuditPage({ params }: { params: Promise<{ token: s
   const { token } = await params;
   return (
     <>
-      <Nav ctaHref="/#audit" />
+      <Nav ctaHref={HOME_AUDIT_HREF} />
       <Hero initialToken={token} />
       <WhatYouGet />
       <HowItWorks />
       <Sample />
-      <WhyUs ctaHref="/#audit" />
+      <Platform ctaHref={HOME_AUDIT_HREF} />
+      <WhyUs ctaHref={HOME_AUDIT_HREF} />
       <Faq />
-      <FinalCta ctaHref="/#audit" />
+      <FinalCta ctaHref={HOME_AUDIT_HREF} />
       <Footer />
     </>
   );

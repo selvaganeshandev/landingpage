@@ -1,6 +1,7 @@
 import { Nav } from "@/components/Nav";
 import { Hero, type HeroParams } from "@/components/Hero";
 import { Faq, FinalCta, HowItWorks, Sample, WhatYouGet, WhyUs } from "@/components/Sections";
+import { Platform } from "@/components/Platform";
 import { Footer } from "@/components/Footer";
 
 const first = (v: string | string[] | undefined) => (Array.isArray(v) ? v[0] : v) || "";
@@ -20,6 +21,7 @@ export default async function Page({ searchParams }: { searchParams: Promise<Rec
       <WhatYouGet />
       <HowItWorks />
       <Sample />
+      <Platform />
       <WhyUs />
       <Faq />
       <FinalCta />

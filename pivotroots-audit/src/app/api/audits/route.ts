@@ -1,13 +1,13 @@
 /**
  * POST /api/audits — start an audit.
  *
- * Body: { url, email, brand_name?, country?, campaign? }. Re-validates what the
+ * Body: { url, email, brand_name?, country?, campaign?, turnstile_token? }. Re-validates what the
  * form already checked (the endpoint is reachable without the form), then
  * POSTs to the backend's public /audits/ and relays its answer: 201 new,
  * 200 reused (same host audited inside the repeat window), 400/429/503 refused.
  */
 import type { NextRequest } from "next/server";
-import { API_URL, DEFAULT_COUNTRY, forwardHeaders, relayJson, unavailable } from "@/lib/backend";
+import { API_URL, DEFAULT_COUNTRY, forwardHeaders, relayJson, unavailable, verifyHuman, visitorIp } from "@/lib/backend";
 import { cleanDomain, emailMatchesDomain, isDomain, isEmail } from "@/lib/audit";
 import { freeEmailProvider, workEmailMessage } from "@/lib/free-email";
 
@@ -32,6 +32,11 @@ export async function POST(req: NextRequest) {
   if (freeProvider) return Response.json({ error: workEmailMessage(freeProvider) }, { status: 400 });
   if (!emailMatchesDomain(email, domain)) {
     return Response.json({ error: `Use an email on ${domain} — that's how we know it's really you.` }, { status: 400 });
+  }
+  // Last check before anything reaches the backend, so a failed human check
+  // never costs an audit or counts against the visitor's daily cap.
+  if (!(await verifyHuman(String(body.turnstile_token ?? ""), visitorIp(req)))) {
+    return Response.json({ error: "We couldn't confirm you're human. Tick the check box and try again." }, { status: 400 });
   }
 
   let upstream: Response;

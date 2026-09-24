@@ -43,6 +43,32 @@ export async function relayJson(upstream: Response): Promise<Response> {
   });
 }
 
+/**
+ * Cloudflare Turnstile check, done here so a bot that skips the form cannot
+ * start audits. Off when TURNSTILE_SECRET_KEY is unset (local dev); fails
+ * closed when Cloudflare cannot be reached.
+ */
+const TURNSTILE_SECRET = process.env.TURNSTILE_SECRET_KEY || "";
+
+export async function verifyHuman(token: string, ip: string): Promise<boolean> {
+  if (!TURNSTILE_SECRET) return true;
+  if (!token) return false;
+  const form = new URLSearchParams({ secret: TURNSTILE_SECRET, response: token });
+  if (ip) form.set("remoteip", ip);
+  try {
+    const res = await fetch("https://challenges.cloudflare.com/turnstile/v0/siteverify", {
+      method: "POST",
+      body: form,
+      cache: "no-store",
+      signal: AbortSignal.timeout(10_000),
+    });
+    const data = (await res.json()) as { success?: boolean };
+    return data.success === true;
+  } catch {
+    return false;
+  }
+}
+
 export function unavailable(): Response {
   return Response.json({ error: "The audit engine is unavailable right now." }, { status: 503, headers: { "Cache-Control": "no-store" } });
 }

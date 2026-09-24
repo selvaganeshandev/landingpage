@@ -9,26 +9,33 @@
 import { useState } from "react";
 import { cleanDomain, emailMatchesDomain, isDomain, isEmail, titleCase } from "@/lib/audit";
 import { freeEmailProvider, workEmailMessage } from "@/lib/free-email";
+import { TURNSTILE_SITE_KEY } from "@/lib/site";
+import { Turnstile } from "./Turnstile";
 
 export interface FormValues {
   domain: string;
   brand: string;
   email: string;
+  /** Cloudflare Turnstile token; "" when the human check is not configured. */
+  captcha: string;
 }
 
 const EMAIL_HINT = "Your work email, on your website's domain — no Gmail or Yahoo. That's how we know it's really you.";
 
-export function AuditForm({ busy, serverError, onSubmit, prefill }: {
+export function AuditForm({ busy, serverError, onSubmit, prefill, captchaReset = 0 }: {
   /** From the email-blast link: ?d=<domain>&e=<email>&b=<brand>. */
   prefill: { d: string; e: string; b: string };
   busy: boolean;
   serverError: string | null;
   onSubmit: (v: FormValues) => void;
+  /** Bumped by the parent after each submit: Turnstile tokens are single-use. */
+  captchaReset?: number;
 }) {
   const [dom, setDom] = useState(() => prefill.d);
   const [brand, setBrand] = useState(() => prefill.b);
   const [brandTouched, setBrandTouched] = useState(() => !!prefill.b);
   const [em, setEm] = useState(() => prefill.e);
+  const [captcha, setCaptcha] = useState<string | null>(null);
   const [errs, setErrs] = useState<Partial<Record<keyof FormValues, string>>>({});
 
   const onDom = (v: string) => {
@@ -51,13 +58,14 @@ export function AuditForm({ busy, serverError, onSubmit, prefill }: {
       if (provider) next.email = workEmailMessage(provider);
       else if (!next.domain && !emailMatchesDomain(m, d)) next.email = `Use an email on ${d} — that's how we know it's really you.`;
     }
+    if (TURNSTILE_SITE_KEY && !captcha) next.captcha = "Tick the box below to show you're human.";
     setErrs(next);
     if (Object.keys(next).length) {
       const first = (["domain", "brand", "email"] as const).find((k) => next[k]);
-      document.getElementById(first === "domain" ? "dom" : first === "brand" ? "brand" : "em")?.focus();
+      if (first) document.getElementById(first === "domain" ? "dom" : first === "brand" ? "brand" : "em")?.focus();
       return;
     }
-    onSubmit({ domain: d, brand: b, email: m });
+    onSubmit({ domain: d, brand: b, email: m, captcha: captcha || "" });
   };
 
   return (
@@ -95,6 +103,13 @@ export function AuditForm({ busy, serverError, onSubmit, prefill }: {
           <button className="btn acc" type="submit" disabled={busy}>{busy ? "Starting…" : "Get my free audit →"}</button>
         </div>
       </div>
+      {TURNSTILE_SITE_KEY && (
+        <div className={`captcha${errs.captcha ? " err" : ""}`}>
+          <Turnstile siteKey={TURNSTILE_SITE_KEY} resetKey={captchaReset}
+            onToken={(t) => { setCaptcha(t); if (t) setErrs((x) => ({ ...x, captcha: undefined })); }} />
+          {errs.captcha && <div className="hint">{errs.captcha}</div>}
+        </div>
+      )}
       {serverError && <div className="msg" role="alert">{serverError}</div>}
     </form>
   );
