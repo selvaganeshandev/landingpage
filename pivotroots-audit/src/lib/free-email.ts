@@ -1,18 +1,10 @@
 /**
- * Consumer mailbox providers and throwaway-address services.
+ * Personal mailboxes the audit form refuses: Google, Yahoo and Microsoft only.
  *
- * The audit is a lead: it has to reach someone who can act on it, and the
- * same-domain rule is what stops a competitor running a brand's audit. A
- * personal address defeats both, so it is refused with a message that says
- * what to do instead — "use a work email" — rather than the generic
- * domain-mismatch line, which reads like a bug when you typed your own Gmail.
- *
- * Exact-match on the address's domain only. A provider whose domain is also a
- * real company's (zoho.com, proton.me's own staff) is deliberately left out:
- * refusing those would block that company's own employees from auditing their
- * own site, which is a worse failure than letting one personal address through.
- *
- * Add to INDIA / UAE rows as PivotRoots sees them in the leads table.
+ * The audit is a lead and the full report is emailed, so it should reach a
+ * work inbox. Every other address is accepted — including company emails on a
+ * different domain from the website (agencies, group companies), so there is
+ * no same-domain rule. Exact-match on the address's domain.
  */
 const FREE_EMAIL_DOMAINS = new Set([
   // Google
@@ -23,19 +15,6 @@ const FREE_EMAIL_DOMAINS = new Set([
   // Microsoft
   "hotmail.com", "hotmail.co.uk", "hotmail.co.in", "hotmail.fr", "outlook.com", "outlook.in",
   "live.com", "live.co.uk", "msn.com",
-  // Apple
-  "icloud.com", "me.com", "mac.com",
-  // Other consumer providers
-  "aol.com", "gmx.com", "gmx.net", "mail.com", "mail.ru", "yandex.com", "yandex.ru",
-  "zohomail.com", "protonmail.com", "pm.me", "tutanota.com", "tuta.io",
-  // India
-  "rediffmail.com", "rediff.com", "indiatimes.com", "sify.com",
-  // Asia-Pacific
-  "qq.com", "163.com", "126.com", "sina.com", "naver.com", "daum.net", "hanmail.net",
-  // Throwaway / disposable
-  "mailinator.com", "yopmail.com", "guerrillamail.com", "sharklasers.com",
-  "10minutemail.com", "temp-mail.org", "tempmail.com", "trashmail.com", "dispostable.com",
-  "getnada.com", "maildrop.cc", "fakeinbox.com",
 ]);
 
 /** The provider's domain when the address is a personal one, else "". */
@@ -46,5 +25,6 @@ export function freeEmailProvider(email: string): string {
 
 /** What to tell someone who typed a personal address. */
 export function workEmailMessage(provider: string): string {
-  return `Use your work email, not a ${provider} address — the report goes to whoever can act on it.`;
+  const article = /^[aeiou]/i.test(provider) ? "an" : "a";
+  return `Use your work email, not ${article} ${provider} address — the report goes to whoever can act on it.`;
 }

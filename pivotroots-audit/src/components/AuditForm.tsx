@@ -7,7 +7,7 @@
  * ?d=<domain>&e=<email>&b=<brand>.
  */
 import { useState, useSyncExternalStore } from "react";
-import { cleanDomain, emailMatchesDomain, isDomain, isEmail, titleCase } from "@/lib/audit";
+import { cleanDomain, isDomain, isEmail, titleCase } from "@/lib/audit";
 import { freeEmailProvider, workEmailMessage } from "@/lib/free-email";
 import { DEFAULT_MARKET, MARKETS, TURNSTILE_SITE_KEY, detectMarket, isMarket } from "@/lib/site";
 import { MarketPicker, Pin } from "./MarketPicker";
@@ -26,7 +26,7 @@ export interface FormValues {
 /** The visitor's location doesn't change while the page is open. */
 const noSubscribe = () => () => {};
 
-const EMAIL_HINT ="Your work email, on your website's domain — no Gmail or Yahoo. That's how we know it's really you.";
+const EMAIL_HINT = "The full report is sent here — use your work email. No Gmail, Yahoo or Outlook.";
 
 export function AuditForm({ busy, serverError, onSubmit, prefill, captchaReset = 0 }: {
   /** From the email-blast link: ?d=<domain>&e=<email>&b=<brand>&m=<market>. */
@@ -66,11 +66,10 @@ export function AuditForm({ busy, serverError, onSubmit, prefill, captchaReset =
     if (b.length < 2) next.brand = "Tell us what to call you";
     if (!isEmail(m)) next.email = "Enter a valid email address";
     else {
-      // Name the provider before the domain rule: "use an email on acme.com"
-      // reads like a bug to someone who just typed their own Gmail.
+      // Only Gmail / Yahoo / Microsoft personal inboxes are refused; any other
+      // address works, even on a different domain from the website.
       const provider = freeEmailProvider(m);
       if (provider) next.email = workEmailMessage(provider);
-      else if (!next.domain && !emailMatchesDomain(m, d)) next.email = `Use an email on ${d} — that's how we know it's really you.`;
     }
     if (TURNSTILE_SITE_KEY && !captcha) next.captcha = "Tick the box below to show you're human.";
     setErrs(next);

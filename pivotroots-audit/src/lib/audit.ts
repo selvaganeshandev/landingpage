@@ -129,12 +129,6 @@ export const titleCase = (d: string) =>
 export const isDomain = (d: string) => /^[a-z0-9.-]+\.[a-z]{2,}$/i.test(d);
 export const isEmail = (e: string) => /^[^\s@]+@[^\s@]+\.[a-z]{2,}$/i.test(e);
 
-/** The email must be on the site's domain (or a sub/parent of it) — that's how we know it's really them. */
-export function emailMatchesDomain(email: string, domain: string) {
-  const emDom = (email.split("@")[1] || "").replace(/^www\./, "");
-  return emDom === domain || emDom.endsWith("." + domain) || domain.endsWith("." + emDom);
-}
-
 /* ---- numbers for the score panel, from the finished report ---- */
 
 export function scoreSummary(a: PublicAudit) {

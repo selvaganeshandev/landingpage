@@ -2,7 +2,7 @@
  * The static sections below the hero, in page order. Copy lives here; the
  * numbers it quotes come from lib/site so they change in one place.
  */
-import { CONTACT_URL, ENGINE_COUNT, MINUTES_LABEL, PROMPT_COUNT, REPORT_TTL_DAYS } from "@/lib/site";
+import { CONTACT_URL, ENGINE_COUNT, MINUTES_LABEL, PDF_PREVIEW_PAGES, PROMPT_COUNT, REPORT_TTL_DAYS } from "@/lib/site";
 
 export function WhatYouGet() {
   return (
@@ -69,7 +69,7 @@ export function HowItWorks() {
             <div className="k">3</div>
             <div>
               <h3>We score it and hand you the fixes</h3>
-              <p>Who mentioned you, who cited you, how you were described, and what the engines got wrong. Three fixes ranked by lift. Your report is live at a link you can forward to anyone — and a PDF you can download.</p>
+              <p>Who mentioned you, who cited you, how you were described, and what the engines got wrong. Three fixes ranked by lift. Your report is live at a link you can forward to anyone, with a PDF preview to download — and the full report lands in your inbox.</p>
             </div>
             <div className="t">~20s</div>
           </div>
@@ -182,8 +182,8 @@ export function Faq() {
             <summary>Is it actually free?</summary>
             <p>
               Yes. The score, the engine grid, the sample questions and the three fixes are free and stay at a public link for {REPORT_TTL_DAYS} days,
-              with a PDF you can download the moment it&apos;s done. Enter a work email and we send the full version — all {PROMPT_COUNT} questions with
-              every engine&apos;s answer, the citation breakdown, and the complete fix list. Still free. No card, ever.
+              with a {PDF_PREVIEW_PAGES}-page PDF preview you can download the moment it&apos;s done. The PivotRoots team emails the full report to your
+              work email — all {PROMPT_COUNT} questions with every engine&apos;s answer, the citation breakdown, and your 90-day plan. Still free. No card, ever.
             </p>
           </details>
           <details>
@@ -204,8 +204,9 @@ export function Faq() {
           <details>
             <summary>Why do you need a work email?</summary>
             <p>
-              Two reasons. It has to be on the same domain as the website you enter, so a competitor can&apos;t run your audit and read your results. And it
-              means the report lands with someone who can actually act on it. No login, no password — just the address.
+              Because that&apos;s where the full report is sent, so it should land with someone who can actually act on it. Any work address is fine —
+              yours, your agency&apos;s, your group company&apos;s — just not a personal Gmail, Yahoo or Outlook inbox. We check the address can receive mail
+              before the audit starts. No login, no password — just the address.
             </p>
           </details>
           <details>

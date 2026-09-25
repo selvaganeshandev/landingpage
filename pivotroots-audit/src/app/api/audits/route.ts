@@ -8,9 +8,10 @@
  */
 import type { NextRequest } from "next/server";
 import { API_URL, DEFAULT_COUNTRY, forwardHeaders, relayJson, unavailable, verifyHuman, visitorIp } from "@/lib/backend";
-import { cleanDomain, emailMatchesDomain, isDomain, isEmail } from "@/lib/audit";
+import { cleanDomain, isDomain, isEmail } from "@/lib/audit";
 import { freeEmailProvider, workEmailMessage } from "@/lib/free-email";
 import { isMarket } from "@/lib/site";
+import { canReceiveMail } from "@/lib/email-check";
 
 export const dynamic = "force-dynamic";
 
@@ -34,8 +35,11 @@ export async function POST(req: NextRequest) {
   if (!isEmail(email)) return Response.json({ error: "Enter a valid work email address." }, { status: 400 });
   const freeProvider = freeEmailProvider(email);
   if (freeProvider) return Response.json({ error: workEmailMessage(freeProvider) }, { status: 400 });
-  if (!emailMatchesDomain(email, domain)) {
-    return Response.json({ error: `Use an email on ${domain} — that's how we know it's really you.` }, { status: 400 });
+  // The full report is emailed: refuse an address whose domain takes no mail.
+  if (!(await canReceiveMail(email))) {
+    return Response.json({
+      error: `We can't deliver email to ${email.split("@")[1]} — the full report is sent by email, so check the address and try again.`,
+    }, { status: 400 });
   }
   // Last check before anything reaches the backend, so a failed human check
   // never costs an audit or counts against the visitor's daily cap.

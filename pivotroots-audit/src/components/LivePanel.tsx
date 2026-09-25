@@ -8,7 +8,7 @@ import { useEffect, useState } from "react";
 import Link from "next/link";
 import { pdfUrl, reportPath, scoreSummary, type LiveRow, type PublicAudit } from "@/lib/audit";
 import { STAGES, stageIndex } from "@/lib/stages";
-import { CONTACT_URL, REPORT_TTL_DAYS, engineLabel } from "@/lib/site";
+import { CONTACT_URL, PDF_PREVIEW_PAGES, REPORT_TTL_DAYS, engineLabel } from "@/lib/site";
 import type { AuditState } from "@/lib/useAudit";
 
 function useElapsed(startedAt: string | undefined, running: boolean) {
@@ -99,12 +99,13 @@ function ScoreBox({ audit, email }: { audit: PublicAudit; email: string }) {
           <div><b>{s.shareOfVoice == null ? "—" : `${s.shareOfVoice}%`}</b><span>your share of voice vs rivals</span></div>
         </div>
         <div className="claim">
-          <a className="btn acc" href={pdfUrl(audit.public_token)} download>Download the PDF report ↓</a>
+          <a className="btn acc" href={pdfUrl(audit.public_token)} download>Download the {PDF_PREVIEW_PAGES}-page preview ↓</a>
           <button type="button" className="btn ghost" onClick={copy}>{copied ? "Link copied ✓" : "Copy report link"}</button>
-          <span className="note">
-            Every question, every engine&apos;s answer, and the fix list. Free.
-            {email ? <> The report is filed under <b>{email}</b>.</> : null} This link stays live for {REPORT_TTL_DAYS} days.
-          </span>
+          <div className="emailed">
+            <b>🔒 The full report comes by email.</b> The PivotRoots team will send every question, every engine&apos;s answer and your
+            90-day plan to {email ? <b>{email}</b> : "the work email you gave us"}.
+          </div>
+          <span className="note">This link stays live for {REPORT_TTL_DAYS} days.</span>
         </div>
       </div>
     </div>
@@ -135,7 +136,7 @@ export function LivePanel({ host, email, reused, state }: {
         </div>
         <div className="when">
           {status === "DONE" && audit
-            ? <>Done{reused ? " · we audited this site in the last 24 hours, so here is that report" : ""} · <a href={pdfUrl(audit.public_token)} download>Download the PDF →</a></>
+            ? <>Done{reused ? " · we audited this site in the last 24 hours, so here is that report" : ""} · <a href={pdfUrl(audit.public_token)} download>Download the preview →</a></>
             : status === "FAIL"
             ? "Stopped"
             : <>{elapsed ? `Running ${elapsed} · ` : ""}you can leave this page open — it updates itself. Bookmark it to come back.</>}

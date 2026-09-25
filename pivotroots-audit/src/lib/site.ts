@@ -11,6 +11,8 @@ export const ENGINE_COUNT = ENGINES.length;
 export const PROMPT_COUNT = 24;
 export const MINUTES_LABEL = "2 minutes";
 export const REPORT_TTL_DAYS = 30;
+/** Pages of the report PDF a visitor can download; the rest is emailed by the team. */
+export const PDF_PREVIEW_PAGES = 4;
 
 /**
  * Sub-path the app is served under (NEXT_PUBLIC_BASE_PATH, e.g. /pmx-landingpage).
