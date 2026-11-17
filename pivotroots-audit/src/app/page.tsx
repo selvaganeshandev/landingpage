@@ -3,6 +3,7 @@ import { Hero, type HeroParams } from "@/components/Hero";
 import { Faq, FinalCta, HowItWorks, Sample, WhatYouGet, WhyUs } from "@/components/Sections";
 import { Platform } from "@/components/Platform";
 import { Footer } from "@/components/Footer";
+import { MotionRoot } from "@/components/MotionRoot";
 
 const first = (v: string | string[] | undefined) => (Array.isArray(v) ? v[0] : v) || "";
 
@@ -26,6 +27,7 @@ export default async function Page({ searchParams }: { searchParams: Promise<Rec
       <Faq />
       <FinalCta />
       <Footer />
+      <MotionRoot />
     </>
   );
 }

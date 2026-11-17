@@ -18,19 +18,32 @@ const LINKS = [
   { href: "#faq", label: "FAQ" },
 ];
 
-/** Section links only make sense on the home page; the report route passes links={false}. */
+/**
+ * Section links only make sense on the home page; the report route passes links={false}.
+ * The progress bar, shrink-on-scroll, active-link underline and clocks are driven by MotionRoot.
+ */
 export function Nav({ ctaHref = "#audit", links = true }: { ctaHref?: string; links?: boolean }) {
   return (
-    <nav className="nav">
-      <div className="wrap">
-        <Logo />
-        {links && (
-          <ul className="nav-links">
-            {LINKS.map((l) => <li key={l.href}><a href={l.href}>{l.label}</a></li>)}
-          </ul>
-        )}
-        <a className="btn ghost sm" href={ctaHref}>Get my free audit</a>
-      </div>
-    </nav>
+    <>
+      <div className="prog" id="prog" aria-hidden="true" />
+      <nav className="nav">
+        <div className="wrap">
+          <Logo />
+          {links && (
+            <ul className="nav-links">
+              {LINKS.map((l) => <li key={l.href}><a href={l.href}>{l.label}</a></li>)}
+              <li className="nav-ind" aria-hidden="true" />
+            </ul>
+          )}
+          <div className="nav-r">
+            <div className="clock" aria-label="Office time">
+              <span><i />Mumbai <b data-tz="Asia/Kolkata">--:--</b></span>
+              <span>Dubai <b data-tz="Asia/Dubai">--:--</b></span>
+            </div>
+            <a className="btn ghost sm mag" href={ctaHref}>Get my free audit</a>
+          </div>
+        </div>
+      </nav>
+    </>
   );
 }

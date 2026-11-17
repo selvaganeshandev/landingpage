@@ -9,6 +9,7 @@ import { Hero } from "@/components/Hero";
 import { Faq, FinalCta, HowItWorks, Sample, WhatYouGet, WhyUs } from "@/components/Sections";
 import { Platform } from "@/components/Platform";
 import { Footer } from "@/components/Footer";
+import { MotionRoot } from "@/components/MotionRoot";
 import { HOME_AUDIT_HREF } from "@/lib/site";
 
 export const metadata: Metadata = {
@@ -30,6 +31,7 @@ export default async function AuditPage({ params }: { params: Promise<{ token: s
       <Faq />
       <FinalCta ctaHref={HOME_AUDIT_HREF} />
       <Footer />
+      <MotionRoot />
     </>
   );
 }

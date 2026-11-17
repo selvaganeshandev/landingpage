@@ -20,7 +20,12 @@ export const metadata: Metadata = {
 
 export default function RootLayout({ children }: Readonly<{ children: React.ReactNode }>) {
   return (
-    <html lang="en" className={`${inter.variable} ${archivo.variable} ${mono.variable}`}>
+    // suppressHydrationWarning: the inline script adds "js" to <html> before React hydrates.
+    <html lang="en" className={`${inter.variable} ${archivo.variable} ${mono.variable}`} suppressHydrationWarning>
+      <head>
+        {/* Reveal animations hide content only once we know scripts run. */}
+        <script dangerouslySetInnerHTML={{ __html: "document.documentElement.classList.add('js')" }} />
+      </head>
       <body>{children}</body>
     </html>
   );

@@ -124,7 +124,7 @@ export function AuditForm({ busy, serverError, onSubmit, prefill, captchaReset =
           </div>
         </div>
         <div className="go">
-          <button className="btn acc" type="submit" disabled={busy}>{busy ? "Starting…" : "Get my free audit →"}</button>
+          <button className="btn acc mag" type="submit" disabled={busy}>{busy ? "Starting…" : "Get my free audit →"}</button>
         </div>
       </div>
       {TURNSTILE_SITE_KEY && (
