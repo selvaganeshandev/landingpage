@@ -1,257 +1,297 @@
 /**
- * The static sections below the hero, in page order. Copy lives here; the
- * numbers it quotes come from lib/site so they change in one place. Motion is
- * declared with markers (data-r, data-split, data-count, .tilt, .mag) and run
- * by MotionRoot.
+ * The home page below the hero: why it matters, the platform (four feature
+ * rows), Ask Agent, SEO + tech, how the free audit works, every module, FAQ
+ * and the closing call to action. Module names come from lib/modules.ts, which
+ * mirrors the app's sidebar. Mock figures are illustrative sample data.
  */
-import type { CSSProperties } from "react";
-import { CONTACT_URL, ENGINE_COUNT, MINUTES_LABEL, PDF_PREVIEW_PAGES, PROMPT_COUNT, REPORT_TTL_DAYS } from "@/lib/site";
-import { Lines } from "./Split";
+import type { CSSProperties, ReactNode } from "react";
+import { AREAS, MODULE_COUNT } from "@/lib/modules";
+import { CONTACT_URL, ENGINES, MINUTES_LABEL, PDF_PREVIEW_PAGES, PROMPT_COUNT, REPORT_TTL_DAYS, SHOW_POWERED_BY } from "@/lib/site";
+import { AskAgent, ModuleDirectory, QGrid } from "./Interactive";
 
 const d = (n: number) => ({ "--d": n }) as CSSProperties;
-const iv = (n: number) => ({ "--i": n }) as CSSProperties;
+const w = (pct: number) => ({ "--w": `${pct}%` }) as CSSProperties;
 
-/* Wordless card illustrations — decoration only. */
-const MENTION_GRID = ["c", "c", "m", "c", "m", "x", "c", "m", "x", "c", "c", "m", "m", "x", "c", "x", "m", "c"];
-
-export function WhatYouGet() {
+function Head({ eyebrow, title, sub, center = true, dark = false }: { eyebrow: string; title: ReactNode; sub?: ReactNode; center?: boolean; dark?: boolean }) {
   return (
-    <section className="sec alt" id="whats-in-it">
+    <div className={`sec-h${center ? " c" : ""} rv`}>
+      <span className={`eyebrow${dark ? " dark" : ""}`}>{eyebrow}</span>
+      <h2>{title}</h2>
+      {sub && <p>{sub}</p>}
+    </div>
+  );
+}
+
+export function Trust() {
+  return (
+    <div className="trust">
       <div className="wrap">
-        <span className="tag" data-r="">What&apos;s in it</span>
-        <h2 data-split=""><Lines lines={["One audit.", "One honest answer."]} /></h2>
-        <p className="sub" data-r="" style={d(2)}>
-          Most &quot;AI visibility&quot; tools give you a number and ask you to trust it. Ours shows you the actual answers —
-          every question, every engine, and who got recommended when it wasn&apos;t you.
-        </p>
+        <p>Answers tracked across</p>
+        <div className="engines">
+          {ENGINES.map((e) => <span key={e}>{e}</span>)}
+          <span className="soon">Google AI Overviews · soon</span>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+export function Shift() {
+  return (
+    <section className="sec" id="why">
+      <div className="wrap">
+        <Head eyebrow="Why it matters now" title="Buyers ask AI first. Most brands can't see the answer."
+          sub="Rankings, traffic and ad dashboards don't show what an AI engine tells your buyer. We do — question by question, engine by engine." />
+        <div className="shift">
+          <div className="scard rv"><span className="n">01</span><h3>One answer, a short list</h3><p>An AI answer names a handful of brands. If you&apos;re not in it, you&apos;re not in the consideration set.</p></div>
+          <div className="scard rv" style={d(1)}><span className="n">02</span><h3>Being cited moves buyers</h3><p>Being mentioned is a start. Being the source the engine links to is what wins the click and the trust.</p></div>
+          <div className="scard rv" style={d(2)}><span className="n">03</span><h3>AI gets things wrong</h3><p>Old prices, retired products, a rival&apos;s feature pinned on you — repeated to every buyer who asks.</p></div>
+        </div>
+        <div className="stats rv">
+          <div><b data-count={MODULE_COUNT}>{MODULE_COUNT}</b><span>modules in one platform</span></div>
+          <div><b data-count={ENGINES.length}>{ENGINES.length}</b><span>AI engines tracked</span></div>
+          <div><b>GEO + SEO</b><span>AI answers and Google, together</span></div>
+          <div><b data-count="4">4</b><span>offices · India &amp; UAE</span></div>
+        </div>
+      </div>
+    </section>
+  );
+}
+
+function Mods({ items }: { items: [string, string][] }) {
+  return <ul className="mods">{items.map(([b, s]) => <li key={b}><div><b>{b}</b><small>{s}</small></div></li>)}</ul>;
+}
+
+function Row({ flip, tag, title, text, mods, children }: { flip?: boolean; tag: string; title: string; text: string; mods: [string, string][]; children: ReactNode }) {
+  return (
+    <div className={`frow${flip ? " flip" : ""}`}>
+      <div className="ftext rv">
+        <span className="tag">{tag}</span>
+        <h3>{title}</h3>
+        <p>{text}</p>
+        <Mods items={mods} />
+      </div>
+      <div className="fvis rv" data-io="" style={d(1)}>{children}</div>
+    </div>
+  );
+}
+
+export function Product() {
+  return (
+    <section className="sec" id="product" style={{ paddingTop: 20 }}>
+      <div className="wrap">
+        <Head eyebrow="The platform" title="See it, understand it, protect it, grow it."
+          sub="Everything PivotRoots clients use after the free audit — the same engine, running every week, across every engine and market." />
+
+        <Row tag="01 · GEO monitoring" title="Every answer, on every engine, every week."
+          text="Track the questions your buyers actually ask and read what each engine said — who it named, in what order, and which pages it cited."
+          mods={[["Prompts", "The buyer questions you track"], ["Runs", "Every answer, engine by engine"], ["Mentions", "Each time you're named, in context"],
+            ["Citations", "The links engines attach"], ["Sources", "The domains engines trust"], ["Alerts", "Drops and rival jumps, flagged"]]}>
+          <QGrid />
+          <div className="card mini-stats"><div><b>144</b><span>answers read</span></div><div><b>38</b><span>mentions</span></div><div><b>21</b><span>citations</span></div><div><b>9</b><span>sources</span></div></div>
+        </Row>
+
+        <Row flip tag="02 · Analytics & competitors" title="Know where you win — and who's beating you."
+          text="Your share of the answers against the brands engines name next to you, how they describe you, and how it moves week on week."
+          mods={[["Share of Voice", "Your share of the answers"], ["Competitors", "Head to head, question by question"], ["Sentiment", "Positive, neutral or negative"],
+            ["Topics", "Themes you own, and the ones you miss"], ["Historical Trends", "Every metric, week on week"], ["Dashboard", "The whole picture on one screen"]]}>
+          <div className="card">
+            <div className="ch">Share of voice <em>12 weeks</em></div>
+            {[["You", 31, true], ["Rival A", 24], ["Aggregator", 19], ["Rival B", 12]].map(([n, p, you]) => (
+              <div className="sov" key={n as string}><span className={you ? "you" : ""}>{n}</span><div className="track"><i className={you ? "you" : ""} style={w((p as number) * 2)} /></div><b>{p}%</b></div>
+            ))}
+          </div>
+          <div className="card">
+            <div className="ch">Sentiment <em>how engines describe you</em></div>
+            <div className="sent"><i className="p" style={w(62)} /><i className="n" style={w(28)} /><i className="x" style={w(10)} /></div>
+            <div className="legend"><span className="pos">62% positive</span><span>28% neutral</span><span className="neg">10% negative</span></div>
+            <div className="ch" style={{ marginTop: 16 }}>Topics</div>
+            <div className="chips"><span>Savings rates ✓</span><span>Student accounts ✓</span><span>Gold loans — missing</span><span>Forex — missing</span></div>
+          </div>
+        </Row>
+
+        <Row tag="03 · Protect & prove" title="Catch AI getting you wrong. Prove what AI sends you."
+          text="Every wrong claim, with the page the engine took it from — and the visits that start in an AI answer, by engine. In every language your buyers ask in."
+          mods={[["Misinformation", "Wrong claims, with their source"], ["Traffic Attribution", "Visits that start in AI answers"], ["Multilingual", "Answers tracked per language"]]}>
+          <div className="card">
+            <div className="ch">Misinformation</div>
+            <div className="alert bad"><span className="ic">!</span><div><b>ChatGPT quoted the wrong fee</b><small>&ldquo;₹999 processing fee&rdquo; → actually ₹499 · source: an old blog post</small></div></div>
+            <div className="alert ok"><span className="ic">✓</span><div><b>Fixed and re-checked</b><small>Gemini and ChatGPT now quote ₹499</small></div></div>
+          </div>
+          <div className="card">
+            <div className="ch">Visits from AI answers <em>vs last quarter</em></div>
+            <div className="bignum">+<span data-count="89">89</span>%</div>
+            <div className="kv" style={{ marginTop: 12 }}><span>ChatGPT</span><b>5,420</b></div>
+            <div className="kv"><span>Perplexity</span><b>4,127</b></div>
+            <div className="kv"><span>Gemini</span><b>3,300</b></div>
+          </div>
+        </Row>
+
+        <Row flip tag="04 · Strategy & content" title="Turn every gap into content that gets cited."
+          text="See the questions engines answer without you and the topics rivals rank for — then plan, draft and score the pages that close the gap."
+          mods={[["GEO Content Gaps", "Questions answered without you"], ["SEO Content Gaps", "Topics rivals rank for, clicks at stake"],
+            ["Content Planner", "A calendar with an AI drafting wizard"], ["Content Editor", "Write and score before you publish"]]}>
+          <div className="card">
+            <div className="ch">Content gaps <em>ranked by lift</em></div>
+            {[["GEO", "Which bank has no forex markup?", "Answered without you on 5 engines"], ["SEO", "student account documents", "~1,900 extra clicks / month"],
+              ["GEO", "Is a gold loan safe?", "A rival is cited on 4 engines"]].map(([t, q, s]) => (
+              <div className="gap" key={q}><i>{t}</i><div><b>{q}</b><small>{s}</small></div></div>
+            ))}
+          </div>
+          <div className="card editor">
+            <div className="ch">Content editor <span className="score">Citable score 94</span></div>
+            <div className="line" style={{ width: "100%" }} /><div className="line" style={{ width: "86%" }} /><div className="line p" style={{ width: "62%" }} /><div className="line" style={{ width: "74%" }} />
+            <div className="chips" style={{ marginTop: 14 }}><span>Answer-first intro</span><span>FAQ block</span><span>Comparison table</span></div>
+          </div>
+        </Row>
+      </div>
+    </section>
+  );
+}
+
+export function Agent() {
+  return (
+    <section className="sec darksec" id="agent">
+      <div className="wrap agent">
+        <div>
+          <Head center={false} dark eyebrow="Ask Agent" title="Ask your AI visibility data anything."
+            sub="No dashboards to dig through. Ask in plain English and get an answer from your own tracking data — with the fix, not just the number." />
+        </div>
+        <div className="agent-r"><AskAgent /></div>
+      </div>
+    </section>
+  );
+}
+
+export function Seo() {
+  return (
+    <section className="sec" id="seo">
+      <div className="wrap">
+        <Head eyebrow="SEO monitoring · Tech · Reports" title="AI answers and Google search, in one place."
+          sub="The same platform tracks your organic search — keywords, rivals, links and site health — so GEO and SEO work from one plan." />
         <div className="bento">
-          <div className="card big tilt" data-r="">
-            <div className="sheen" />
-            <div className="n">01</div>
-            <h3>Are you mentioned?</h3>
-            <p>{PROMPT_COUNT} questions your buyers actually ask, put to {ENGINE_COUNT} engines. For each one: who got named, in what order, and who didn&apos;t.</p>
-            <ul><li>Engine-by-engine grid</li><li>Every question, every answer</li><li>Who they recommend instead, and why</li></ul>
-            <div className="viz" aria-hidden="true">
-              <div className="viz-grid">{MENTION_GRID.map((c, i) => <i key={i} className={c} style={iv(i)} />)}</div>
-            </div>
-          </div>
-          <div className="card tilt" data-r="" style={d(1)}>
-            <div className="sheen" />
-            <div className="n">02</div>
-            <h3>Are you the source?</h3>
-            <p>Being named is a start. Being cited is what moves buyers. We show who controls the citations in your category.</p>
-            <ul><li>Your site vs rivals vs third parties</li><li>The publishers shaping your answers</li><li>Claims the engines get wrong about you</li></ul>
-            <div className="viz-bars" aria-hidden="true">
-              <i className="you" style={{ "--w": "72%", "--i": 0 } as CSSProperties} />
-              <i style={{ "--w": "54%", "--i": 1 } as CSSProperties} />
-              <i style={{ "--w": "38%", "--i": 2 } as CSSProperties} />
-            </div>
-          </div>
-          <div className="card dark tilt" data-r="" style={d(2)}>
-            <div className="sheen" />
-            <div className="n">03</div>
-            <h3>The three fixes</h3>
-            <p>Not a 40-page PDF. Three things, ranked by lift per hour of work, each with the projected score if you do it.</p>
-            <ul><li>What to change, on which page</li><li>How many points it&apos;s worth</li><li>Roughly how long it takes</li></ul>
-            <div className="fixes" aria-hidden="true"><span>#1<b>▲▲▲</b></span><span>#2<b>▲▲</b></span><span>#3<b>▲</b></span></div>
-          </div>
-        </div>
-      </div>
-    </section>
-  );
-}
-
-/** Pinned on desktop: the section holds while the three steps light up in turn. */
-export function HowItWorks() {
-  return (
-    <section className="how" id="how">
-      <div className="pin">
-        <div className="wrap">
-          <div>
-            <span className="tag inv" data-r="">How it works</span>
-            <h2 data-split=""><Lines lines={["Two minutes.", "Three fields."]} /></h2>
-            <div className="meter" data-r="" style={d(2)} aria-hidden="true">
-              <b id="howN">1</b>/ 3<div className="meter-bar"><i id="howBar" /></div>
-            </div>
-          </div>
-          <div className="steps">
-            <div className="rail" aria-hidden="true"><i id="rail" /></div>
-            <div className="step on">
-              <div className="k">1</div>
-              <div>
-                <h3>We read your site</h3>
-                <p>Industry, products, who you sell to, and the four competitors that show up next to you. No questionnaire — we already know.</p>
-              </div>
-              <div className="t">~15s</div>
-            </div>
-            <div className="step">
-              <div className="k">2</div>
-              <div>
-                <h3>We ask the engines what your buyers ask</h3>
-                <p>
-                  {PROMPT_COUNT} real questions — &quot;best savings account for students&quot;, &quot;which lender has the lowest processing fee&quot; —
-                  each put to all {ENGINE_COUNT} engines. You watch the answers arrive.
-                </p>
-              </div>
-              <div className="t">~90s</div>
-            </div>
-            <div className="step">
-              <div className="k">3</div>
-              <div>
-                <h3>We score it and hand you the fixes</h3>
-                <p>Who mentioned you, who cited you, how you were described, and what the engines got wrong. Three fixes ranked by lift. Your report is live at a link you can forward to anyone, with a PDF preview to download — and the full report lands in your inbox.</p>
-              </div>
-              <div className="t">~20s</div>
-            </div>
-          </div>
-        </div>
-      </div>
-    </section>
-  );
-}
-
-const SAMPLE_ROWS: { q: string; dots: ("c" | "m" | "x")[] }[] = [
-  { q: "Best savings account for salaried professionals?", dots: ["c", "c", "c", "m", "c", "m"] },
-  { q: "Fastest credit card approval?", dots: ["m", "x", "m", "x", "x", "x"] },
-  { q: "Best gold loan rate per gram?", dots: ["x", "x", "m", "x", "x", "x"] },
-];
-
-const SAMPLE_ENGINES = [
-  { e: "ChatGPT", c: "ok", v: "cited 11/24" },
-  { e: "Gemini", c: "ok", v: "cited 9/24" },
-  { e: "Claude", c: "ok", v: "cited 8/24" },
-  { e: "Perplexity", c: "bad", v: "cited 2/24" },
-  { e: "Grok", c: "warn", v: "cited 6/24" },
-  { e: "DeepSeek", c: "warn", v: "cited 5/24" },
-];
-
-export function Sample() {
-  return (
-    <section className="sec alt" id="sample">
-      <div className="wrap">
-        <div className="sample">
-          <div>
-            <span className="tag" data-r="">Sample report</span>
-            <h2 data-split=""><Lines lines={["This is what", "\"present but not preferred\" looks like."]} /></h2>
-            <p className="sub" data-r="" style={d(2)}>
-              A retail bank, mentioned by five of six engines — and cited by two. On Perplexity, an aggregator gets cited four times
-              more often. That&apos;s the gap between showing up and being the answer.
-            </p>
-            <div className="quote" data-r="left" style={d(3)}>Being mentioned is a start. <em>Being cited</em> is the business.</div>
-          </div>
-          {/* The report builds itself on reveal: tiles flip in, dots light up, numbers count. */}
-          <div className="rep" data-reveal="">
-            <div className="hd">
-              <small>AI Visibility Audit · sample</small>
-              <b>Retail Bank · India</b>
-              <div className="nums">
-                <div><div className="v acc" data-count="58">58</div><div className="l">SCORE · PREFERRED</div></div>
-                <div><div className="v"><span data-count="5">5</span><span>/6</span></div><div className="l">ENGINES MENTION</div></div>
-                <div><div className="v"><span data-count="2">2</span><span>/6</span></div><div className="l">ENGINES CITE</div></div>
-              </div>
-            </div>
-            <div className="bd">
-              <div className="eg">
-                {SAMPLE_ENGINES.map((x, i) => <div key={x.e} className={x.c} style={iv(i)}><b>{x.e}</b><i>{x.v}</i></div>)}
-              </div>
-              <div className="cap">What buyers ask · {ENGINE_COUNT} engines</div>
-              {SAMPLE_ROWS.map((r, ri) => (
-                <div className="row" key={r.q}>
-                  <span>{r.q}</span>
-                  <span className="dots">{r.dots.map((x, i) => <i key={i} className={x} style={iv(ri * 6 + i)} />)}</span>
-                </div>
+          <div className="bx s4 rv">
+            <h3>Keywords &amp; Opportunities</h3><p>Rankings for the keywords that bring business, and the ones close to page one — ranked by the lift they&apos;d bring.</p>
+            <div className="viz kw">
+              <div className="r th"><span>Keyword</span><span>Pos.</span><span>Change</span><span>Opportunity</span></div>
+              {([["savings account interest rate", 3, 2, ""], ["zero balance account", 7, 4, "page 1"], ["personal loan eligibility", 11, -1, "near page 1"],
+                ["gold loan per gram", 14, 6, "near page 1"]] as [string, number, number, string][]).map(([k, p, c, o]) => (
+                <div className="r" key={k}><span>{k}</span><b>#{p}</b><span className={c >= 0 ? "up" : "dn"}>{c >= 0 ? "▲" : "▼"} {Math.abs(c)}</span>{o ? <span className="opp">{o}</span> : <span />}</div>
               ))}
-              <div className="legend">● cited · ● mentioned · ● absent — rival cited instead</div>
             </div>
           </div>
+          <div className="bx s2 ink rv" style={d(1)}>
+            <h3>Tech Health Analysis</h3><p>A graded health check of your site, exportable for your dev team.</p>
+            <div className="viz grade"><b>B+</b><ul><li>Graded checks</li><li>Clear priorities</li><li>Export to share</li></ul></div>
+          </div>
+          <div className="bx s2 rv">
+            <h3>SEO Share of Voice</h3><p>Your share of organic search against your rivals.</p>
+            <div className="viz">
+              <div className="sov"><span className="you">You</span><div className="track"><i className="you" style={w(54)} /></div><b>18%</b></div>
+              <div className="sov"><span>Rival A</span><div className="track"><i style={w(72)} /></div><b>24%</b></div>
+            </div>
+          </div>
+          <div className="bx s2 rv" style={d(1)}>
+            <h3>SEO Competitors</h3><p>Who outranks you, and on which keywords.</p>
+            <div className="viz chips"><span>Rival A · 142 kw</span><span>Rival B · 96 kw</span><span>Aggregator · 61 kw</span></div>
+          </div>
+          <div className="bx s2 rv" style={d(2)}>
+            <h3>Backlinks</h3><p>Your link profile, with links won and lost.</p>
+            <div className="viz bl">{[30, 42, 38, 55, 61, 80].map((h, i) => <i key={i} className={i === 5 ? "w" : ""} style={{ "--h": `${h}%` } as CSSProperties} />)}</div>
+          </div>
+          <div className="bx s3 rv">
+            <h3>Audit Engine</h3><p>Full AI visibility audits on demand — for your brand, a new market, or a prospect. The free audit is one slice of it.</p>
+            <div className="viz chips"><span>{PROMPT_COUNT} buyer questions</span><span>{ENGINES.length} engines</span><span>Score + 3 fixes</span><span>PDF report</span></div>
+          </div>
+          <div className="bx s3 rv" style={d(1)}>
+            <h3>GEO &amp; Organic Reports</h3><p>Shareable reports for your team and leadership, AI and SEO side by side.</p>
+            <div className="viz doc"><div><i /><i /><i className="p" /><i /><span>GEO report</span></div><div><i /><i className="p" /><i /><i /><span>Organic report</span></div></div>
+          </div>
         </div>
       </div>
     </section>
   );
 }
 
-export function WhyUs({ ctaHref = "#audit" }: { ctaHref?: string }) {
+export function HowFree() {
   return (
-    <section className="sec alt" id="why">
+    <section className="sec band" id="how">
       <div className="wrap">
-        <span className="tag" data-r="">Why us</span>
-        <h2 data-split=""><Lines lines={["We've been flying", "since before jetpacks."]} /></h2>
-        <div className="g4">
-          <div className="stat" data-r="">
-            <div className="n" data-count={ENGINE_COUNT}>{ENGINE_COUNT}</div>
-            <h3>Engines, queried directly</h3>
-            <p>Not scraped, not sampled from someone else&apos;s dataset. We ask ChatGPT, Gemini, Claude, Perplexity, Grok and DeepSeek ourselves.</p>
-          </div>
-          <div className="stat" data-r="" style={d(1)}>
-            <div className="n" data-count={PROMPT_COUNT}>{PROMPT_COUNT}</div>
-            <h3>Real buyer questions</h3>
-            <p>Not &quot;tell me about Brand X&quot;. The questions people actually type — comparisons, best-ofs, how-tos — written from your own site.</p>
-          </div>
-          <div className="stat" data-r="" style={d(2)}>
-            <div className="n" data-count="3">3</div>
-            <h3>Fields. That&apos;s the form.</h3>
-            <p>Website, brand name, work email. Industry, products, geography and competitors we detect from your site.</p>
-          </div>
-          <div className="stat" data-r="" style={d(3)}>
-            <div className="n" data-count="4">4</div>
-            <h3>Offices, two countries</h3>
-            <p>Mumbai, Bangalore, Gurgaon, Dubai. When the audit says &quot;fix this&quot;, there&apos;s a team that can.</p>
-          </div>
+        <Head eyebrow="Start free" title="Two minutes. Three fields. One honest answer."
+          sub="The free audit runs a slice of the platform on your brand, so you can see where you stand before you talk to anyone." />
+        <div className="steps">
+          <div className="step rv"><div className="k"><b>1</b><span>~15s</span></div><h3>We read your site</h3><p>Industry, products, who you sell to, and the four competitors that show up next to you. No questionnaire — we already know.</p></div>
+          <div className="step rv" style={d(1)}><div className="k"><b>2</b><span>~90s</span></div><h3>We ask the engines what your buyers ask</h3><p>{PROMPT_COUNT} real questions, each put to all {ENGINES.length} engines. You watch the answers arrive.</p></div>
+          <div className="step rv" style={d(2)}><div className="k"><b>3</b><span>~20s</span></div><h3>We score it and hand you the fixes</h3><p>Who mentioned you, who cited you, what they got wrong. Three fixes ranked by lift, a {PDF_PREVIEW_PAGES}-page PDF preview, and the full report in your inbox.</p></div>
         </div>
-        <div className="ctas" data-r="">
-          <a className="btn mag" href={ctaHref}>Get my free audit <span className="arr">→</span></a>
-          <a className="btn ghost mag" href={CONTACT_URL}>Talk to us instead</a>
+        <div className="sample rv">
+          <div>
+            <span className="eyebrow dark">Sample report</span>
+            <h3>This is what &ldquo;present but not preferred&rdquo; looks like.</h3>
+            <p>A retail bank, mentioned by five of six engines — and cited by two. Being mentioned is a start. Being cited is the business.</p>
+          </div>
+          <div className="snums">
+            <div><b data-count="58">58</b><span>score · preferred</span></div>
+            <div><b>5<small>/6</small></b><span>engines mention</span></div>
+            <div><b>2<small>/6</small></b><span>engines cite</span></div>
+          </div>
         </div>
       </div>
     </section>
   );
 }
 
-function Q({ q, open, children }: { q: string; open?: boolean; children: React.ReactNode }) {
+export function Modules() {
   return (
-    <details open={open}>
-      <summary>{q}<span className="pm" aria-hidden="true" /></summary>
-      <div className="ans"><p>{children}</p></div>
-    </details>
+    <section className="sec" id="modules">
+      <div className="wrap">
+        <Head center={false} eyebrow="Everything inside" title={`${MODULE_COUNT} modules. One login.`}
+          sub={`Filter by area to see what each part of the platform does — ${AREAS.length} areas in all. Your plan includes the modules your team needs.`} />
+        <ModuleDirectory />
+        <p className="fine-print rv">
+          Figures on this page are illustrative sample data, not a client&apos;s results.
+          {SHOW_POWERED_BY && " The platform runs on the PromptMaxx AI visibility engine."}
+        </p>
+      </div>
+    </section>
   );
+}
+
+function Q({ q, children, open }: { q: string; children: ReactNode; open?: boolean }) {
+  return <details open={open}><summary>{q}</summary><p>{children}</p></details>;
 }
 
 export function Faq() {
   return (
-    <section className="sec" id="faq">
-      <div className="wrap faq-grid">
-        <div className="left">
-          <span className="tag" data-r="">Questions</span>
-          <h2 data-split=""><Lines lines={["Fair questions."]} /></h2>
-        </div>
-        <div className="faq" data-r="">
-          <Q q="Is it actually free?" open>
+    <section className="sec" id="faq" style={{ paddingTop: 20 }}>
+      <div className="wrap faq">
+        <Head center={false} eyebrow="Questions" title="Fair questions." sub={<>Anything else? <a href={CONTACT_URL}>Talk to a strategist.</a></>} />
+        <div className="rv">
+          <Q q="Is the audit actually free?" open>
             Yes. The score, the engine grid, the sample questions and the three fixes are free and stay at a public link for {REPORT_TTL_DAYS} days,
             with a {PDF_PREVIEW_PAGES}-page PDF preview you can download the moment it&apos;s done. The PivotRoots team emails the full report to your
             work email — all {PROMPT_COUNT} questions with every engine&apos;s answer, the citation breakdown, and your 90-day plan. Still free. No card, ever.
           </Q>
+          <Q q="What's the difference between the audit and the platform?">
+            The audit is one run: {PROMPT_COUNT} questions, one pass per engine, in {MINUTES_LABEL} — an honest snapshot. The platform runs every week,
+            with every question asked repeatedly across every engine and market, plus SEO, content and reporting — and the PivotRoots team turning
+            what it finds into fixes.
+          </Q>
           <Q q={`Why only ${PROMPT_COUNT} questions and one run per engine?`}>
             Because that&apos;s what fits in {MINUTES_LABEL}. AI answers vary run to run, so a single run is an honest snapshot, not a statistic — and the
-            report says so. Clients we work with get every question asked ten times, on a schedule, with confidence intervals. The free audit tells
-            you whether that&apos;s worth a conversation.
+            report says so. Clients we work with get every question asked ten times, on a schedule, with confidence intervals.
           </Q>
           <Q q="What do you do with my domain and email?">
             We audit the domain, email you the report, and a PivotRoots strategist may follow up once to ask if the results were useful. That&apos;s it.
             No list-selling, no drip sequence. Unsubscribe in one click. <a href="https://www.pivotroots.com/privacy-policy">Privacy policy</a>.
           </Q>
           <Q q="Why do you need a work email?">
-            Because that&apos;s where the full report is sent, so it should land with someone who can actually act on it. Any work address is fine —
-            yours, your agency&apos;s, your group company&apos;s — just not a personal Gmail, Yahoo or Outlook inbox. We check the address can receive mail
-            before the audit starts. No login, no password — just the address.
-          </Q>
-          <Q q="My site is huge. Will you read all of it?">
-            We read your homepage, sitemap and the product pages that matter for the questions — enough to know what you sell and who you sell it to.
-            Enterprise sites get the same {MINUTES_LABEL} audit; the full engagement goes deeper.
+            Because that&apos;s where the full report is sent, so it should land with someone who can act on it. Any work address is fine — yours, your
+            agency&apos;s, your group company&apos;s — just not a personal Gmail, Yahoo or Outlook inbox. No login, no password — just the address.
           </Q>
           <Q q="What about Google rankings?">
-            This audit is about AI answers only — that&apos;s the question nobody&apos;s been able to answer for you until now. If you want the Google side too,
-            it&apos;s part of the full engagement. And Google&apos;s AI Overviews aren&apos;t tracked yet: no API exists, so nobody can do it reliably. We&apos;d
-            rather tell you that than fake it.
+            The free audit covers AI answers only. Google rankings, backlinks and site health are part of the platform&apos;s SEO monitoring. And
+            Google&apos;s AI Overviews aren&apos;t tracked yet: no API exists, so nobody can do it reliably. We&apos;d rather tell you that than fake it.
           </Q>
           <Q q="I ran it and my score is bad. Now what?">
             Good — now you know. The three fixes are things your team can do this month. If you want the full plan, the sequencing, and someone to
@@ -263,28 +303,17 @@ export function Faq() {
   );
 }
 
-const FINAL_LINES = ["Your competitor", "might be running", "this right now."];
-const HIGHLIGHT = /^(competitor|right|now\.)$/i;
-
-/** The headline lights up word by word as it scrolls into view. */
 export function FinalCta({ ctaHref = "#audit" }: { ctaHref?: string }) {
   return (
-    <section className="final">
-      <div className="orb" aria-hidden="true" />
-      <div className="wrap">
-        <h2 id="finalH">
-          {FINAL_LINES.map((line, li) => (
-            <span key={line}>
-              {li > 0 && <br />}
-              {line.split(" ").map((w, i) => (
-                <span key={w}>{i > 0 && " "}<span className={`fw${HIGHLIGHT.test(w) ? " hl" : ""}`}>{w}</span></span>
-              ))}
-            </span>
-          ))}
-        </h2>
-        <p className="sub">Two minutes. Six engines. One honest answer.</p>
-        <a className="btn acc lg mag" href={ctaHref}>Get my free audit <span className="arr">→</span></a>
+    <section className="final darksec">
+      <span className="eyebrow dark">Free · {MINUTES_LABEL} · {ENGINES.length} engines</span>
+      <h2>Your competitor <em>might be running this</em> right now.</h2>
+      <p>See what AI tells your buyers — before they decide.</p>
+      <div className="final-ctas">
+        <a className="btn btn-pear btn-lg" href={ctaHref}>Get my free audit <span className="arr">→</span></a>
+        <a className="btn btn-ghost-dark btn-lg" href={CONTACT_URL}>Talk to a strategist</a>
       </div>
+      <div className="ticks"><span>No card</span><span>No login</span><span>Full report by email</span></div>
     </section>
   );
 }

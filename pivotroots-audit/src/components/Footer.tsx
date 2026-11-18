@@ -7,8 +7,8 @@ export function Footer() {
       <div className="wrap">
         <div className="cols">
           <div>
-            <Logo height={24} />
-            <p>Award-winning digital marketing agency in India &amp; UAE. SEO, performance, media, UX, analytics, creative — and now, AI visibility.</p>
+            <Logo tag={false} />
+            <p className="about">Award-winning digital marketing agency in India &amp; UAE. SEO, performance, media, UX, analytics, creative — and now, AI visibility.</p>
             {SHOW_POWERED_BY && <p className="powered">Audit engine powered by PromptMaxx</p>}
           </div>
           <div><h4>Mumbai <time data-tz="Asia/Kolkata" /></h4>Trade Star, Office 3, 2nd Floor, A wing, JB Nagar, Andheri Kurla Road, 400059</div>
@@ -16,10 +16,9 @@ export function Footer() {
           <div><h4>Gurgaon <time data-tz="Asia/Kolkata" /></h4>6th Floor, Tower C, Building 8, DLF Cyber City, Phase II, 122002</div>
           <div>
             <h4>Dubai <time data-tz="Asia/Dubai" /></h4>601 Tiffany Towers, Cluster W, JLT
-            <h4 className="gap">Enquiries</h4>hello@pivotroots.com<br />+91 99202 98092
+            <h4 className="gap-t">Enquiries</h4>hello@pivotroots.com<br />+91 99202 98092
           </div>
         </div>
-        <div className="wordmark" id="wordmark" aria-hidden="true">PivotRoots</div>
         <div className="bottom">
           <span>© {new Date().getFullYear()} PivotRoots Digital Pvt. Ltd.</span>
           <span><a href={PRIVACY_URL}>Privacy</a> · <a href={TERMS_URL}>Terms</a></span>

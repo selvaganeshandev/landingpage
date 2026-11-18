@@ -1,7 +1,6 @@
 import { Nav } from "@/components/Nav";
 import { Hero, type HeroParams } from "@/components/Hero";
-import { Faq, FinalCta, HowItWorks, Sample, WhatYouGet, WhyUs } from "@/components/Sections";
-import { Platform } from "@/components/Platform";
+import { Agent, Faq, FinalCta, HowFree, Modules, Product, Seo, Shift, Trust } from "@/components/Sections";
 import { Footer } from "@/components/Footer";
 import { MotionRoot } from "@/components/MotionRoot";
 
@@ -19,11 +18,13 @@ export default async function Page({ searchParams }: { searchParams: Promise<Rec
     <>
       <Nav />
       <Hero params={params} />
-      <WhatYouGet />
-      <HowItWorks />
-      <Sample />
-      <Platform />
-      <WhyUs />
+      <Trust />
+      <Shift />
+      <Product />
+      <Agent />
+      <Seo />
+      <HowFree />
+      <Modules />
       <Faq />
       <FinalCta />
       <Footer />
